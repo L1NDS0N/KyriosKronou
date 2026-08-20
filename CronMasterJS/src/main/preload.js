@@ -58,6 +58,7 @@ contextBridge.exposeInMainWorld('api', {
   checkMysqldump: () => ipcRenderer.invoke('check-mysqldump'),
   testFtpConnection: (cfg) => ipcRenderer.invoke('test-ftp-connection', cfg),
   testSftpConnection: (cfg) => ipcRenderer.invoke('test-sftp-connection', cfg),
+  testSmbConnection: (target) => ipcRenderer.invoke('test-smb-connection', target),
   downloadMysqldump: () => ipcRenderer.invoke('download-mysqldump'),
   setMysqldumpPath: (p) => ipcRenderer.invoke('set-mysqldump-path', p),
   getBackupHistory: (profileId) => ipcRenderer.invoke('get-backup-history', profileId),

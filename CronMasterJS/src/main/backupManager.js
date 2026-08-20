@@ -651,24 +651,53 @@ class BackupManager {
   async uploadSMB(filePath, target) {
     return new Promise((resolve) => {
       const filename = path.basename(filePath);
-      const uncPath = target.path || target.url; // \\server\share\folder
+      const networkPath = target.path || target.url; // \\server\share\folder
+      const destPath = networkPath + (networkPath.endsWith('\\') ? '' : '\\') + filename;
+      const host = target.host || '';
+      const user = target.user || '';
+      const pass = target.password || '';
 
-      // Copy via network path
-      const destPath = path.join(uncPath, filename);
+      // If auth provided, use net use first
+      if (user && host) {
+        const netUse = `net use "\\${host}" "${pass}" /user:"${user}" /persistent:no`;
+        exec(netUse, { timeout: 30000, windowsHide: true }, (err) => {
+          if (err && !err.message?.includes('already')) {
+            this.logger.log('ERROR', `SMB auth failed for ${host}: ${err.message}`);
+            resolve({ success: false, type: 'smb', message: `Authentication failed: ${err.message}` });
+            return;
+          }
+          this._smbCopy(filePath, destPath, networkPath, host, resolve);
+        });
+      } else {
+        this._smbCopy(filePath, destPath, networkPath, host, resolve);
+      }
+    });
+  }
 
-      const cmd = `copy "${filePath}" "${destPath}" /Y`;
-      exec(cmd, { timeout: 600000, windowsHide: true }, (error) => {
-        if (error) {
-          // Try PowerShell Copy-Item for network paths
-          const psCmd = `powershell -NoProfile -Command "Copy-Item -Path '${filePath}' -Destination '${destPath}' -Force"`;
-          exec(psCmd, { timeout: 600000 }, (err2) => {
-            if (err2) resolve({ success: false, type: 'smb', message: err2.message });
-            else resolve({ success: true, type: 'smb', remotePath: destPath });
-          });
-        } else {
-          resolve({ success: true, type: 'smb', remotePath: destPath });
-        }
-      });
+  _smbCopy(filePath, destPath, networkPath, host, resolve) {
+    // Use robocopy for reliable network copies (handles retries, long paths)
+    const dir = path.dirname(destPath);
+    const robocopy = `robocopy "${path.dirname(filePath)}" "${dir}" "${path.basename(filePath)}" /R:2 /W:3 /NP /NFL /NDL /NJH /NJS`;
+    exec(robocopy, { timeout: 600000, windowsHide: true }, (error) => {
+      // robocopy returns non-zero for certain conditions that aren't errors
+      const exitCode = error ? error.code : 0;
+      const isRealError = exitCode > 7;
+      if (isRealError) {
+        // Fallback to xcopy
+        const xcopy = `echo F| xcopy "${filePath}" "${destPath}" /Y /Q`;
+        exec(xcopy, { timeout: 600000, windowsHide: true }, (err2) => {
+          if (err2) {
+            this.logger.log('ERROR', `SMB copy failed: ${err2.message}`);
+            resolve({ success: false, type: 'smb', message: err2.message });
+          } else {
+            this.logger.log('INFO', `SMB copy OK (xcopy): ${path.basename(filePath)} → ${networkPath}`);
+            resolve({ success: true, type: 'smb', remotePath: destPath });
+          }
+        });
+      } else {
+        this.logger.log('INFO', `SMB copy OK: ${path.basename(filePath)} → ${networkPath}`);
+        resolve({ success: true, type: 'smb', remotePath: destPath });
+      }
     });
   }
 
@@ -766,6 +795,54 @@ class BackupManager {
     // Fallback: return first meaningful line
     const firstLine = msg.split('\n').find(l => l.trim().length > 0) || msg;
     return firstLine.substring(0, 200);
+  }
+
+  // ─── SMB Test Connection ───
+  testSmbConnection(target) {
+    return new Promise((resolve) => {
+      const host = target.host || '';
+      const user = target.user || '';
+      const pass = target.password || '';
+      const smbPath = target.path || `\\\\${host}`;
+
+      // If auth provided, try net use first
+      if (user && host) {
+        const netUse = `net use "\\${host}" "${pass}" /user:"${user}" /persistent:no`;
+        exec(netUse, { timeout: 15000, windowsHide: true }, (err) => {
+          if (err && !err.message?.includes('already')) {
+            resolve({ success: false, message: `Authentication failed: ${err.message}` });
+            return;
+          }
+          // Try to list the path
+          this._testSmbPath(smbPath, resolve);
+        });
+      } else {
+        // Try anonymous access
+        this._testSmbPath(smbPath, resolve);
+      }
+    });
+  }
+
+  _testSmbPath(smbPath, resolve) {
+    // Try dir on the UNC path
+    const cmd = `dir "${smbPath}" /B 2>&1`;
+    exec(cmd, { timeout: 15000, windowsHide: true }, (error, stdout) => {
+      if (error && error.code !== 0) {
+        // Try PowerShell
+        const psCmd = `powershell -NoProfile -Command "Test-Path '${smbPath}'"`;
+        exec(psCmd, { timeout: 15000, windowsHide: true }, (err2, out2) => {
+          if (err2) {
+            resolve({ success: false, message: `Cannot access: ${err2.message}` });
+          } else if (out2.trim() === 'True') {
+            resolve({ success: true, message: 'Path accessible' });
+          } else {
+            resolve({ success: false, message: 'Path not found or inaccessible' });
+          }
+        });
+      } else {
+        resolve({ success: true, message: 'Path accessible' });
+      }
+    });
   }
 
   // ─── NSSM Wrapper Generation ───

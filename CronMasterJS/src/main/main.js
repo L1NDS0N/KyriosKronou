@@ -721,6 +721,13 @@ function registerIPC() {
       return { success: false, message: err.message };
     }
   });
+  ipcMain.handle('test-smb-connection', async (e, target) => {
+    try {
+      return await backupManager.testSmbConnection(target);
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  });
   ipcMain.handle('set-mysqldump-path', (e, p) => backupManager.setCustomPath(p));
   ipcMain.handle('download-mysqldump', async () => {
     const targetDir = path.join(app.getPath('userData'), 'mysql-tools');

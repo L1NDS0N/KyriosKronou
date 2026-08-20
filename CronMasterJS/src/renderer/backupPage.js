@@ -497,20 +497,21 @@ class BackupPage {
             <label class="form-label" style="margin-bottom:2px;font-size:10px">Host</label>
             <input type="text" class="form-input" id="wiz-t-host-${i}" value="${esc(t.host || t.url || '')}" placeholder="ftp.example.com" oninput="backupPage._syncTargets()">
           </div>
-          ${!isSmb ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
             <div>
-              <label class="form-label" style="margin-bottom:2px;font-size:10px">User</label>
-              <input type="text" class="form-input" id="wiz-t-user-${i}" value="${esc(t.user || '')}" placeholder="username" oninput="backupPage._syncTargets()">
+              <label class="form-label" style="margin-bottom:2px;font-size:10px">User ${isSmb ? '<span style="color:var(--text3)">(optional for local shares)</span>' : ''}</label>
+              <input type="text" class="form-input" id="wiz-t-user-${i}" value="${esc(t.user || '')}" placeholder="${isSmb ? 'DOMAIN\\user or .\\user' : 'username'}" oninput="backupPage._syncTargets()">
             </div>
             <div>
               <label class="form-label" style="margin-bottom:2px;font-size:10px">Password</label>
               <input type="password" class="form-input" id="wiz-t-pass-${i}" value="${esc(t.password || '')}" placeholder="password" oninput="backupPage._syncTargets()">
             </div>
-          </div>` : ''}
+          </div>
           <div>
             <label class="form-label" style="margin-bottom:2px;font-size:10px">${isSmb ? 'Network Path' : 'Remote Path'}</label>
-            <input type="text" class="form-input" id="wiz-t-path-${i}" value="${esc(t.path || '')}" placeholder="${isSmb ? '\\\\server\\share\\backup' : '/backups/'}" oninput="backupPage._syncTargets()">
+            <input type="text" class="form-input" id="wiz-t-path-${i}" value="${esc(t.path || '')}" placeholder="${isSmb ? '\\\\server\\share\\folder' : '/backups/'}" oninput="backupPage._syncTargets()">
           </div>
+          ${isSmb ? '<p style="font-size:10px;color:var(--text3);margin-top:2px">Use <code>.\\user</code> for local or <code>DOMAIN\\user</code> for domain auth. Leave empty for anonymous.</p>' : ''}
         </div>
         <div id="wiz-t-result-${i}" style="margin-top:6px;font-size:11px;display:none"></div>
       </div>
@@ -563,7 +564,10 @@ class BackupPage {
           ? `<span style="color:var(--green)">&#10003; Connected successfully</span>`
           : `<span style="color:var(--red)">&#10007; ${esc(r.message || 'Connection failed')}</span>`;
       } else {
-        if (resultEl) resultEl.innerHTML = `<span style="color:var(--text3)">SMB/NAS path will be tested during backup</span>`;
+        const r = await window.api.testSmbConnection({ host, user, password: pass, path: path || '' });
+        if (resultEl) resultEl.innerHTML = r.success
+          ? `<span style="color:var(--green)">&#10003; ${esc(r.message || 'Path accessible')}</span>`
+          : `<span style="color:var(--red)">&#10007; ${esc(r.message || 'Cannot access path')}</span>`;
       }
     } catch (err) {
       if (resultEl) resultEl.innerHTML = `<span style="color:var(--red)">&#10007; ${esc(err.message)}</span>`;
