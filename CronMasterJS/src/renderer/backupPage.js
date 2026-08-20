@@ -237,9 +237,10 @@ class BackupPage {
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn-ghost" onclick="hideModal()">Cancel</button>
+          ${isEdit ? `<button class=\"btn-glow\" onclick=\"backupPage.saveProfile()\"><i data-lucide=\"save\"></i> Save</button>` : ''}
           ${this.currentStep < steps.length - 1
-            ? `<button class=\"btn-glow\" onclick=\"backupPage.nextStep()\">Next <i data-lucide=\"arrow-right\"></i></button>`
-            : `<button class=\"btn-glow\" onclick=\"backupPage.saveProfile()\"><i data-lucide=\"save\"></i> ${isEdit ? 'Save Changes' : 'Create Profile'}</button>`}
+            ? `<button class=\"btn-outline\" onclick=\"backupPage.nextStep()\">Next <i data-lucide=\"arrow-right\"></i></button>`
+            : `<button class=\"btn-glow\" onclick=\"backupPage.saveProfile()\"><i data-lucide=\"save\"></i> Create Profile</button>`}
         </div>
       </div>
     `);
@@ -558,6 +559,13 @@ class BackupPage {
     this._syncCurrentStep();
     this.currentStep = n;
     this._renderWizard();
+    // Auto-load databases when entering step 1
+    if (n === 1 && this.draft.Host && this.draft.User) {
+      const chipContainer = document.getElementById('wiz-db-chips');
+      if (chipContainer && chipContainer.children.length === 0) {
+        this.loadWizardDbs();
+      }
+    }
   }
 
   nextStep() {
@@ -568,6 +576,10 @@ class BackupPage {
     if (this.currentStep < 4) {
       this.currentStep++;
       this._renderWizard();
+      // Auto-load databases when entering step 1
+      if (this.currentStep === 1 && this.draft.Host && this.draft.User) {
+        setTimeout(() => this.loadWizardDbs(), 100);
+      }
     }
   }
 

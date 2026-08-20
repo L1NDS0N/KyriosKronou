@@ -1094,30 +1094,50 @@ async function downloadNssmManual() {
 // ============================================================
 // History
 // ============================================================
+let allBackupHistory = [];
+
 async function refreshHistory() {
   setLoading('page-history', true);
   try {
     allHistory = await window.api.getHistory();
+    // Also load backup history
+    try {
+      const bh = await window.api.getBackupHistory();
+      allBackupHistory = (bh.history || []).map(h => ({
+        ...h,
+        TaskName: h.ProfileName || 'Backup',
+        CronExpression: h.Databases ? h.Databases.join(', ') : '',
+        _type: 'backup'
+      }));
+    } catch (e) { allBackupHistory = []; }
     renderHistory();
   } finally { setLoading('page-history', false); }
 }
 
 function renderHistory() {
   const now = Date.now();
-  let filtered = allHistory;
-  if (currentFilter === '24h') filtered = allHistory.filter(h => new Date(h.Timestamp) > new Date(now - 86400000));
-  else if (currentFilter === 'week') filtered = allHistory.filter(h => new Date(h.Timestamp) > new Date(now - 604800000));
-  else if (currentFilter === 'month') filtered = allHistory.filter(h => new Date(h.Timestamp) > new Date(now - 2592000000));
+  // Merge task + backup history and sort by timestamp
+  let all = [...allHistory, ...allBackupHistory].sort((a, b) => new Date(b.Timestamp) - new Date(a.Timestamp));
+  if (currentFilter === '24h') all = all.filter(h => new Date(h.Timestamp) > new Date(now - 86400000));
+  else if (currentFilter === 'week') all = all.filter(h => new Date(h.Timestamp) > new Date(now - 604800000));
+  else if (currentFilter === 'month') all = all.filter(h => new Date(h.Timestamp) > new Date(now - 2592000000));
 
   const tbody = document.getElementById('history-body');
   const empty = document.getElementById('history-empty');
-  if (filtered.length === 0) { tbody.innerHTML = ''; empty.style.display = 'block'; lucide.createIcons(); return; }
+  if (all.length === 0) { tbody.innerHTML = ''; empty.style.display = 'block'; lucide.createIcons(); return; }
   empty.style.display = 'none';
-  tbody.innerHTML = filtered.map(h => `<tr>
-    <td>${formatTime(h.Timestamp)}</td><td>${escHtml(h.TaskName)}</td><td>${escHtml(h.CronExpression)}</td>
-    <td><span class="badge badge-${h.Status === 'Success' ? 'success' : 'error'}">${h.Status}</span></td>
-    <td>${h.Duration || '-'}</td>
-  </tr>`).join('');
+  tbody.innerHTML = all.map(h => {
+    const isBackup = h._type === 'backup';
+    const typeBadge = isBackup ? '<span class="badge badge-info" style="font-size:9px">backup</span>' : '<span class="badge badge-active" style="font-size:9px">task</span>';
+    const statusClass = h.Status === 'Success' ? 'success' : 'error';
+    return `<tr style="cursor:${isBackup ? 'pointer' : 'default'}" ${isBackup ? `onclick="backupPage.showHistory('${h.ProfileId}')"` : ''}>
+      <td>${formatTime(h.Timestamp)}</td>
+      <td>${typeBadge} ${escHtml(h.TaskName)}</td>
+      <td>${escHtml(h.CronExpression || h.Duration || '')}</td>
+      <td><span class="badge badge-${statusClass}">${h.Status}</span></td>
+      <td>${h.Duration || '-'}</td>
+    </tr>`;
+  }).join('');
   lucide.createIcons();
 }
 

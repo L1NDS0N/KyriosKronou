@@ -358,20 +358,51 @@ class BackupManager {
       LastStatus: success ? 'Success' : 'Partial'
     });
 
+    // Write detailed log file
+    let logPath = '';
+    try {
+      const logsDir = path.join(this.config.configDir, 'backup-logs');
+      if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+      const logFile = `backup-${profileId.slice(0, 8)}-${new Date().toISOString().replace(/[:.]/g, '-')}.log`;
+      logPath = path.join(logsDir, logFile);
+      const logContent = [
+        `=== Backup: ${profile.Name} ===`,
+        `Time: ${new Date().toISOString()}`,
+        `Status: ${success ? 'Success' : 'Error'}`,
+        `Duration: ${duration}`,
+        `Databases: ${databases.join(', ')}`,
+        `---`,
+        ...results.map(r => [
+          `--- ${r.database} ---`,
+          `Status: ${r.success ? 'OK' : 'FAIL'}`,
+          `Size: ${r.sizeHuman || '0 B'}`,
+          r.message ? `Message: ${r.message}` : '',
+          r.stdout ? `Stdout:\n${r.stdout}` : '',
+          r.stderr ? `Stderr:\n${r.stderr}` : '',
+          r.uploads ? r.uploads.map(u => `Upload ${u.type}: ${u.success ? 'OK' : 'FAIL'} ${u.message || ''}`).join('\n') : ''
+        ].filter(Boolean).join('\n'))
+      ].join('\n');
+      fs.writeFileSync(logPath, logContent, 'utf8');
+    } catch (e) { /* log file is best-effort */ }
+
     // Log history
     this.addHistoryEntry(profileId, {
+      ProfileName: profile.Name,
       Status: success ? 'Success' : (results.some(r => r.success) ? 'Partial' : 'Error'),
       Duration: duration,
       Databases: databases.map(db => db === '--all-databases' ? 'all' : db),
       DatabasesCount: databases.length,
       TotalSize: totalSize,
       TotalSizeHuman: this.formatSize(totalSize),
+      LogPath: logPath,
       Results: results.map(r => ({
         database: r.database,
         success: r.success,
         size: r.size || 0,
         sizeHuman: r.sizeHuman || '0 B',
         message: r.message || '',
+        stdout: r.stdout || '',
+        stderr: r.stderr || '',
         uploads: r.uploads || []
       }))
     });
@@ -427,9 +458,11 @@ class BackupManager {
       const cmd = args.join(' ');
       this.logger.log('INFO', `Backing up database: ${database}`);
 
-      exec(cmd, { timeout: 600000, maxBuffer: 50 * 1024 * 1024, windowsHide: true }, async (error) => {
+      exec(cmd, { timeout: 600000, maxBuffer: 50 * 1024 * 1024, windowsHide: true }, async (error, stdout, stderr) => {
         if (error) {
-          resolve({ success: false, database, message: error.message });
+          const logOutput = [stdout, stderr, error.message].filter(Boolean).join('\n').trim();
+          this.logger.log('ERROR', `Backup failed for ${database}: ${logOutput.substring(0, 500)}`);
+          resolve({ success: false, database, message: logOutput.substring(0, 2000), stdout: stdout || '', stderr: stderr || '' });
           return;
         }
 

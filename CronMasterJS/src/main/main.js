@@ -216,17 +216,51 @@ function initComponents() {
 
 function startScheduler() {
   schedulerInterval = setInterval(() => {
-    if (!mainWindow) return;
-    const dueTasks = taskManager.getDueTasks();
-    dueTasks.forEach(async (task) => {
-      const result = await taskManager.executeTask(task);
-      logger.auditTaskExecuted(task.Id, task.Name, result);
-      sendTaskNotification(task, result);
-      if (mainWindow && mainWindow.webContents) {
-        mainWindow.webContents.send('task-executed', result);
-        mainWindow.webContents.send('data-updated');
-      }
-    });
+    // ── Task scheduler (CronMaster mode only) ──
+    if (mainWindow) {
+      const dueTasks = taskManager.getDueTasks();
+      dueTasks.forEach(async (task) => {
+        // Skip tasks managed by NSSM — they run independently
+        if (task.ManagementMode === 'nssm') return;
+        const result = await taskManager.executeTask(task);
+        logger.auditTaskExecuted(task.Id, task.Name, result);
+        sendTaskNotification(task, result);
+        if (mainWindow && mainWindow.webContents) {
+          mainWindow.webContents.send('task-executed', result);
+          mainWindow.webContents.send('data-updated');
+        }
+      });
+    }
+
+    // ── Backup scheduler (CronMaster mode only) ──
+    if (backupManager) {
+      const profiles = backupManager.getAllProfiles();
+      const now = new Date();
+      profiles.forEach(async (profile) => {
+        if (!profile.Enabled) return;
+        if (profile.ManagementMode === 'nssm') return; // NSSM manages itself
+        if (!cronParser.shouldRunNow(profile.CronExpression)) return;
+        // Prevent double-execution within 55 seconds
+        if (profile.LastRun) {
+          const lastRun = new Date(profile.LastRun);
+          if (now - lastRun < 55000) return;
+        }
+        logger.log('INFO', `Backup scheduler triggered: ${profile.Name}`);
+        try {
+          const result = await backupManager.executeBackup(profile.Id);
+          sendNotification(
+            result.success ? '\u2705 Backup Completed' : '\u274c Backup Failed',
+            `${profile.Name}\n${result.success ? 'Backup successful' : 'Backup failed'}\nDuration: ${result.duration}`,
+            result.success ? 'success' : 'error'
+          );
+          if (mainWindow && mainWindow.webContents) {
+            mainWindow.webContents.send('data-updated');
+          }
+        } catch (err) {
+          logger.error(`Backup scheduler error: ${profile.Name}`, err);
+        }
+      });
+    }
   }, 30000);
 }
 

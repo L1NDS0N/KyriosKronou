@@ -124,17 +124,17 @@ html, body { height: 100%; font-family: var(--font); background: var(--bg); colo
 .credits-link:hover { color: var(--primary-light); }
 
 .nav-btn {
-  display: flex; align-items: center; justify-content: center; padding: 11px 0; gap: 0;
+  display: flex; align-items: center; justify-content: center; padding: 0; gap: 0;
   background: none; border: none; color: var(--text3);
   font-size: 12px; font-weight: 500; font-family: var(--font);
   cursor: pointer; border-radius: var(--radius-xs);
   transition: var(--transition); white-space: nowrap; position: relative;
   width: 100%; height: 42px;
 }
-#sidebar:hover .nav-btn { padding: 11px 14px; gap: 12px; justify-content: flex-start; }
-.nav-btn i { width: 20px; height: 20px; min-width: 20px; max-width: 20px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; position: absolute; left: 50%; transform: translateX(-50%); transition: left .3s cubic-bezier(.4,0,.2,1), transform .3s cubic-bezier(.4,0,.2,1); }
-#sidebar:hover .nav-btn i { position: relative; left: auto; transform: none; }
+#sidebar:hover .nav-btn { padding: 0 14px; gap: 12px; justify-content: flex-start; }
+.nav-btn i { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex-shrink: 0; }
 .nav-btn i svg { width: 20px !important; height: 20px !important; }
+#sidebar:hover .nav-btn i svg { width: 20px !important; height: 20px !important; }
 .nav-btn:hover { background: var(--glass2); color: var(--text2); }
 .nav-btn.active { background: var(--glass2); color: var(--primary-light); }
 .nav-btn.active::before {
@@ -965,10 +965,10 @@ kbd {
 .qa-textarea:focus { outline: none; background: rgba(0,0,0,.3); }
 
 /* ═══ BACKUP DB CHECKLIST ═══ */
-.bp-db-list { display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow-y: auto; padding: 4px 0; border: 1px solid var(--border); border-radius: 8px; background: rgba(0,0,0,.15); }
+.bp-db-list { display: flex; flex-direction: column; gap: 0; max-height: 220px; overflow-y: auto; padding: 2px 0; border: 1px solid var(--border); border-radius: 8px; background: rgba(0,0,0,.15); }
 .bp-db-check-row {
   display: flex; align-items: center; gap: 10px;
-  padding: 10px 14px; cursor: pointer;
+  padding: 7px 14px; cursor: pointer;
   border-radius: 0; transition: background .15s;
   border-bottom: 1px solid rgba(255,255,255,.02);
 }
@@ -976,8 +976,8 @@ kbd {
 .bp-db-check-row:hover { background: rgba(255,255,255,.04); }
 .bp-db-check { position: absolute; opacity: 0; width: 0; height: 0; }
 .bp-db-check-box {
-  width: 20px; height: 20px; flex-shrink: 0;
-  border: 2px solid var(--border); border-radius: 5px;
+  width: 16px; height: 16px; flex-shrink: 0;
+  border: 2px solid var(--border); border-radius: 4px;
   display: flex; align-items: center; justify-content: center;
   transition: all .2s; background: var(--glass);
 }
@@ -985,7 +985,7 @@ kbd {
   background: var(--primary); border-color: var(--primary);
 }
 .bp-db-check:checked + .bp-db-check-box::after {
-  content: '\2713'; color: #fff; font-size: 13px; font-weight: 700;
+  content: '\2713'; color: #fff; font-size: 11px; font-weight: 700;
 }
 .bp-db-check-row:has(.bp-db-check:checked) { background: rgba(106,90,173,.06); }
 .bp-db-check-name { font-size: 13px; color: var(--text2); font-family: var(--mono); }
