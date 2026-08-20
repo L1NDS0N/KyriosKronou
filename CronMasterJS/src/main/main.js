@@ -693,6 +693,80 @@ function registerIPC() {
     return await backupManager.downloadMysqldump(targetDir);
   });
 
+  // ─── Backup History ───
+  ipcMain.handle('get-backup-history', (e, profileId) => {
+    try {
+      return { success: true, history: backupManager.getHistory(profileId) };
+    } catch (err) {
+      return { success: false, history: [], message: err.message };
+    }
+  });
+  ipcMain.handle('get-backup-history-stats', (e, profileId) => {
+    try {
+      return { success: true, stats: backupManager.getHistoryStats(profileId) };
+    } catch (err) {
+      return { success: false, stats: {}, message: err.message };
+    }
+  });
+
+  // ─── Backup NSSM Deployment ───
+  ipcMain.handle('deploy-backup-nssm', async (e, profileId) => {
+    try {
+      const profile = backupManager.getProfile(profileId);
+      if (!profile) return { success: false, message: 'Profile not found' };
+      if (!wrapperGenerator) return { success: false, message: 'Wrapper generator not initialized' };
+      const nssmCheck = serviceManager.checkNssm();
+      if (!nssmCheck.installed) return { success: false, message: 'NSSM not installed' };
+      // Generate wrapper script for the backup
+      const serviceName = `KyrionBackup_${profile.Name.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      // Create a PowerShell wrapper that runs mysqldump with the profile settings
+      const wrapperScript = backupManager.generateBackupWrapper(profile);
+      const scriptsDir = wrapperGenerator.scriptsDir;
+      const wrapperPath = path.join(scriptsDir, `${serviceName}.ps1`);
+      if (!fs.existsSync(scriptsDir)) fs.mkdirSync(scriptsDir, { recursive: true });
+      fs.writeFileSync(wrapperPath, wrapperScript, 'utf8');
+      // Install via NSSM
+      const result = serviceManager.installService(serviceName, 'powershell.exe', `-ExecutionPolicy Bypass -NoProfile -File "${wrapperPath}"`, scriptsDir, 'Automatic');
+      if (result.success) {
+        serviceManager.startService(serviceName);
+        backupManager.updateProfile({ Id: profileId, ManagementMode: 'nssm', NssmServiceName: serviceName });
+        sendNotification('Backup Service Deployed', `${serviceName} is now running as an NSSM service`, 'success');
+      }
+      return { success: result.success, message: result.message, serviceName };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  });
+  ipcMain.handle('undeploy-backup-nssm', async (e, profileId) => {
+    try {
+      const profile = backupManager.getProfile(profileId);
+      if (!profile) return { success: false, message: 'Profile not found' };
+      const serviceName = profile.NssmServiceName;
+      if (!serviceName) return { success: false, message: 'No NSSM service linked' };
+      const result = serviceManager.stopService(serviceName);
+      serviceManager.uninstallService(serviceName);
+      // Remove wrapper script
+      const scriptsDir = wrapperGenerator.scriptsDir;
+      const wrapperPath = path.join(scriptsDir, `${serviceName}.ps1`);
+      if (fs.existsSync(wrapperPath)) fs.unlinkSync(wrapperPath);
+      backupManager.updateProfile({ Id: profileId, ManagementMode: 'cronmaster', NssmServiceName: '' });
+      sendNotification('Backup Service Removed', `${serviceName} has been stopped and removed`, 'info');
+      return { success: true, message: 'Service removed' };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  });
+  ipcMain.handle('get-backup-nssm-status', async (e, profileId) => {
+    try {
+      const profile = backupManager.getProfile(profileId);
+      if (!profile || !profile.NssmServiceName) return { success: true, status: null };
+      const info = serviceManager.getServiceInfo(profile.NssmServiceName);
+      return { success: true, status: info };
+    } catch (err) {
+      return { success: false, status: null };
+    }
+  });
+
   // ─── API Server ───
   ipcMain.handle('api-server-start', async (e, port) => {
     try {

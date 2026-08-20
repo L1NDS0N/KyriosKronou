@@ -31,7 +31,7 @@ class BackupPage {
     lucide.createIcons();
   }
 
-  render() {
+  async render() {
     const content = document.getElementById('backup-profiles-list');
     const empty = document.getElementById('backup-empty');
     if (!content) return;
@@ -43,17 +43,37 @@ class BackupPage {
     }
     if (empty) empty.style.display = 'none';
 
-    content.innerHTML = this.profiles.map(p => `
+    // Load stats for all profiles
+    const statsMap = {};
+    for (const p of this.profiles) {
+      try {
+        const stats = await window.api.getBackupHistoryStats(p.Id);
+        statsMap[p.Id] = stats.stats || {};
+      } catch (e) { statsMap[p.Id] = {}; }
+    }
+
+    content.innerHTML = this.profiles.map(p => {
+      const st = statsMap[p.Id] || {};
+      const mode = p.ManagementMode || 'cronmaster';
+      const isNssm = mode === 'nssm';
+      return `
       <div class="glass-card backup-profile-card ${p.Enabled ? '' : 'disabled'}">
         <div class="backup-profile-header">
           <div class="backup-profile-info">
             <h3 class="backup-profile-name">${esc(p.Name)}</h3>
             <span class="badge ${p.Enabled ? 'badge-active' : 'badge-disabled'}">${p.Enabled ? 'Active' : 'Disabled'}</span>
+            <span class="badge ${isNssm ? 'badge-warning' : 'badge-info'}" style="font-size:10px">${isNssm ? '&#128736; NSSM' : '&#9201; Kyrion'}</span>
             <span class="badge badge-info">${esc(p.Databases?.length ? p.Databases.join(', ') : 'All DBs')}</span>
             ${p.Compression !== 'none' ? `<span class="badge badge-info" style="font-size:10px">${p.Compression.toUpperCase()} L${p.CompressionLevel}</span>` : ''}
           </div>
           <div class="backup-profile-actions">
-            <button class="btn-glow btn-sm" onclick="backupPage.runBackup('${p.Id}')"><i data-lucide="play"></i> Run</button>
+            ${isNssm ? `
+              <button class="btn-secondary-sm" onclick="backupPage.deployBackupNssm('${p.Id}')" title="Start as NSSM service"><i data-lucide="power"></i></button>
+              <button class="btn-danger" onclick="backupPage.undeployBackupNssm('${p.Id}')" title="Stop NSSM service"><i data-lucide="power-off"></i></button>
+            ` : `
+              <button class="btn-glow btn-sm" onclick="backupPage.runBackup('${p.Id}')"><i data-lucide="play"></i> Run</button>
+            `}
+            <button class="btn-secondary-sm" onclick="backupPage.showHistory('${p.Id}')" title="Execution History"><i data-lucide="history"></i></button>
             <button class="btn-secondary-sm" onclick="backupPage.editProfile('${p.Id}')"><i data-lucide="pencil"></i> Edit</button>
             <button class="btn-secondary-sm" onclick="backupPage.exportProfile('${p.Id}')"><i data-lucide="download"></i></button>
             <button class="btn-danger" onclick="backupPage.deleteProfile('${p.Id}','${esc(p.Name)}')"><i data-lucide="trash-2"></i></button>
@@ -65,9 +85,10 @@ class BackupPage {
           <div class="backup-detail"><i data-lucide="clock"></i> <span>${esc(p.CronExpression)}</span></div>
           ${p.UploadTargets.length > 0 ? `<div class="backup-detail"><i data-lucide="upload"></i> <span>${p.UploadTargets.map(t => t.type.toUpperCase()).join(', ')}</span></div>` : ''}
           ${p.LastRun ? `<div class="backup-detail"><i data-lucide="history"></i> <span>Last: ${new Date(p.LastRun).toLocaleString()} — ${p.LastStatus || '?'}</span></div>` : ''}
+          ${st.total > 0 ? `<div class="backup-detail"><i data-lucide="bar-chart"></i> <span>${st.total} runs &middot; ${st.success} ok &middot; ${st.failed} failed</span></div>` : ''}
         </div>
       </div>
-    `).join('');
+    `}).join('');
     if (window.lucide) lucide.createIcons();
   }
 
@@ -249,13 +270,21 @@ class BackupPage {
 
       case 1: return `
         <label class="form-label">Select Databases</label>
-        <p style="font-size:12px;color:var(--text3);margin-bottom:8px">Click to select. If none selected, ALL databases will be backed up.</p>
-        <button class="btn-outline btn-sm" onclick="backupPage.loadWizardDbs()" style="margin-bottom:8px"><i data-lucide="refresh-cw"></i> Load Databases</button>
-        <span id="wiz-db-status" style="font-size:12px;margin-left:8px"></span>
-        <div id="wiz-db-chips" class="bp-db-chips">
-          ${(d.Databases || []).map(db => `<span class="bp-db-chip active" onclick="this.classList.toggle('active'); backupPage._syncDbs()" data-db="${esc(db)}">${esc(db)}</span>`).join('')}
+        <p style="font-size:12px;color:var(--text3);margin-bottom:8px">If none selected, ALL databases will be backed up.</p>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <button class="btn-outline btn-sm" onclick="backupPage.loadWizardDbs()"><i data-lucide="refresh-cw"></i> Load Databases</button>
+          <span id="wiz-db-status" style="font-size:12px"></span>
         </div>
-        ${!d.Databases || d.Databases.length === 0 ? '<p style="font-size:12px;color:var(--primary-light)">✓ All databases will be backed up</p>' : ''}
+        <div id="wiz-db-chips" class="bp-db-list">
+          ${(d.Databases || []).map(db => `
+            <label class="bp-db-check-row">
+              <input type="checkbox" class="bp-db-check" data-db="${esc(db)}" ${d.Databases?.includes(db) ? 'checked' : ''} onchange="backupPage._syncDbs()">
+              <span class="bp-db-check-box"></span>
+              <span class="bp-db-check-name">${esc(db)}</span>
+            </label>
+          `).join('')}
+        </div>
+        <p id="wiz-db-all-label" style="font-size:12px;color:var(--primary-light);margin-top:8px">${(!d.Databases || d.Databases.length === 0) ? '\u2713 All databases will be backed up' : `${d.Databases.length} selected`}</p>
       `;
 
       case 2: return `
@@ -334,6 +363,21 @@ class BackupPage {
           <span class="bp-db-chip" onclick="backupPage._setCron('0 2 1 * *')">Monthly</span>
           <span class="bp-db-chip" onclick="backupPage._setCron('*/15 * * * *')">Every 15 min</span>
           <span class="bp-db-chip" onclick="backupPage._setCron('0 0 1 * *')">1st of month</span>
+        </div>
+
+        <label class="form-label" style="margin-top:12px">Management Mode</label>
+        <p style="font-size:12px;color:var(--text3);margin-bottom:8px">Kyrion runs backup when the app is open. NSSM keeps it running as a Windows service even when the app is closed.</p>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <label class="bp-mode-option ${(d.ManagementMode || 'cronmaster') === 'cronmaster' ? 'active' : ''}" onclick="backupPage.draft.ManagementMode='cronmaster'">
+            <input type="radio" name="mgmt-mode" value="cronmaster" ${(d.ManagementMode || 'cronmaster') === 'cronmaster' ? 'checked' : ''} style="display:none">
+            <i data-lucide="monitor" style="width:16px;height:16px"></i>
+            <div><strong>Kyrion</strong><br><small>App must be open</small></div>
+          </label>
+          <label class="bp-mode-option ${d.ManagementMode === 'nssm' ? 'active' : ''}" onclick="backupPage.draft.ManagementMode='nssm'">
+            <input type="radio" name="mgmt-mode" value="nssm" ${d.ManagementMode === 'nssm' ? 'checked' : ''} style="display:none">
+            <i data-lucide="server" style="width:16px;height:16px"></i>
+            <div><strong>NSSM Service</strong><br><small>Always running</small></div>
+          </label>
         </div>
 
         <div class="checkbox-row">
@@ -475,8 +519,14 @@ class BackupPage {
 
   _syncDbs() {
     const dbs = [];
-    document.querySelectorAll('#wiz-db-chips .bp-db-chip.active').forEach(c => dbs.push(c.dataset.db));
+    document.querySelectorAll('#wiz-db-chips .bp-db-check').forEach(c => { if (c.checked) dbs.push(c.dataset.db); });
     this.draft.Databases = dbs;
+    // Update 'all selected' label
+    const label = document.getElementById('wiz-db-all-label');
+    if (label) {
+      const total = document.querySelectorAll('#wiz-db-chips .bp-db-check').length;
+      label.textContent = dbs.length === 0 ? `\u2713 All databases will be backed up` : `${dbs.length} of ${total} selected`;
+    }
   }
 
   _insertPlaceholder(ph) {
@@ -557,14 +607,19 @@ class BackupPage {
     const result = await window.api.listMysqlDatabases(this.draft.Host, this.draft.Port, this.draft.User, this.draft.Password);
     const container = document.getElementById('wiz-db-chips');
     if (result.success && result.databases.length > 0) {
+      const selected = this.draft.Databases || [];
       container.innerHTML = result.databases.map(d =>
-        `<span class="bp-db-chip ${(this.draft.Databases||[]).includes(d) ? 'active' : ''}" onclick="this.classList.toggle('active'); backupPage._syncDbs()" data-db="${esc(d)}">${esc(d)}</span>`
+        `<label class="bp-db-check-row">
+          <input type="checkbox" class="bp-db-check" data-db="${esc(d)}" ${selected.includes(d) ? 'checked' : ''} onchange="backupPage._syncDbs()">
+          <span class="bp-db-check-box"></span>
+          <span class="bp-db-check-name">${esc(d)}</span>
+        </label>`
       ).join('');
       status.textContent = `Found ${result.databases.length} databases`;
     } else {
       status.textContent = result.message || 'No databases found';
     }
-    lucide.createIcons();
+    this._syncDbs();
   }
 
   _setCron(value) {
@@ -680,6 +735,107 @@ class BackupPage {
   async exportProfile(id) {
     const result = await window.api.exportBackupProfile(id);
     if (result.success) showToast('Profile exported', 'success');
+  }
+
+  // ─── History Modal ───
+  async showHistory(profileId) {
+    const profile = this.profiles.find(p => p.Id === profileId);
+    if (!profile) return;
+    const result = await window.api.getBackupHistory(profileId);
+    const history = result.history || [];
+
+    const statusIcon = (s) => s === 'Success' ? '<span style="color:var(--green)">&#10003;</span>' : '<span style="color:var(--red)">&#10007;</span>';
+    const formatSize = (bytes) => {
+      if (!bytes) return '0 B';
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+      if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+      return (bytes / 1073741824).toFixed(1) + ' GB';
+    };
+
+    const rows = history.map((h, i) => {
+      const ts = h.Timestamp ? new Date(h.Timestamp).toLocaleString() : '?';
+      const dbs = (h.Databases || []).join(', ') || 'all';
+      return `
+        <div class="bh-entry" onclick="this.classList.toggle('expanded')">
+          <div class="bh-row">
+            <span class="bh-num">${history.length - i}</span>
+            ${statusIcon(h.Status)}
+            <span class="bh-time">${ts}</span>
+            <span class="bh-dbs">${esc(dbs)}</span>
+            <span class="bh-dur">${esc(h.Duration || '?')}</span>
+            <span class="bh-size">${esc(h.TotalSizeHuman || formatSize(h.TotalSize))}</span>
+            <span class="badge badge-${h.Status === 'Success' ? 'active' : 'disabled'}" style="font-size:10px">${h.Status}</span>
+            <i data-lucide="chevron-down" class="bh-chevron"></i>
+          </div>
+          <div class="bh-details">
+            ${(h.Results || []).map(r => `
+              <div class="bh-result">
+                <span>${statusIcon(r.success ? 'Success' : 'Error')}</span>
+                <strong>${esc(r.database)}</strong>
+                <span style="color:var(--text3)">${r.sizeHuman || '0 B'}</span>
+                ${r.uploads && r.uploads.length > 0 ? r.uploads.map(u => `<span class="badge badge-${u.success ? 'active' : 'disabled'}" style="font-size:9px">${u.type.toUpperCase()} ${u.success ? 'ok' : 'fail'}</span>`).join(' ') : ''}
+                ${r.message ? `<div class="bh-error">${esc(r.message)}</div>` : ''}
+              </div>
+            `).join('')}
+          </div>
+        </div>`;
+    }).join('');
+
+    showModal(`
+      <h2><i data-lucide="history"></i> ${esc(profile.Name)} &mdash; History</h2>
+      <p style="font-size:12px;color:var(--text3);margin-bottom:12px">Cron: ${esc(profile.CronExpression)} &middot; ${history.length} execution(s)</p>
+      <div class="bh-list">
+        ${history.length === 0 ? '<p style="text-align:center;color:var(--text3);padding:24px">No execution history yet.</p>' : rows}
+      </div>
+      <div class="modal-actions">
+        <button class="btn-outline" onclick="backupPage.exportHistoryCsv('${profileId}')"><i data-lucide="download"></i> Export CSV</button>
+        <button class="btn-ghost" onclick="hideModal()">Close</button>
+      </div>
+    `);
+    lucide.createIcons();
+  }
+
+  async exportHistoryCsv(profileId) {
+    const result = await window.api.getBackupHistory(profileId);
+    const history = result.history || [];
+    if (history.length === 0) { showToast('No history to export', 'error'); return; }
+    const header = 'Timestamp,Status,Duration,Databases,TotalSize,SizeHuman\n';
+    const rows = history.map(h => {
+      const ts = h.Timestamp || '';
+      const dbs = (h.Databases || []).join(';');
+      return `"${ts}","${h.Status}","${h.Duration}","${dbs}","${h.TotalSize || 0}","${h.TotalSizeHuman || ''}"`;
+    }).join('\n');
+    const blob = new Blob([header + rows], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `backup-history-${profileId.slice(0, 8)}.csv`;
+    a.click();
+    showToast('CSV exported', 'success');
+  }
+
+  // ─── NSSM Deploy/Undeploy ───
+  async deployBackupNssm(profileId) {
+    showToast('Deploying NSSM service...', 'info');
+    const result = await window.api.deployBackupNssm(profileId);
+    if (result.success) {
+      showToast(`Service deployed: ${result.serviceName}`, 'success');
+    } else {
+      showToast(result.message || 'Deploy failed', 'error');
+    }
+    this.load();
+  }
+
+  async undeployBackupNssm(profileId) {
+    if (!confirm('Stop and remove the NSSM service for this backup?')) return;
+    showToast('Removing NSSM service...', 'info');
+    const result = await window.api.undeployBackupNssm(profileId);
+    if (result.success) {
+      showToast('Service removed', 'success');
+    } else {
+      showToast(result.message || 'Remove failed', 'error');
+    }
+    this.load();
   }
 }
 
