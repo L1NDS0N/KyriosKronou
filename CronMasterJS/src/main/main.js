@@ -793,7 +793,7 @@ function registerIPC() {
       const wrappersDir = wrapperGenerator.wrappersDir;
       const wrapperPath = path.join(wrappersDir, `${serviceName}.ps1`);
       if (fs.existsSync(wrapperPath)) fs.unlinkSync(wrapperPath);
-      backupManager.updateProfile({ Id: profileId, ManagementMode: 'cronmaster', NssmServiceName: '' });
+      backupManager.updateProfile({ Id: profileId, NssmServiceName: '' });
       sendNotification('Backup Service Removed', `${serviceName} has been stopped and removed`, 'info');
       return { success: true, message: 'Service removed' };
     } catch (err) {

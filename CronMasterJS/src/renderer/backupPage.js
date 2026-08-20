@@ -84,12 +84,15 @@ class BackupPage {
           </div>
           <div class="backup-profile-actions">
             ${isNssm ? `
-              <button class="btn-nssm-deploy btn-sm" onclick="backupPage.deployBackupNssm('${p.Id}')" title="Deploy/Start NSSM service">
-                <i data-lucide="play-circle"></i> Deploy
-              </button>
-              <button class="btn-nssm-stop btn-sm" onclick="backupPage.undeployBackupNssm('${p.Id}')" title="Stop & remove NSSM service">
-                <i data-lucide="power-off"></i> Undeploy
-              </button>
+              ${serviceName ? `
+                <button class="btn-nssm-toggle btn-sm btn-nssm-active" onclick="backupPage.undeployBackupNssm('${p.Id}')" title="Stop NSSM service">
+                  <i data-lucide="power-off"></i> Stop
+                </button>
+              ` : `
+                <button class="btn-nssm-toggle btn-sm" onclick="backupPage.deployBackupNssm('${p.Id}')" title="Deploy as NSSM service">
+                  <i data-lucide="play-circle"></i> Deploy
+                </button>
+              `}
             ` : ''}
             <button class="btn-glow btn-sm" onclick="backupPage.runBackup('${p.Id}')"><i data-lucide="play"></i> Run</button>
             <button class="btn-secondary-sm" onclick="backupPage.showHistory('${p.Id}')" title="Execution History"><i data-lucide="history"></i></button>
