@@ -765,7 +765,10 @@ function registerIPC() {
       const wrappersDir = wrapperGenerator.wrappersDir;
       const wrapperPath = path.join(wrappersDir, `${serviceName}.ps1`);
       if (!fs.existsSync(wrappersDir)) fs.mkdirSync(wrappersDir, { recursive: true });
-      fs.writeFileSync(wrapperPath, wrapperScript, 'utf8');
+      // Write with UTF-8 BOM so PowerShell 5.1 reads it correctly
+      const BOM = Buffer.from([0xEF, 0xBB, 0xBF]);
+      const contentBuffer = Buffer.from(wrapperScript, 'utf8');
+      fs.writeFileSync(wrapperPath, Buffer.concat([BOM, contentBuffer]));
       // Install via NSSM
       const result = serviceManager.installService(serviceName, 'powershell.exe', `-ExecutionPolicy Bypass -NoProfile -File \"${wrapperPath}\"`, wrappersDir, 'Automatic');
       if (result.success) {

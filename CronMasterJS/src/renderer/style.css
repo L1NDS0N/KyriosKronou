@@ -682,6 +682,12 @@ kbd {
 .backup-profile-details { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
 .backup-detail { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text2); }
 .backup-detail i, .backup-detail svg { width: 13px; height: 13px; color: var(--text3); }
+/* NSSM Deploy/Undeploy Buttons */
+.btn-nssm-deploy, .btn-nssm-stop { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 500; cursor: pointer; border: 1px solid; transition: all .2s; }
+.btn-nssm-deploy { background: rgba(80,160,100,.1); border-color: rgba(80,160,100,.3); color: rgba(80,200,120,.9); }
+.btn-nssm-deploy:hover { background: rgba(80,160,100,.2); border-color: rgba(80,160,100,.5); box-shadow: 0 0 8px rgba(80,160,100,.15); }
+.btn-nssm-stop { background: rgba(160,80,80,.1); border-color: rgba(160,80,80,.3); color: rgba(200,100,100,.9); }
+.btn-nssm-stop:hover { background: rgba(160,80,80,.2); border-color: rgba(160,80,80,.5); box-shadow: 0 0 8px rgba(160,80,80,.15); }
 .backup-form-scroll { max-height: 65vh; overflow-y: auto; padding-right: 8px; }
 .backup-form-scroll::-webkit-scrollbar { width: 5px; }
 .backup-form-scroll::-webkit-scrollbar-thumb { background: var(--text3); border-radius: 3px; }

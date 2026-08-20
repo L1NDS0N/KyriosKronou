@@ -43,39 +43,58 @@ class BackupPage {
     }
     if (empty) empty.style.display = 'none';
 
-    // Load stats for all profiles
+    // Load stats and NSSM status for all profiles
     const statsMap = {};
+    const nssmStatusMap = {};
     for (const p of this.profiles) {
       try {
         const stats = await window.api.getBackupHistoryStats(p.Id);
         statsMap[p.Id] = stats.stats || {};
       } catch (e) { statsMap[p.Id] = {}; }
+      if ((p.ManagementMode || 'cronmaster') === 'nssm' && p.NssmServiceName) {
+        try {
+          const statusResult = await window.api.getBackupNssmStatus(p.Id);
+          nssmStatusMap[p.Id] = statusResult.status || null;
+        } catch (e) { nssmStatusMap[p.Id] = null; }
+      }
     }
 
     content.innerHTML = this.profiles.map(p => {
       const st = statsMap[p.Id] || {};
       const mode = p.ManagementMode || 'cronmaster';
       const isNssm = mode === 'nssm';
+      const serviceName = p.NssmServiceName || '';
+      const nssmInfo = nssmStatusMap[p.Id];
+      const nssmStatusText = nssmInfo?.status || null;
       return `
       <div class="glass-card backup-profile-card ${p.Enabled ? '' : 'disabled'}">
         <div class="backup-profile-header">
           <div class="backup-profile-info">
             <h3 class="backup-profile-name">${esc(p.Name)}</h3>
             <span class="badge ${p.Enabled ? 'badge-active' : 'badge-disabled'}">${p.Enabled ? 'Active' : 'Disabled'}</span>
-            <span class="badge ${isNssm ? 'badge-warning' : 'badge-info'}" style="font-size:10px">${isNssm ? '&#128736; NSSM' : '&#9201; Kyrion'}</span>
+            ${isNssm ? `
+              <span class="badge badge-warning" style="font-size:10px">&#128736; NSSM Managed</span>
+              ${serviceName ? `<span class="badge" style="font-size:9px;background:rgba(255,255,255,0.06);color:var(--text3);font-family:monospace">${esc(serviceName)}</span>` : ''}
+              ${nssmStatusText ? `<span class="badge badge-${nssmStatusText === 'Running' ? 'active' : 'disabled'}" style="font-size:9px">${nssmStatusText === 'Running' ? '\u25cf Running' : '\u25cf Stopped'}</span>` : (serviceName ? `<span class="badge badge-disabled" style="font-size:9px">\u25cf Unknown</span>` : '')}
+            ` : `
+              <span class="badge badge-info" style="font-size:10px">&#9201; Kyrion</span>
+            `}
             <span class="badge badge-info">${esc(p.Databases?.length ? p.Databases.join(', ') : 'All DBs')}</span>
             ${p.Compression !== 'none' ? `<span class="badge badge-info" style="font-size:10px">${p.Compression.toUpperCase()} L${p.CompressionLevel}</span>` : ''}
           </div>
           <div class="backup-profile-actions">
             ${isNssm ? `
-              <button class="btn-secondary-sm" onclick="backupPage.deployBackupNssm('${p.Id}')" title="Start as NSSM service"><i data-lucide="power"></i></button>
-              <button class="btn-danger" onclick="backupPage.undeployBackupNssm('${p.Id}')" title="Stop NSSM service"><i data-lucide="power-off"></i></button>
-            ` : `
-              <button class="btn-glow btn-sm" onclick="backupPage.runBackup('${p.Id}')"><i data-lucide="play"></i> Run</button>
-            `}
+              <button class="btn-nssm-deploy btn-sm" onclick="backupPage.deployBackupNssm('${p.Id}')" title="Deploy/Start NSSM service">
+                <i data-lucide="play-circle"></i> Deploy
+              </button>
+              <button class="btn-nssm-stop btn-sm" onclick="backupPage.undeployBackupNssm('${p.Id}')" title="Stop & remove NSSM service">
+                <i data-lucide="power-off"></i> Undeploy
+              </button>
+            ` : ''}
+            <button class="btn-glow btn-sm" onclick="backupPage.runBackup('${p.Id}')"><i data-lucide="play"></i> Run</button>
             <button class="btn-secondary-sm" onclick="backupPage.showHistory('${p.Id}')" title="Execution History"><i data-lucide="history"></i></button>
-            <button class="btn-secondary-sm" onclick="backupPage.editProfile('${p.Id}')"><i data-lucide="pencil"></i> Edit</button>
-            <button class="btn-secondary-sm" onclick="backupPage.exportProfile('${p.Id}')"><i data-lucide="download"></i></button>
+            <button class="btn-secondary-sm" onclick="backupPage.editProfile('${p.Id}')" title="Edit Profile"><i data-lucide="pencil"></i> Edit</button>
+            <button class="btn-secondary-sm" onclick="backupPage.exportProfile('${p.Id}')" title="Export"><i data-lucide="download"></i></button>
             <button class="btn-danger" onclick="backupPage.deleteProfile('${p.Id}','${esc(p.Name)}')"><i data-lucide="trash-2"></i></button>
           </div>
         </div>
@@ -84,8 +103,8 @@ class BackupPage {
           <div class="backup-detail"><i data-lucide="folder"></i> <span>${esc(p.BackupPath)}</span></div>
           <div class="backup-detail"><i data-lucide="clock"></i> <span>${esc(p.CronExpression)}</span></div>
           ${p.UploadTargets.length > 0 ? `<div class="backup-detail"><i data-lucide="upload"></i> <span>${p.UploadTargets.map(t => t.type.toUpperCase()).join(', ')}</span></div>` : ''}
-          ${p.LastRun ? `<div class="backup-detail"><i data-lucide="history"></i> <span>Last: ${new Date(p.LastRun).toLocaleString()} — ${p.LastStatus || '?'}</span></div>` : ''}
-          ${st.total > 0 ? `<div class="backup-detail"><i data-lucide="bar-chart"></i> <span>${st.total} runs &middot; ${st.success} ok &middot; ${st.failed} failed</span></div>` : ''}
+          ${p.LastRun ? `<div class="backup-detail"><i data-lucide="history"></i> <span>Last: ${new Date(p.LastRun).toLocaleString()} \u2014 ${p.LastStatus || '?'}</span></div>` : ''}
+          ${st.total > 0 ? `<div class="backup-detail"><i data-lucide="bar-chart"></i> <span>${st.total} runs \u00b7 ${st.success} ok \u00b7 ${st.failed} failed</span></div>` : ''}
         </div>
       </div>
     `}).join('');
