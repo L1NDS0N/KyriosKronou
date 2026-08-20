@@ -581,15 +581,19 @@ class BackupPage {
 
   _syncCurrentStep() {
     const d = this.draft;
-    // Sync all inputs from current step
+    // Only sync DBs if we're on step 1 (Databases) — otherwise the checkboxes don't exist in DOM
+    if (this.currentStep === 1) this._syncDbs();
+    // Only sync targets if we're on step 3 (Upload)
+    if (this.currentStep === 3) this._syncTargets();
+    // Sync all other inputs from current step
     document.querySelectorAll('[id^="wiz-"]').forEach(el => {
       const key = el.id.replace('wiz-', '');
+      // Skip db/target sync elements — handled above
+      if (key === 'db-chips' || key.startsWith('t-')) return;
       if (el.type === 'checkbox') d[key.charAt(0).toUpperCase() + key.slice(1)] = el.checked;
       else if (el.type === 'number' || el.type === 'range') d[key.charAt(0).toUpperCase() + key.slice(1)] = parseInt(el.value) || 0;
       else d[key.charAt(0).toUpperCase() + key.slice(1)] = el.value;
     });
-    this._syncTargets();
-    this._syncDbs();
   }
 
   async testWizardConn() {

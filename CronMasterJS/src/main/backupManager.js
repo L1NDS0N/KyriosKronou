@@ -463,17 +463,14 @@ class BackupManager {
   async compressFile(inputPath, outputPath, method, level) {
     return new Promise((resolve, reject) => {
       if (method === 'zip') {
-        // Try 7z first (better compression), fallback to PowerShell
         const has7z = this.find7z();
         if (has7z) {
-          const cmd = `"${has7z}" a -tzip -mx=${level} "${outputPath}" "${inputPath}"`;
-          exec(cmd, { timeout: 300000, windowsHide: true }, (err) => {
-            if (err) reject(err); else resolve();
+          const args = ['a', '-tzip', `-mx=${level}`, outputPath, inputPath];
+          const { execFile } = require('child_process');
+          execFile(has7z, args, { timeout: 300000, windowsHide: true }, (err) => {
+            if (err && err.code !== 0) reject(err); else resolve();
           });
         } else {
-          // PowerShell compression
-          const dir = path.dirname(inputPath);
-          const name = path.basename(inputPath);
           const cmd = `powershell -NoProfile -Command "Compress-Archive -Path '${inputPath}' -DestinationPath '${outputPath}' -CompressionLevel Optimal"`;
           exec(cmd, { timeout: 300000, windowsHide: true }, (err) => {
             if (err) reject(err); else resolve();
@@ -482,9 +479,17 @@ class BackupManager {
       } else if (method === '7z') {
         const has7z = this.find7z();
         if (has7z) {
-          const cmd = `"${has7z}" a -t7z -mx=${level} "${outputPath}" "${inputPath}"`;
-          exec(cmd, { timeout: 300000, windowsHide: true }, (err) => {
-            if (err) reject(err); else resolve();
+          const args = ['a', '-t7z', `-mx=${level}`, outputPath, inputPath];
+          this.logger.log('INFO', `Compressing: ${path.basename(inputPath)} with 7z (level ${level})`);
+          const { execFile } = require('child_process');
+          execFile(has7z, args, { timeout: 300000, windowsHide: true }, (err, stdout, stderr) => {
+            if (err && err.code !== 0) {
+              this.logger.log('ERROR', `7z compression failed: ${err.message}`);
+              reject(err);
+            } else {
+              this.logger.log('INFO', `7z compression OK: ${path.basename(outputPath)}`);
+              resolve();
+            }
           });
         } else {
           reject(new Error('7z not found. Install 7-Zip or use zip compression.'));
@@ -496,18 +501,45 @@ class BackupManager {
   }
 
   find7z() {
+    // Check user-configured path first
+    const customPath = this.config.getSetting('7zPath', '');
+    if (customPath && fs.existsSync(customPath)) return customPath;
+
     const candidates = [
       'C:\\Program Files\\7-Zip\\7z.exe',
       'C:\\Program Files (x86)\\7-Zip\\7z.exe',
+      'C:\\7-Zip\\7z.exe',
+      'C:\\tools\\7z\\7z.exe',
+      process.env.PROGRAMFILES ? path.join(process.env.PROGRAMFILES, '7-Zip', '7z.exe') : '',
+      process.env['PROGRAMFILES(X86)'] ? path.join(process.env['PROGRAMFILES(X86)'], '7-Zip', '7z.exe') : '',
       '/usr/bin/7z',
       '/usr/local/bin/7z'
-    ];
+    ].filter(Boolean);
+
     for (const p of candidates) {
       if (fs.existsSync(p)) return p;
     }
+
     try {
-      return execSync('where 7z 2>nul || which 7z 2>/dev/null', { encoding: 'utf8', timeout: 5000 }).trim().split('\n')[0];
+      const result = execSync('where 7z 2>nul', { encoding: 'utf8', timeout: 5000, windowsHide: true }).trim();
+      if (result) {
+        const firstLine = result.split('\n')[0].trim();
+        if (fs.existsSync(firstLine)) return firstLine;
+      }
     } catch (e) {}
+
+    // Also scan Chocolatey
+    try {
+      const chocoBin = path.join(process.env.CHOCOLATEYINSTALL || 'C:\\ProgramData\\chocolatey', 'bin', '7z.exe');
+      if (fs.existsSync(chocoBin)) return chocoBin;
+    } catch (e) {}
+
+    // Scan PATH via PowerShell
+    try {
+      const psResult = execSync('powershell -NoProfile -Command "(Get-Command 7z -ErrorAction SilentlyContinue).Source"', { encoding: 'utf8', timeout: 5000, windowsHide: true }).trim();
+      if (psResult && fs.existsSync(psResult)) return psResult;
+    } catch (e) {}
+
     return null;
   }
 
