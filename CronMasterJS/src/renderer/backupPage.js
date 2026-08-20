@@ -311,6 +311,21 @@ class BackupPage {
     lucide.createIcons();
   }
 
+  setMode(mode) {
+    this.draft.ManagementMode = mode;
+    // Toggle active class on mode buttons
+    document.querySelectorAll('.bp-mode-option').forEach(el => el.classList.remove('active'));
+    // Find the correct label by checking the onclick attribute or data value
+    const labels = document.querySelectorAll('.bp-mode-option');
+    labels.forEach(label => {
+      const isCron = label.getAttribute('onclick').includes("'cronmaster'");
+      if ((mode === 'cronmaster' && isCron) || (mode === 'nssm' && !isCron)) {
+        label.classList.add('active');
+      }
+    });
+    this._updateFloatingSummary();
+  }
+
   _renderStepContent() {
     const d = this.draft;
     switch (this.currentStep) {
@@ -433,12 +448,12 @@ class BackupPage {
         <label class="form-label" style="margin-top:12px">Management Mode</label>
         <p style="font-size:12px;color:var(--text3);margin-bottom:8px">Kyrion runs backup when the app is open. NSSM keeps it running as a Windows service even when the app is closed.</p>
         <div style="display:flex;gap:8px;margin-bottom:8px">
-          <label class="bp-mode-option ${(d.ManagementMode || 'cronmaster') === 'cronmaster' ? 'active' : ''}" onclick="backupPage.draft.ManagementMode='cronmaster'">
+          <label class="bp-mode-option ${(d.ManagementMode || 'cronmaster') === 'cronmaster' ? 'active' : ''}" onclick="backupPage.setMode('cronmaster')">
             <input type="radio" name="mgmt-mode" value="cronmaster" ${(d.ManagementMode || 'cronmaster') === 'cronmaster' ? 'checked' : ''} style="display:none">
             <i data-lucide="monitor" style="width:16px;height:16px"></i>
             <div><strong>Kyrion</strong><br><small>App must be open</small></div>
           </label>
-          <label class="bp-mode-option ${d.ManagementMode === 'nssm' ? 'active' : ''}" onclick="backupPage.draft.ManagementMode='nssm'">
+          <label class="bp-mode-option ${d.ManagementMode === 'nssm' ? 'active' : ''}" onclick="backupPage.setMode('nssm')">
             <input type="radio" name="mgmt-mode" value="nssm" ${d.ManagementMode === 'nssm' ? 'checked' : ''} style="display:none">
             <i data-lucide="server" style="width:16px;height:16px"></i>
             <div><strong>NSSM Service</strong><br><small>Always running</small></div>

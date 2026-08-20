@@ -58,6 +58,7 @@ class BackupManager {
       Enabled: data.Enabled !== false,
       // Management mode: 'cronmaster' (default) or 'nssm'
       ManagementMode: data.ManagementMode || 'cronmaster',
+      NssmServiceName: data.NssmServiceName || '',
       // Metadata
       CreatedAt: data.CreatedAt || new Date().toISOString(),
       UpdatedAt: data.UpdatedAt || new Date().toISOString(),

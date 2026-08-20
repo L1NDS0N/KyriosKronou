@@ -755,12 +755,12 @@ function registerIPC() {
       const serviceName = `KyrionBackup_${profile.Name.replace(/[^a-zA-Z0-9]/g, '_')}`;
       // Create a PowerShell wrapper that runs mysqldump with the profile settings
       const wrapperScript = backupManager.generateBackupWrapper(profile);
-      const scriptsDir = wrapperGenerator.scriptsDir;
-      const wrapperPath = path.join(scriptsDir, `${serviceName}.ps1`);
-      if (!fs.existsSync(scriptsDir)) fs.mkdirSync(scriptsDir, { recursive: true });
+      const wrappersDir = wrapperGenerator.wrappersDir;
+      const wrapperPath = path.join(wrappersDir, `${serviceName}.ps1`);
+      if (!fs.existsSync(wrappersDir)) fs.mkdirSync(wrappersDir, { recursive: true });
       fs.writeFileSync(wrapperPath, wrapperScript, 'utf8');
       // Install via NSSM
-      const result = serviceManager.installService(serviceName, 'powershell.exe', `-ExecutionPolicy Bypass -NoProfile -File "${wrapperPath}"`, scriptsDir, 'Automatic');
+      const result = serviceManager.installService(serviceName, 'powershell.exe', `-ExecutionPolicy Bypass -NoProfile -File \"${wrapperPath}\"`, wrappersDir, 'Automatic');
       if (result.success) {
         serviceManager.startService(serviceName);
         backupManager.updateProfile({ Id: profileId, ManagementMode: 'nssm', NssmServiceName: serviceName });
@@ -780,8 +780,8 @@ function registerIPC() {
       const result = serviceManager.stopService(serviceName);
       serviceManager.uninstallService(serviceName);
       // Remove wrapper script
-      const scriptsDir = wrapperGenerator.scriptsDir;
-      const wrapperPath = path.join(scriptsDir, `${serviceName}.ps1`);
+      const wrappersDir = wrapperGenerator.wrappersDir;
+      const wrapperPath = path.join(wrappersDir, `${serviceName}.ps1`);
       if (fs.existsSync(wrapperPath)) fs.unlinkSync(wrapperPath);
       backupManager.updateProfile({ Id: profileId, ManagementMode: 'cronmaster', NssmServiceName: '' });
       sendNotification('Backup Service Removed', `${serviceName} has been stopped and removed`, 'info');
