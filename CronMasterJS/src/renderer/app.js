@@ -211,16 +211,35 @@ function renderQuickTasks() {
   if (allTasks.length === 0) { container.innerHTML = ''; return; }
 
   let html = `<div class="quick-tasks-header"><i data-lucide="list"></i> Existing Tasks <span class="quick-tasks-count">${allTasks.length}</span></div>`;
-  html += allTasks.map(t => `
-    <div class="quick-task-row" onclick="editTask('${t.Id}')" title="Click to edit">
+  html += allTasks.map(t => {
+    const line = `${t.CronExpression} | ${t.Name} | ${t.ScriptPath || ''}${t.Arguments ? ' | ' + t.Arguments : ''}${t.Description ? ' | ' + t.Description : ''}`;
+    return `
+    <div class="quick-task-row" onclick="loadTaskToEditor('${escAttr(line)}', '${t.Id}')" title="Click to load into editor">
       <span class="qtr-dot ${t.Enabled ? 'active' : 'disabled'}"></span>
       <span class="qtr-name">${escHtml(t.Name)}</span>
       <span class="qtr-cron">${escHtml(t.CronExpression)}</span>
       <span class="qtr-script">${escHtml(t.ScriptPath)}</span>
-      <span class="qtr-edit-hint"><i data-lucide="pencil" style="width:11px;height:11px;"></i> edit</span>
-    </div>`).join('');
+      <span class="qtr-edit-hint"><i data-lucide="arrow-left" style="width:11px;height:11px;"></i> load</span>
+    </div>`;
+  }).join('');
   container.innerHTML = html;
   lucide.createIcons();
+}
+
+function loadTaskToEditor(line, taskId) {
+  const textarea = document.getElementById('quick-input');
+  if (!textarea) return;
+  // If textarea already has content, append on new line
+  const existing = textarea.value.trim();
+  if (existing && !existing.endsWith('\n')) {
+    textarea.value = existing + '\n' + line;
+  } else {
+    textarea.value = existing ? existing + line : line;
+  }
+  textarea.focus();
+  // Trigger preview update
+  textarea.dispatchEvent(new Event('input'));
+  showToast('Task loaded into editor', 'info');
 }
 
 document.getElementById('quick-input').addEventListener('input', () => {

@@ -1,4 +1,4 @@
-// quickCreate.js - Smart textarea for batch task creation
+// quickCreate.js - Smart textarea for batch task creation with syntax validation
 // Parses text like: cron | name | script | [args] | [description]
 
 function parseQuickLines(text, cronParser) {
@@ -8,7 +8,7 @@ function parseQuickLines(text, cronParser) {
   for (const line of lines) {
     const parts = line.split('|').map(p => p.trim());
     if (parts.length < 3) {
-      results.push({ raw: line, valid: false, error: 'Need at least: cron | name | script' });
+      results.push({ raw: line, valid: false, error: 'Need at least: cron | name | script', lineNum: results.length + 1 });
       continue;
     }
 
@@ -17,7 +17,14 @@ function parseQuickLines(text, cronParser) {
     // Auto-correct common cron mistakes
     cron = autoCorrectCron(cron);
 
-    const valid = cronParser.validate(cron);
+    const cronValid = cronParser.validate(cron);
+    const scriptValid = validateScriptPath(script);
+    const valid = cronValid && scriptValid.valid;
+
+    let error = null;
+    if (!cronValid) error = `Invalid cron: ${cron}`;
+    else if (!scriptValid.valid) error = scriptValid.error;
+
     results.push({
       raw: line,
       valid,
@@ -26,10 +33,55 @@ function parseQuickLines(text, cronParser) {
       script: script || '',
       args: args || '',
       description: desc || '',
-      error: valid ? null : `Invalid cron: ${cron}`
+      error,
+      lineNum: results.length + 1,
+      scriptExt: scriptValid.ext,
+      cronFields: parseCronFields(cron)
     });
   }
   return results;
+}
+
+function validateScriptPath(script) {
+  if (!script) return { valid: false, error: 'No script path', ext: '' };
+  const trimmed = script.trim();
+  const ext = getExt(trimmed);
+
+  // Check valid extensions
+  const validExts = ['.ps1', '.bat', '.cmd', '.exe', '.py', '.js', '.sh'];
+  if (ext && !validExts.includes(ext.toLowerCase())) {
+    return { valid: false, error: `Unknown extension: ${ext}`, ext };
+  }
+
+  // Check for common path issues
+  if (trimmed.includes('  ')) {
+    return { valid: false, error: 'Double spaces in path', ext };
+  }
+
+  return { valid: true, ext };
+}
+
+function getExt(path) {
+  const lastDot = path.lastIndexOf('.');
+  const lastSlash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  if (lastDot > lastSlash) return path.substring(lastDot);
+  return '';
+}
+
+function parseCronFields(cron) {
+  if (!cron) return [];
+  const parts = cron.split(/\s+/);
+  const labels = ['minute', 'hour', 'day', 'month', 'weekday'];
+  return parts.map((p, i) => {
+    let color = 'var(--green)';
+    let desc = '';
+    if (p === '*') desc = `every ${labels[i]}`;
+    else if (p.includes('/')) desc = `every ${p.split('/')[1]} ${labels[i]}(s)`;
+    else if (p.includes('-')) desc = `${labels[i]} ${p}`;
+    else if (/^\d+$/.test(p)) desc = `${labels[i]} ${p}`;
+    else { color = 'var(--red)'; desc = 'invalid'; }
+    return { value: p, color, desc, label: labels[i] };
+  });
 }
 
 function autoCorrectCron(expr) {
@@ -53,12 +105,12 @@ function autoCorrectCron(expr) {
   const lower = c.toLowerCase();
   if (shorthands[lower]) return shorthands[lower];
 
-  // Fix: single number without spaces → assume "X * * * *"
+  // Fix: single number without spaces -> assume "X * * * *"
   if (/^\d+$/.test(c) && parseInt(c) <= 59) {
     return `${c} * * * *`;
   }
 
-  // Fix: "HH:MM" format → "MM HH * * *"
+  // Fix: "HH:MM" format -> "MM HH * * *"
   const hmMatch = c.match(/^(\d{1,2}):(\d{2})$/);
   if (hmMatch) {
     return `${hmMatch[2]} ${hmMatch[1]} * * *`;
@@ -68,7 +120,7 @@ function autoCorrectCron(expr) {
   c = c.replace(/\s+/g, ' ');
   c = c.replace(/,\s*$/, '');
 
-  // Fix: missing fields → pad with *
+  // Fix: missing fields -> pad with *
   const fields = c.split(' ');
   while (fields.length < 5) fields.push('*');
 
@@ -78,12 +130,14 @@ function autoCorrectCron(expr) {
 function renderQuickPreview(results) {
   const container = document.getElementById('quick-preview');
   const status = document.getElementById('quick-status');
+  const syntaxBar = document.getElementById('quick-syntax-bar');
   if (!container || !status) return;
 
   if (results.length === 0) {
     container.innerHTML = '';
     container.classList.remove('has-items');
     status.innerHTML = '';
+    if (syntaxBar) syntaxBar.innerHTML = '';
     return;
   }
 
@@ -91,14 +145,31 @@ function renderQuickPreview(results) {
   const validCount = results.filter(r => r.valid).length;
   const invalidCount = results.filter(r => !r.valid).length;
 
-  container.innerHTML = results.map(r => `
+  container.innerHTML = results.map(r => {
+    const extBadge = r.scriptExt ? `<span class="qpi-ext">${r.scriptExt}</span>` : '';
+    return `
     <div class="quick-preview-item ${r.valid ? 'valid' : 'invalid'}">
+      <span class="qpi-linenum">${r.lineNum}</span>
       <span class="qpi-cron">${escHtml(r.cron || '???')}</span>
       <span class="qpi-name">${escHtml(r.name || 'Unnamed')}</span>
-      <span class="qpi-script">${escHtml(r.script || 'no script')}</span>
-      <span class="qpi-status">${r.valid ? 'OK' : r.error}</span>
-    </div>
-  `).join('');
+      <span class="qpi-script">${escHtml(r.script || 'no script')} ${extBadge}</span>
+      <span class="qpi-status">${r.valid ? '&#10003;' : r.error}</span>
+    </div>`;
+  }).join('');
 
   status.innerHTML = `<span class="valid-count">${validCount} valid</span>${invalidCount > 0 ? ` · <span class="invalid-count">${invalidCount} invalid</span>` : ''}`;
+
+  // Render syntax bar for the last/active line
+  if (syntaxBar) {
+    // Show combined cron field breakdown for all valid lines
+    const validResults = results.filter(r => r.valid && r.cronFields);
+    if (validResults.length > 0) {
+      const last = validResults[validResults.length - 1];
+      syntaxBar.innerHTML = last.cronFields.map(f =>
+        `<span class="sb-field" style="color:${f.color}"><span class="sb-val">${escHtml(f.value)}</span><span class="sb-label">${f.label}</span></span>`
+      ).join('<span class="sb-sep">|</span>');
+    } else {
+      syntaxBar.innerHTML = '';
+    }
+  }
 }
