@@ -102,21 +102,18 @@ html, body { height: 100%; font-family: var(--font); background: var(--bg); colo
 
 /* ═══ SIDEBAR ═══ */
 #sidebar {
-  width: 64px; min-width: 64px; position: relative; z-index: 2;
+  width: 200px; min-width: 200px; position: relative; z-index: 2;
   background: rgba(8,8,14,.7); backdrop-filter: blur(40px);
   border-right: 1px solid var(--glass-border);
   display: flex; flex-direction: column; padding: 12px 0;
-  transition: width .3s cubic-bezier(.4,0,.2,1); overflow: hidden;
+  overflow: hidden;
 }
 #sidebar::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 120px; background: radial-gradient(ellipse at 50% -20%, rgba(200,200,212,.02), transparent); pointer-events: none; }
-#sidebar:hover { width: 200px; }
-#sidebar .nav-btn span { opacity: 0; transition: opacity .2s .05s; white-space: nowrap; }
-#sidebar:hover .nav-btn span { opacity: 1; }
+#sidebar .nav-btn span { opacity: 1; white-space: nowrap; }
 .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 0; }
 .sidebar-bottom { padding: 0; }
 .sidebar-divider { height: 1px; background: var(--glass-border); margin: 8px 4px; }
-.sidebar-footer-credits { text-align: center; padding: 8px 0 4px; opacity: 0; transition: opacity .2s; }
-#sidebar:hover .sidebar-footer-credits { opacity: 1; }
+.sidebar-footer-credits { text-align: center; padding: 8px 0 4px; opacity: 1; }
 .credits-text { display: block; font-size: 9px; color: var(--text3); margin-bottom: 2px; letter-spacing: .3px; }
 .heart { color: var(--red); font-size: 10px; animation: heartbeat 2s ease-in-out infinite; display: inline-block; }
 @keyframes heartbeat { 0%,100% { transform: scale(1); } 50% { transform: scale(1.15); } }
@@ -131,10 +128,9 @@ html, body { height: 100%; font-family: var(--font); background: var(--bg); colo
   transition: var(--transition); white-space: nowrap; position: relative;
   width: 100%; height: 42px;
 }
-#sidebar:hover .nav-btn { padding: 0 14px; gap: 12px; justify-content: flex-start; }
+.nav-btn { padding: 0 14px; gap: 12px; justify-content: flex-start; }
 .nav-btn i { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex-shrink: 0; }
 .nav-btn i svg { width: 20px !important; height: 20px !important; }
-#sidebar:hover .nav-btn i svg { width: 20px !important; height: 20px !important; }
 .nav-btn:hover { background: var(--glass2); color: var(--text2); }
 .nav-btn.active { background: var(--glass2); color: var(--primary-light); }
 .nav-btn.active::before {
