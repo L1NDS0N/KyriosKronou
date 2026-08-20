@@ -991,12 +991,12 @@ class BackupManager {
       '',
       '        # Build mysqldump args',
       '        $mArgs = @()',
-      '        $mArgs += "--host=\"$Host_\""
-      '        $mArgs += "--port=$Port"
-      '        $mArgs += "--user=\"$User\""
-      '        $mArgs += "--password=\"$Password\""
+      '        $mArgs += "--host=\"" + $Host_ + "\""',
+      '        $mArgs += "--port=" + $Port',
+      '        $mArgs += "--user=\"" + $User + "\""',
+      '        $mArgs += "--password=\"" + $Password + "\""',
       '        if ($ExtraArgs) { $mArgs += $ExtraArgs }',
-      '        $mArgs += "--result-file=\"$dumpPath\""
+      '        $mArgs += "--result-file=\"" + $dumpPath + "\""',
       '        if ($db -eq "--all-databases") {',
       '            $mArgs += "--all-databases"',
       '        } else {',
