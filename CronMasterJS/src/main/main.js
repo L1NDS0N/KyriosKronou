@@ -1,0 +1,895 @@
+// main.js - Electron Main Process (with System Tray + Autostart + Audit Logging)
+const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, Notification } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const CronParser = require('./cronParser');
+const Logger = require('./logger');
+const ConfigManager = require('./configManager');
+const TaskManager = require('./taskManager');
+const ServiceManager = require('./serviceManager');
+const NssmInstaller = require('./nssmInstaller');
+const WrapperGenerator = require('./wrapperGenerator');
+const ApiServer = require('./apiServer');
+const BackupManager = require('./backupManager');
+
+let mainWindow;
+let tray = null;
+let cronParser, logger, config, taskManager, serviceManager, nssmInstaller;
+let wrapperGenerator;
+let apiServer;
+let backupManager;
+let schedulerInterval;
+let isQuitting = false;
+
+// ─── Push Notifications ───
+function sendNotification(title, body, type) {
+  try {
+    if (!config || !config.getSetting('Notifications', true)) return;
+    if (!Notification.isSupported()) return;
+
+    // Try push-128.png, fallback to push-64.png, then tray-32.png
+    const assetDir = path.join(__dirname, '..', 'renderer', 'assets');
+    let iconPath = path.join(assetDir, 'push-128.png');
+    if (!fs.existsSync(iconPath)) iconPath = path.join(assetDir, 'push-64.png');
+    if (!fs.existsSync(iconPath)) iconPath = path.join(assetDir, 'tray-32.png');
+    if (!fs.existsSync(iconPath)) iconPath = path.join(__dirname, '..', 'build-resources', 'icon.ico');
+    const notif = new Notification({
+      title,
+      body,
+      silent: false,
+      icon: fs.existsSync(iconPath) ? iconPath : undefined
+    });
+    notif.on('click', () => {
+      if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
+    });
+    notif.show();
+  } catch (e) { /* notifications are best-effort */ }
+}
+
+function sendTaskNotification(task, result) {
+  const success = result && result.success !== false;
+  const title = success ? '\u2705 Task Completed' : '\u274c Task Failed';
+  const body = `${task.Name}\n${success ? 'Executed successfully' : 'Failed: ' + (result.error || 'Unknown error')}${result.duration ? '\nDuration: ' + result.duration : ''}`;
+  sendNotification(title, body, success ? 'success' : 'error');
+}
+
+function sendServiceNotification(action, serviceName, success, message) {
+  const icon = success ? '\u2705' : '\u274c';
+  const title = `${icon} Service ${action}`;
+  sendNotification(title, `${serviceName}\n${message || (success ? 'Operation completed' : 'Operation failed')}`, success ? 'success' : 'error');
+}
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    minWidth: 900,
+    minHeight: 600,
+    frame: false,
+    backgroundColor: '#050508',
+    show: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js')
+    }
+  });
+
+  mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+
+  mainWindow.once('ready-to-show', () => { mainWindow.show(); });
+
+  // Close → minimize to tray if setting enabled
+  mainWindow.on('close', (e) => {
+    const closeToTray = config ? config.getSetting('CloseToTray', true) : true;
+    if (closeToTray && !isQuitting) {
+      e.preventDefault();
+      mainWindow.hide();
+      return;
+    }
+    if (schedulerInterval) clearInterval(schedulerInterval);
+    if (logger) logger.flush();
+  });
+
+  mainWindow.on('closed', () => { mainWindow = null; });
+}
+
+function createTray() {
+  // Load logo from assets for system tray
+  let trayIcon;
+  const trayPath = path.join(__dirname, '..', 'renderer', 'assets', 'tray-32.png');
+  if (fs.existsSync(trayPath)) {
+    trayIcon = nativeImage.createFromPath(trayPath).resize({ width: 16, height: 16 });
+  } else {
+    // Fallback: generate a 16x16 purple circle
+    const size = 16;
+    const buf = Buffer.alloc(size * size * 4);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const i = (y * size + x) * 4;
+        const cx = x - size / 2 + 0.5, cy = y - size / 2 + 0.5;
+        const dist = Math.sqrt(cx * cx + cy * cy);
+        const radius = size / 2 - 1;
+        if (dist < radius - 0.5) {
+          buf[i] = 130; buf[i + 1] = 90; buf[i + 2] = 200; buf[i + 3] = 255;
+        } else if (dist < radius + 0.5) {
+          const alpha = Math.max(0, Math.min(255, Math.round(255 * (radius + 0.5 - dist))));
+          buf[i] = 130; buf[i + 1] = 90; buf[i + 2] = 200; buf[i + 3] = alpha;
+        } else {
+          buf[i] = 0; buf[i + 1] = 0; buf[i + 2] = 0; buf[i + 3] = 0;
+        }
+      }
+    }
+    trayIcon = nativeImage.createFromBuffer(buf, { width: size, height: size }).resize({ width: 16, height: 16 });
+  }
+
+  tray = new Tray(trayIcon);
+  tray.setToolTip('Κύριος Κρόνου - Task Scheduler');
+
+  const contextMenu = Menu.buildFromTemplate([
+    { label: 'Κύριος Κρόνου', enabled: false },
+    { type: 'separator' },
+    {
+      label: 'Show Window', click: () => {
+        if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Quick Actions', submenu: [
+        { label: 'Refresh Dashboard', click: () => { if (mainWindow) mainWindow.webContents.send('tray-refresh'); } },
+        { label: 'Run Due Tasks', click: () => { runDueTasksFromTray(); } }
+      ]
+    },
+    { type: 'separator' },
+    {
+      label: 'Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin,
+      click: (menuItem) => {
+        app.setLoginItemSettings({ openAtLogin: menuItem.checked, path: app.getPath('exe') });
+        if (config) {
+          const old = config.getSetting('StartWithWindows', false);
+          config.setSetting('StartWithWindows', menuItem.checked);
+          config.save();
+          logger.auditSettingsChanged('StartWithWindows', old, menuItem.checked);
+        }
+      }
+    },
+    { label: 'Minimize to Tray on Close', type: 'checkbox', checked: true,
+      click: (menuItem) => {
+        if (config) {
+          const old = config.getSetting('CloseToTray', true);
+          config.setSetting('CloseToTray', menuItem.checked);
+          config.save();
+          logger.auditSettingsChanged('CloseToTray', old, menuItem.checked);
+        }
+      }
+    },
+    { type: 'separator' },
+    { label: 'Exit', click: () => { isQuitting = true; app.quit(); } }
+  ]);
+
+  tray.setContextMenu(contextMenu);
+
+  tray.on('double-click', () => {
+    if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
+  });
+
+  if (config) {
+    const closeToTray = config.getSetting('CloseToTray', true);
+    contextMenu.items[7].checked = closeToTray;
+    const startWithWin = config.getSetting('StartWithWindows', false);
+    contextMenu.items[5].checked = startWithWin;
+  }
+}
+
+async function runDueTasksFromTray() {
+  if (!taskManager) return;
+  const dueTasks = taskManager.getDueTasks();
+  for (const task of dueTasks) {
+    const result = await taskManager.executeTask(task);
+    logger.auditTaskExecuted(task.Id, task.Name, result);
+    sendTaskNotification(task, result);
+    if (mainWindow && mainWindow.webContents) {
+      mainWindow.webContents.send('task-executed', result);
+      mainWindow.webContents.send('data-updated');
+    }
+  }
+}
+
+function initComponents() {
+  const appData = app.getPath('userData');
+  const configDir = path.join(appData, 'config');
+  const logsDir = path.join(appData, 'logs');
+
+  cronParser = new CronParser();
+  logger = new Logger(logsDir);
+  config = new ConfigManager(configDir, 'default');
+  taskManager = new TaskManager(config, logger, cronParser);
+  serviceManager = new ServiceManager(logger);
+  nssmInstaller = new NssmInstaller(logger);
+  wrapperGenerator = new WrapperGenerator(config, logger);
+  backupManager = new BackupManager(config, logger);
+
+  logger.log('INFO', 'CronMaster started');
+  logger.audit('APP_STARTED', { targetType: 'app', after: { version: app.getVersion() } });
+}
+
+function startScheduler() {
+  schedulerInterval = setInterval(() => {
+    if (!mainWindow) return;
+    const dueTasks = taskManager.getDueTasks();
+    dueTasks.forEach(async (task) => {
+      const result = await taskManager.executeTask(task);
+      logger.auditTaskExecuted(task.Id, task.Name, result);
+      sendTaskNotification(task, result);
+      if (mainWindow && mainWindow.webContents) {
+        mainWindow.webContents.send('task-executed', result);
+        mainWindow.webContents.send('data-updated');
+      }
+    });
+  }, 30000);
+}
+
+// IPC Handlers with audit logging and error wrappers
+function registerIPC() {
+  // ─── Task Operations ───
+  ipcMain.handle('get-tasks', () => taskManager.getAllTasks());
+
+  ipcMain.handle('add-task', (e, data) => {
+    const result = taskManager.addTask(data);
+    if (result.success !== false) {
+      logger.auditTaskCreated({ Id: result.Id, Name: data.Name, CronExpression: data.CronExpression, ScriptPath: data.ScriptPath });
+    }
+    return result;
+  });
+
+  ipcMain.handle('update-task', (e, data) => {
+    const existing = taskManager.getTask(data.Id);
+    const wasEnabled = existing ? existing.Enabled : true;
+    const result = taskManager.updateTask(data);
+    if (result.success !== false) {
+      logger.auditTaskUpdated(data.Id,
+        existing ? { name: existing.Name, cron: existing.CronExpression, enabled: existing.Enabled } : null,
+        { name: data.Name, cron: data.CronExpression, enabled: data.Enabled }
+      );
+
+      // If task was just disabled and is NSSM-managed, stop the service (don't remove)
+      if (wasEnabled && !data.Enabled && data.ManagementMode === 'nssm') {
+        const serviceName = `CronMaster_${String(data.Id).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}`;
+        try {
+          const svcInfo = serviceManager.getServiceInfo(serviceName);
+          if (svcInfo && svcInfo.Status === 'Running') {
+            serviceManager.stopService(serviceName);
+            logger.log('INFO', `NSSM service stopped (task disabled): ${serviceName}`);
+          }
+        } catch (err) {
+          logger.error(`Failed to stop NSSM service on disable: ${serviceName}`, err);
+        }
+      }
+
+      // If task was just re-enabled and is NSSM-managed, start the service
+      if (!wasEnabled && data.Enabled && data.ManagementMode === 'nssm') {
+        const serviceName = `CronMaster_${String(data.Id).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}`;
+        try {
+          const svcInfo = serviceManager.getServiceInfo(serviceName);
+          if (svcInfo && svcInfo.Status !== 'Running') {
+            serviceManager.startService(serviceName);
+            logger.log('INFO', `NSSM service started (task enabled): ${serviceName}`);
+          }
+        } catch (err) {
+          logger.error(`Failed to start NSSM service on enable: ${serviceName}`, err);
+        }
+      }
+    }
+    return result;
+  });
+
+  ipcMain.handle('delete-task', (e, id) => {
+    const existing = taskManager.getTask(id);
+    const result = taskManager.deleteTask(id);
+    if (result.success !== false) {
+      logger.auditTaskDeleted(id, existing ? existing.Name : id);
+    }
+    return result;
+  });
+
+  ipcMain.handle('execute-task', async (e, task) => {
+    const result = await taskManager.executeTask(task);
+    logger.auditTaskExecuted(task.Id, task.Name, result);
+    sendTaskNotification(task, result);
+    if (mainWindow) mainWindow.webContents.send('data-updated');
+    return result;
+  });
+
+  ipcMain.handle('get-due-tasks', () => taskManager.getDueTasks());
+
+  // ─── History ───
+  ipcMain.handle('get-history', () => taskManager.getHistory());
+  ipcMain.handle('export-history', async (e, format) => {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      filters: [{ name: format.toUpperCase(), extensions: [format] }]
+    });
+    if (!result.canceled && result.filePath) {
+      const res = taskManager.exportHistory(result.filePath);
+      logger.auditExport(format, res.count || 0);
+      return res;
+    }
+    return { success: false, message: 'Cancelled' };
+  });
+
+  // ─── Import / Export Tasks ───
+  ipcMain.handle('export-tasks', async () => {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    });
+    if (!result.canceled && result.filePath) {
+      const res = taskManager.exportTasks(result.filePath);
+      logger.auditExport('json', res.count || 0);
+      return res;
+    }
+    return { success: false, message: 'Cancelled' };
+  });
+
+  ipcMain.handle('import-tasks', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      properties: ['openFile']
+    });
+    if (!result.canceled && result.filePaths.length > 0) {
+      const res = taskManager.importTasks(result.filePaths[0]);
+      if (res.success) logger.auditImport(res.count || 0);
+      return res;
+    }
+    return { success: false, message: 'Cancelled' };
+  });
+
+  // ─── Services ───
+  ipcMain.handle('get-services', () => serviceManager.getAllServices());
+  ipcMain.handle('get-service-count', () => serviceManager.getServiceCount());
+  ipcMain.handle('check-nssm', (e, p) => serviceManager.checkNssm(p));
+
+  // ─── NSSM Installer ───
+  ipcMain.handle('nssm-check-installed', (e, p) => nssmInstaller.checkInstalled(p));
+  ipcMain.handle('nssm-check-managers', () => nssmInstaller.checkPackageManagers());
+  ipcMain.handle('nssm-install-via', async (e, manager) => {
+    const result = await nssmInstaller.installVia(manager);
+    logger.auditNssmInstalled(manager, result.success);
+    return result;
+  });
+  ipcMain.handle('nssm-download-manual', async () => {
+    const result = await nssmInstaller.downloadManual(app.getPath('userData'));
+    logger.auditNssmInstalled('manual-download', result.success);
+    return result;
+  });
+
+  // ─── Service Management ───
+  ipcMain.handle('install-service', (e, data) => {
+    const result = serviceManager.installService(data.name, data.appPath, data.args, data.workDir, data.startupType);
+    if (result.success) logger.auditServiceInstalled(data.name, data.appPath);
+    return result;
+  });
+
+  ipcMain.handle('start-service', (e, name) => {
+    const result = serviceManager.startService(name);
+    if (result.success) logger.auditServiceStarted(name);
+    return result;
+  });
+
+  ipcMain.handle('stop-service', (e, name) => {
+    const result = serviceManager.stopService(name);
+    if (result.success) logger.auditServiceStopped(name);
+    return result;
+  });
+
+  ipcMain.handle('restart-service', (e, name) => {
+    const result = serviceManager.restartService(name);
+    if (result.success) {
+      logger.auditServiceStopped(name);
+      logger.auditServiceStarted(name);
+    }
+    return result;
+  });
+
+  ipcMain.handle('uninstall-service', (e, name) => {
+    const result = serviceManager.uninstallService(name);
+    if (result.success) logger.auditServiceUninstalled(name);
+    return result;
+  });
+
+  // ─── Wrapper + Deploy ───
+  ipcMain.handle('generate-wrapper', (e, task) => wrapperGenerator.generateWrapper(task));
+  ipcMain.handle('remove-wrapper', (e, taskId) => wrapperGenerator.removeWrapper(taskId));
+  ipcMain.handle('get-wrapper-path', (e, taskId) => wrapperGenerator.getWrapperPath(taskId));
+  ipcMain.handle('list-wrappers', () => wrapperGenerator.listWrappers());
+
+  // ─── Service Parameter Editing ───
+  ipcMain.handle('get-service-params', (e, serviceName) => {
+    try {
+      const info = serviceManager.getServiceInfo(serviceName);
+      if (!info) return { success: false, message: 'Service not found' };
+      // Get all NSSM parameters
+      const params = {};
+      const fields = ['Application', 'AppDirectory', 'AppParameters', 'DisplayName', 'Description', 'Start', 'AppStdout', 'AppStderr', 'AppRotateFiles', 'AppRotateBytes'];
+      for (const field of fields) {
+        const result = serviceManager._runNssm('get', serviceName, field);
+        params[field] = result.output ? result.output.trim() : '';
+      }
+      params.Name = serviceName;
+      params.Status = info.Status;
+      return { success: true, params };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  });
+
+  ipcMain.handle('set-service-params', (e, serviceName, params) => {
+    try {
+      // Apply each parameter
+      if (params.Application) serviceManager._runNssm('set', serviceName, 'Application', params.Application);
+      if (params.AppDirectory) serviceManager._runNssm('set', serviceName, 'AppDirectory', params.AppDirectory);
+      if (params.AppParameters !== undefined) serviceManager._runNssm('set', serviceName, 'AppParameters', params.AppParameters);
+      if (params.DisplayName) serviceManager._runNssm('set', serviceName, 'DisplayName', params.DisplayName);
+      if (params.Description) serviceManager._runNssm('set', serviceName, 'Description', params.Description);
+      if (params.Start) serviceManager._runNssm('set', serviceName, 'Start', params.Start);
+      if (params.AppStdout) serviceManager._runNssm('set', serviceName, 'AppStdout', params.AppStdout);
+      if (params.AppStderr) serviceManager._runNssm('set', serviceName, 'AppStderr', params.AppStderr);
+      if (params.AppRotateFiles !== undefined) serviceManager._runNssm('set', serviceName, 'AppRotateFiles', params.AppRotateFiles ? 1 : 0);
+      if (params.AppRotateBytes) serviceManager._runNssm('set', serviceName, 'AppRotateBytes', params.AppRotateBytes);
+      logger.log('INFO', `Service parameters updated: ${serviceName}`);
+      return { success: true };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  });
+
+  ipcMain.handle('rename-service', async (e, oldName, newName) => {
+    try {
+      if (!oldName || !newName) return { success: false, message: 'Names required' };
+      // Get current params
+      const info = serviceManager.getServiceInfo(oldName);
+      if (!info) return { success: false, message: 'Service not found' };
+      const params = {};
+      const fields = ['Application', 'AppDirectory', 'AppParameters', 'DisplayName', 'Description', 'Start', 'AppStdout', 'AppStderr'];
+      for (const field of fields) {
+        const result = serviceManager._runNssm('get', oldName, field);
+        params[field] = result.output ? result.output.trim() : '';
+      }
+      // Stop and remove old service
+      serviceManager.stopService(oldName);
+      serviceManager.uninstallService(oldName);
+      // Install new service with same params
+      serviceManager.installService(newName, params.Application, params.AppParameters, params.AppDirectory, 'Automatic');
+      // Restore other params
+      if (params.DisplayName) serviceManager._runNssm('set', newName, 'DisplayName', params.DisplayName);
+      if (params.Description) serviceManager._runNssm('set', newName, 'Description', params.Description);
+      if (params.AppStdout) serviceManager._runNssm('set', newName, 'AppStdout', params.AppStdout);
+      if (params.AppStderr) serviceManager._runNssm('set', newName, 'AppStderr', params.AppStderr);
+      serviceManager.startService(newName);
+      logger.audit('SERVICE_RENAMED', { targetType: 'service', before: { name: oldName }, after: { name: newName } });
+      return { success: true, newName };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  });
+
+  ipcMain.handle('read-service-log', (e, taskId) => {
+    try {
+      const logPath = require('path').join(config.configDir, '..', 'logs', `task-${taskId}.log`);
+      if (require('fs').existsSync(logPath)) {
+        const content = require('fs').readFileSync(logPath, 'utf8');
+        const lines = content.split('\n');
+        return { success: true, content, lines: lines.slice(-50) }; // last 50 lines
+      }
+      return { success: false, message: 'Log file not found', content: '' };
+    } catch (err) {
+      return { success: false, message: err.message, content: '' };
+    }
+  });
+
+  // ─── Script File Management ───
+  ipcMain.handle('read-script-file', (e, filePath) => {
+    try {
+      if (!filePath || !fs.existsSync(filePath)) {
+        return { success: false, message: 'File not found' };
+      }
+      const content = fs.readFileSync(filePath, 'utf8');
+      return { success: true, content };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  });
+
+  ipcMain.handle('save-script-file', (e, filePath, content) => {
+    try {
+      const dir = path.dirname(filePath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(filePath, content, 'utf8');
+      return { success: true, path: filePath };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  });
+
+  ipcMain.handle('get-scripts-dir', () => {
+    const dir = path.join(config.configDir, '..', 'scripts');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  });
+
+  ipcMain.handle('browse-folder', async (e, title) => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: title || 'Select Folder',
+      properties: ['openDirectory']
+    });
+    if (result.canceled || !result.filePaths.length) return { path: '' };
+    return { path: result.filePaths[0] };
+  });
+
+  ipcMain.handle('deploy-task-service', async (e, task) => {
+    try {
+      if (!task || !task.Id || !task.ScriptPath) {
+        logger.error('Deploy failed: invalid task data', null, { taskId: task?.Id });
+        return { success: false, message: 'Invalid task data' };
+      }
+
+      // Check if NSSM is installed
+      const nssmCheck = serviceManager.checkNssm();
+      if (!nssmCheck.installed) {
+        return { success: false, message: 'NSSM is not installed. Go to Services > Check NSSM to install it first.' };
+      }
+
+      // Check if script exists
+      const fs = require('fs');
+      if (!fs.existsSync(task.ScriptPath)) {
+        return { success: false, message: `Script not found: ${task.ScriptPath}` };
+      }
+
+      const { wrapperPath, serviceName } = wrapperGenerator.generateWrapper(task);
+
+      // Stop existing service if any
+      const existingInfo = serviceManager.getServiceInfo(serviceName);
+      if (existingInfo) {
+        serviceManager.stopService(serviceName);
+        serviceManager.uninstallService(serviceName);
+        // Wait a moment for the service to be fully removed
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      const result = serviceManager.installService(serviceName, 'powershell.exe', `-ExecutionPolicy Bypass -NoProfile -File "${wrapperPath}"`, path.dirname(wrapperPath), 'Automatic');
+      if (!result.success) {
+        return { success: false, message: result.message || 'Failed to install service' };
+      }
+
+      // Configure NSSM restart behavior:
+      // - Restart on failure (delay 5000ms)
+      // - Exit with no error = don't restart (graceful stop)
+      // - Exit with error = restart after delay
+      serviceManager._runNssm('set', serviceName, 'AppExit', 'Default', 'Restart');
+      serviceManager._runNssm('set', serviceName, 'AppRestartDelay', '5000');
+
+      // Set process priority to below normal (less resource usage)
+      serviceManager._runNssm('set', serviceName, 'AppPriority', 'BELOW_NORMAL_PRIORITY_CLASS');
+
+      // Start the service
+      const startResult = serviceManager.startService(serviceName);
+      logger.auditServiceDeployed(task.Id, serviceName);
+
+      // Verify the service actually started (check after 5s)
+      setTimeout(() => {
+        const info = serviceManager.getServiceInfo(serviceName);
+        if (info) {
+          if (info.Status === 'Running') {
+            logger.log('INFO', `Service ${serviceName} verified running`);
+          } else {
+            logger.error(`Service ${serviceName} installed but status: ${info.Status}`, null, { taskId: task.Id, status: info.Status });
+          }
+        }
+      }, 5000);
+
+      sendServiceNotification('Deployed', serviceName, true, `Task: ${task.Name}`);
+      return { success: true, serviceName, wrapperPath, message: `Service ${serviceName} installed and started` };
+    } catch (err) {
+      logger.error('Deploy failed', err, { taskId: task?.Id });
+      sendServiceNotification('Deploy Failed', task?.Name || 'Unknown', false, err.message);
+      return { success: false, message: `Deploy failed: ${err.message}` };
+    }
+  });
+
+  ipcMain.handle('undeploy-task-service', async (e, task) => {
+    try {
+      if (!task || !task.Id) return { success: false, message: 'Invalid task' };
+      const serviceName = `CronMaster_${task.Id.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}`;
+      serviceManager.stopService(serviceName);
+      const result = serviceManager.uninstallService(serviceName);
+      wrapperGenerator.removeWrapper(task.Id);
+      logger.auditServiceUndeployed(task.Id, serviceName);
+      sendServiceNotification('Undeployed', serviceName, true, `Task: ${task.Name}`);
+      return result;
+    } catch (err) {
+      logger.error('Undeploy failed', err, { taskId: task?.Id });
+      sendServiceNotification('Undeploy Failed', task?.Name || 'Unknown', false, err.message);
+      return { success: false, message: `Undeploy failed: ${err.message}` };
+    }
+  });
+
+  ipcMain.handle('get-task-service-status', (e, taskId) => {
+    try {
+      if (!taskId) return { serviceName: '', installed: false, status: null };
+      // Check NSSM is available first
+      const nssmCheck = serviceManager.checkNssm();
+      if (!nssmCheck.installed) {
+        return { serviceName: '', installed: false, status: null, nssmAvailable: false };
+      }
+      const serviceName = `CronMaster_${String(taskId).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}`;
+      const info = serviceManager.getServiceInfo(serviceName);
+      const wrapperPath = wrapperGenerator.getWrapperPath(taskId);
+      return { serviceName, installed: !!info, status: info ? info.Status : null, nssmAvailable: true, wrapperPath };
+    } catch (err) {
+      logger.error('Failed to check task service status', err, { taskId });
+      return { serviceName: '', installed: false, status: null, nssmAvailable: false };
+    }
+  });
+
+  // ─── Backup Profiles ───
+  ipcMain.handle('get-backup-profiles', () => backupManager.getAllProfiles());
+  ipcMain.handle('create-backup-profile', (e, data) => backupManager.createProfile(data));
+  ipcMain.handle('update-backup-profile', (e, data) => backupManager.updateProfile(data));
+  ipcMain.handle('delete-backup-profile', (e, id) => backupManager.deleteProfile(id));
+  ipcMain.handle('run-backup', async (e, profileId) => {
+    try {
+      const result = await backupManager.executeBackup(profileId);
+      return result;
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  });
+  ipcMain.handle('test-mysql-connection', (e, host, port, user, pass) => backupManager.testConnection(host, port, user, pass));
+  ipcMain.handle('list-mysql-databases', (e, host, port, user, pass) => backupManager.listDatabases(host, port, user, pass));
+  ipcMain.handle('export-backup-profile', (e, id) => {
+    const dialog = require('electron').dialog;
+    const win = BrowserWindow.getFocusedWindow();
+    const result = dialog.showSaveDialogSync(win, { title: 'Export Backup Profile', defaultPath: `backup-profile-${id}.json`, filters: [{ name: 'JSON', extensions: ['json'] }] });
+    if (result) return backupManager.exportProfile(id, result);
+    return { success: false, message: 'Cancelled' };
+  });
+  ipcMain.handle('import-backup-profile', async () => {
+    const dialog = require('electron').dialog;
+    const win = BrowserWindow.getFocusedWindow();
+    const result = dialog.showOpenDialogSync(win, { title: 'Import Backup Profile', filters: [{ name: 'JSON', extensions: ['json'] }], properties: ['openFile'] });
+    if (result && result[0]) return backupManager.importProfile(result[0]);
+    return { success: false, message: 'Cancelled' };
+  });
+  ipcMain.handle('check-mysqldump', () => backupManager.getStatus());
+
+  ipcMain.handle('test-ftp-connection', async (e, config) => {
+    try {
+      const ftp = require('basic-ftp');
+      const client = new ftp.Client();
+      client.ftp.verbose = false;
+      await client.access({ host: config.host, user: config.user, password: config.password, port: 21 });
+      if (config.path) await client.cd(config.path);
+      await client.close();
+      return { success: true, message: 'FTP connection successful' };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  });
+
+  ipcMain.handle('test-sftp-connection', async (e, cfg) => {
+    try {
+      const { Client } = require('ssh2-sftp-client');
+      const sftp = new Client();
+      await sftp.connect({ host: cfg.host, port: parseInt(cfg.port) || 22, username: cfg.user, password: cfg.password });
+      if (cfg.path) await sftp.cwd(cfg.path);
+      await sftp.end();
+      return { success: true, message: 'SFTP connection successful' };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  });
+  ipcMain.handle('set-mysqldump-path', (e, p) => backupManager.setCustomPath(p));
+  ipcMain.handle('download-mysqldump', async () => {
+    const targetDir = path.join(app.getPath('userData'), 'mysql-tools');
+    return await backupManager.downloadMysqldump(targetDir);
+  });
+
+  // ─── API Server ───
+  ipcMain.handle('api-server-start', async (e, port) => {
+    try {
+      if (apiServer && apiServer.isRunning()) return { success: false, message: 'API server already running' };
+      apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator);
+      const result = await apiServer.start(port);
+      config.setSetting('ApiEnabled', true);
+      if (port) config.setSetting('ApiPort', port);
+      config.save();
+      return result;
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  });
+  ipcMain.handle('api-server-stop', async () => {
+    try {
+      if (!apiServer) return { success: true, message: 'Not running' };
+      const result = await apiServer.stop();
+      config.setSetting('ApiEnabled', false);
+      config.save();
+      return result;
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  });
+  ipcMain.handle('api-server-status', () => {
+    return {
+      running: apiServer ? apiServer.isRunning() : false,
+      port: apiServer ? apiServer.port : config.getSetting('ApiPort', 7600),
+      url: apiServer && apiServer.isRunning() ? `http://localhost:${apiServer.port}` : null
+    };
+  });
+
+  // ─── Settings ───
+  ipcMain.handle('get-setting', (e, key, defaultVal) => config.getSetting(key, defaultVal));
+  ipcMain.handle('set-setting', (e, key, value) => {
+    const old = config.getSetting(key);
+    config.setSetting(key, value);
+    config.save();
+    logger.auditSettingsChanged(key, old, value);
+  });
+  ipcMain.handle('get-profiles', () => config.getProfileList());
+  ipcMain.handle('load-profile', (e, name) => {
+    const oldProfile = config.getSetting('_activeProfile', 'default');
+    config.loadProfile(name);
+    logger.auditProfileSwitched(oldProfile, name);
+  });
+
+  // ─── Cron Validation ───
+  ipcMain.handle('validate-cron', (e, expr) => cronParser.validate(expr));
+  ipcMain.handle('get-cron-description', (e, expr) => cronParser.getDescription(expr));
+  ipcMain.handle('get-next-run', (e, expr) => {
+    const next = cronParser.getNextRunTime(expr);
+    return next ? next.toISOString() : null;
+  });
+
+  // ─── Dialog ───
+  ipcMain.handle('open-script-dialog', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      filters: [
+        { name: 'PowerShell Scripts', extensions: ['ps1'] },
+        { name: 'Executables', extensions: ['exe'] },
+        { name: 'Batch Files', extensions: ['bat', 'cmd'] },
+        { name: 'All Files', extensions: ['*'] }
+      ],
+      properties: ['openFile']
+    });
+    if (!result.canceled && result.filePaths.length > 0) return { success: true, path: result.filePaths[0] };
+    return { success: false };
+  });
+
+  // ─── System Tray ───
+  ipcMain.handle('get-tray-settings', () => ({
+    closeToTray: config.getSetting('CloseToTray', true),
+    startWithWindows: config.getSetting('StartWithWindows', false)
+  }));
+
+  ipcMain.handle('set-close-to-tray', (e, enabled) => {
+    const old = config.getSetting('CloseToTray', true);
+    config.setSetting('CloseToTray', enabled);
+    config.save();
+    logger.auditSettingsChanged('CloseToTray', old, enabled);
+  });
+
+  ipcMain.handle('set-start-with-windows', (e, enabled) => {
+    const old = config.getSetting('StartWithWindows', false);
+    config.setSetting('StartWithWindows', enabled);
+    config.save();
+    app.setLoginItemSettings({ openAtLogin: enabled, path: app.getPath('exe') });
+    logger.auditSettingsChanged('StartWithWindows', old, enabled);
+  });
+
+  // ─── Window Controls ───
+  ipcMain.handle('window-minimize', () => mainWindow.minimize());
+  ipcMain.handle('window-maximize', () => {
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
+  });
+  ipcMain.handle('window-close', () => {
+    const closeToTray = config.getSetting('CloseToTray', true);
+    if (closeToTray) {
+      mainWindow.hide();
+    } else {
+      isQuitting = true;
+      mainWindow.close();
+    }
+  });
+
+  // ─── Log Access (for UI) ───
+  ipcMain.handle('get-logs', () => logger.getRecentLogs(200));
+  ipcMain.handle('get-errors', () => logger.getRecentErrors(200));
+  ipcMain.handle('get-audit-logs', () => logger.getRecentAudit(200));
+  ipcMain.handle('get-log-stats', () => logger.getStats());
+
+  ipcMain.handle('export-logs', async (e, type, format) => {
+    const filters = format === 'csv'
+      ? [{ name: 'CSV', extensions: ['csv'] }]
+      : format === 'json'
+        ? [{ name: 'JSON', extensions: ['json'] }]
+        : [{ name: 'Text', extensions: ['log', 'txt'] }];
+
+    const result = await dialog.showSaveDialog(mainWindow, { filters });
+    if (result.canceled || !result.filePath) return { success: false, message: 'Cancelled' };
+
+    if (type === 'errors') return logger.exportErrors(result.filePath, format);
+    if (type === 'audit') return logger.exportAudit(result.filePath, format);
+    return logger.exportLogs(result.filePath, format);
+  });
+
+  ipcMain.handle('renderer-error', (e, errorData) => {
+    logger.error(`Renderer: ${errorData.message}`, null, {
+      source: 'renderer',
+      stack: errorData.stack,
+      filename: errorData.filename,
+      lineno: errorData.lineno,
+      colno: errorData.colno
+    });
+  });
+}
+
+// Global error handlers
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
+  if (logger) {
+    logger.error('Uncaught exception', err, { source: 'main-process' });
+  }
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason);
+  if (logger) {
+    const err = reason instanceof Error ? reason : new Error(String(reason));
+    logger.error('Unhandled rejection', err, { source: 'main-process' });
+  }
+});
+
+app.whenReady().then(() => {
+  try {
+    initComponents();
+    registerIPC();
+    createWindow();
+    createTray();
+    startScheduler();
+
+    // Start API server if enabled
+    const apiEnabled = config.getSetting('ApiEnabled', false);
+    if (apiEnabled) {
+      apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator);
+      apiServer.start().catch(err => {
+        logger.error('API Server failed to start', err);
+      });
+    }
+
+    const startWithWin = config.getSetting('StartWithWindows', false);
+    const currentLogin = app.getLoginItemSettings().openAtLogin;
+    if (startWithWin !== currentLogin) {
+      app.setLoginItemSettings({ openAtLogin: startWithWin, path: app.getPath('exe') });
+    }
+  } catch (err) {
+    console.error('Startup error:', err);
+    if (logger) logger.error('Startup failed', err);
+    dialog.showErrorBox('CronMaster Error', `Failed to start: ${err.message}`);
+  }
+});
+
+app.on('window-all-closed', () => {
+  const closeToTray = config ? config.getSetting('CloseToTray', true) : true;
+  if (!closeToTray || isQuitting) {
+    if (schedulerInterval) clearInterval(schedulerInterval);
+    if (logger) {
+      logger.audit('APP_CLOSED', { targetType: 'app' });
+      logger.flush();
+    }
+    app.quit();
+  }
+});
+
+app.on('activate', () => {
+  if (mainWindow) { mainWindow.show(); }
+  else { createWindow(); }
+});

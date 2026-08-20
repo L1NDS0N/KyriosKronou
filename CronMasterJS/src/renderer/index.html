@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kyrion Kronou</title>
+  <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="48x48" href="assets/favicon-48.png">
+  <link rel="apple-touch-icon" href="assets/push-128.png">
+  <meta name="msapplication-TileColor" content="#0a0a14">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <script src="lucide.min.js"></script>
+  <link rel="stylesheet" href="codemirror.min.css">
+  <link rel="stylesheet" href="show-hint.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Animated background blobs -->
+  <div class="bg-effects">
+    <div class="moon"></div>
+    <div class="dot-field"></div>
+    <div class="grid-overlay"></div>
+  </div>
+
+  <!-- Titlebar -->
+  <div id="titlebar">
+    <div class="titlebar-left">
+      <div class="titlebar-brand">
+        <div class="titlebar-logo">
+          <div class="logo-glow"></div>
+          <img src="assets/tray-32.png" alt="Kyrion Kronou" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+          <span style="display:none">CM</span>
+        </div>
+        <span class="brand-name">Κύριος Κρόνου</span>
+      </div>
+    </div>
+    <div id="titlebar-buttons">
+      <button class="tb-btn" id="btn-minimize"><i data-lucide="minus" class="tb-icon"></i></button>
+      <button class="tb-btn" id="btn-maximize"><i data-lucide="square" class="tb-icon"></i></button>
+      <button class="tb-btn tb-close" id="btn-close"><i data-lucide="x" class="tb-icon"></i></button>
+    </div>
+  </div>
+
+  <div id="app">
+    <!-- Sidebar -->
+    <nav id="sidebar">
+      <div class="sidebar-nav">
+        <button class="nav-btn active" data-page="dashboard">
+          <i data-lucide="layout-dashboard"></i><span data-i18n="nav.dashboard">Dashboard</span>
+        </button>
+        <button class="nav-btn" data-page="tasks">
+          <i data-lucide="clock-3"></i><span data-i18n="nav.tasks">Tasks</span>
+        </button>
+        <button class="nav-btn" data-page="backup">
+          <i data-lucide="hard-drive-download"></i><span data-i18n="nav.backups">Backups</span>
+        </button>
+        <button class="nav-btn" data-page="services">
+          <i data-lucide="server"></i><span data-i18n="nav.services">Services</span>
+        </button>
+        <button class="nav-btn" data-page="history">
+          <i data-lucide="activity"></i><span data-i18n="nav.history">History</span>
+        </button>
+      </div>
+      <div class="sidebar-bottom">
+        <div class="sidebar-divider"></div>
+        <button class="nav-btn" data-page="logs">
+          <i data-lucide="scroll-text"></i><span data-i18n="nav.logs">Logs</span>
+        </button>
+        <button class="nav-btn" data-page="settings">
+          <i data-lucide="settings"></i><span data-i18n="nav.settings">Settings</span>
+        </button>
+        <div class="sidebar-footer-credits">
+          <span class="credits-text">Made with <span class="heart">&hearts;</span> by</span>
+          <a href="#" class="credits-link" id="credits-author">l1nds0n</a>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main id="content">
+      <header id="topbar">
+        <div class="topbar-left">
+          <h1 id="page-title" data-i18n="dashboard.title">Dashboard</h1>
+        </div>
+        <div id="topbar-right">
+          <div class="pill" id="service-status">
+            <span class="pill-dot" id="status-dot"></span>
+            <span id="status-text">Checking...</span>
+          </div>
+          <button class="icon-btn" id="btn-refresh" title="Refresh (F5)"><i data-lucide="refresh-cw"></i></button>
+        </div>
+      </header>
+
+      <div id="page-container">
+
+        <!-- ═══ DASHBOARD ═══ -->
+        <section id="page-dashboard" class="page active">
+          <div class="stats-grid">
+            <div class="stat-card stat-blue">
+              <div class="stat-icon"><i data-lucide="layers"></i></div>
+              <div class="stat-info">
+                <div class="stat-label" data-i18n="dashboard.totalTasks">Total Tasks</div>
+                <div class="stat-value" id="stat-total">0</div>
+              </div>
+              <div class="stat-glow"></div>
+            </div>
+            <div class="stat-card stat-green">
+              <div class="stat-icon"><i data-lucide="play-circle"></i></div>
+              <div class="stat-info">
+                <div class="stat-label" data-i18n="dashboard.active">Active</div>
+                <div class="stat-value" id="stat-active">0</div>
+              </div>
+              <div class="stat-glow"></div>
+            </div>
+            <div class="stat-card stat-amber">
+              <div class="stat-icon"><i data-lucide="cpu"></i></div>
+              <div class="stat-info">
+                <div class="stat-label" data-i18n="dashboard.services">Services</div>
+                <div class="stat-value" id="stat-services">0</div>
+              </div>
+              <div class="stat-glow"></div>
+            </div>
+            <div class="stat-card stat-red">
+              <div class="stat-icon"><i data-lucide="alert-triangle"></i></div>
+              <div class="stat-info">
+                <div class="stat-label" data-i18n="dashboard.errorsToday">Errors Today</div>
+                <div class="stat-value" id="stat-errors">0</div>
+              </div>
+              <div class="stat-glow"></div>
+            </div>
+          </div>
+          <div class="glass-card">
+            <div class="glass-card-header">
+              <h3><i data-lucide="activity"></i> Recent Activity</h3>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table" id="recent-table">
+                <thead><tr><th>Time</th><th>Task</th><th>Status</th><th>Duration</th></tr></thead>
+                <tbody id="recent-body"></tbody>
+              </table>
+              <div class="empty-state" id="recent-empty"><i data-lucide="inbox" class="empty-icon"></i><p>No recent activity</p></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ═══ TASKS ═══ -->
+        <section id="page-tasks" class="page">
+          <div class="page-toolbar">
+            <div class="toolbar-left">
+              <button class="btn-glow" id="btn-new-task"><i data-lucide="plus"></i><span data-i18n="tasks.newTask">New Task</span></button>
+              <button class="btn-ghost" id="btn-import"><i data-lucide="upload"></i><span data-i18n="tasks.import">Import</span></button>
+              <button class="btn-ghost" id="btn-export"><i data-lucide="download"></i><span data-i18n="tasks.export">Export</span></button>
+              <button class="btn-ghost" id="btn-toggle-quick"><i data-lucide="terminal"></i><span data-i18n="tasks.quickCreate">Quick Create</span></button>
+            </div>
+            <div class="toolbar-right">
+              <div class="search-input"><i data-lucide="search" class="search-icon"></i><input type="text" id="search-tasks" placeholder="Search tasks..." data-i18n-placeholder="tasks.search"></div>
+            </div>
+          </div>
+
+          <!-- Quick Create Panel -->
+          <div id="quick-create-panel" class="quick-panel">
+            <div class="quick-header">
+              <div class="quick-title"><i data-lucide="terminal"></i> <span>Quick Create</span></div>
+              <div class="quick-format-help">
+                <span class="quick-hint"><kbd>cron</kbd> <span class="sep">|</span> <kbd>name</kbd> <span class="sep">|</span> <kbd>script</kbd> <span class="sep">|</span> <kbd>[args]</kbd> <span class="sep">|</span> <kbd>[description]</kbd></span>
+              </div>
+            </div>
+            <div class="quick-input-wrap">
+              <div id="quick-tasks-list" class="quick-tasks-list"></div>
+              <textarea id="quick-input" class="quick-textarea" rows="4" spellcheck="false" placeholder="Add new tasks (one per line)...&#10;&#10;0 5 * * * | Daily Backup | C:\Scripts\backup.ps1 | Full backup&#10;*/15 * * * * | Health Check | C:\Scripts\healthcheck.exe"></textarea>
+              <div id="quick-preview" class="quick-preview"></div>
+            </div>
+            <div class="quick-actions">
+              <div class="quick-status" id="quick-status"></div>
+              <div class="quick-buttons">
+                <button class="btn-ghost btn-sm" id="btn-quick-clear"><i data-lucide="eraser"></i> Clear</button>
+                <button class="btn-glow btn-sm" id="btn-quick-create"><i data-lucide="plus-circle"></i> Create Tasks</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="tasks-list"></div>
+          <div class="empty-state" id="tasks-empty"><i data-lucide="rocket" class="empty-icon"></i><p data-i18n="tasks.noTasks">No tasks yet. Create one to get started!</p></div>
+        </section>
+
+        <!-- ═══ SERVICES ═══ -->
+        <section id="page-services" class="page">
+          <div class="page-toolbar">
+            <div class="toolbar-left"><span class="toolbar-info"><i data-lucide="server"></i> NSSM Service Management</span></div>
+            <div class="toolbar-right">
+              <label class="filter-toggle" id="filter-managed-label" title="Show only managed services">
+                <input type="checkbox" id="filter-managed-only" checked>
+                <span data-i18n="services.managedOnly">Managed Only</span>
+              </label>
+              <button class="btn-outline" id="btn-refresh-services" title="Refresh"><i data-lucide="refresh-cw"></i></button>
+              <button class="btn-outline" id="btn-check-nssm"><i data-lucide="scan"></i><span data-i18n="services.checkNssm">Check NSSM</span></button>
+              <button class="btn-glow" id="btn-install-service"><i data-lucide="plus"></i><span data-i18n="services.installService">Install Service</span></button>
+            </div>
+          </div>
+          <div class="glass-card">
+            <div class="table-wrap">
+              <table class="data-table" id="services-table">
+                <thead><tr><th>Service Name</th><th>Status</th><th>Application</th><th>Startup</th><th>Actions</th></tr></thead>
+                <tbody id="services-body"></tbody>
+              </table>
+              <div class="empty-state" id="services-empty"><i data-lucide="server-crash" class="empty-icon"></i><p data-i18n="services.noServices">No services found</p><span data-i18n="services.installFirst">Install NSSM first.</span></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ═══ HISTORY ═══ -->
+        <section id="page-history" class="page">
+          <div class="page-toolbar">
+            <div class="toolbar-left">
+              <div class="segmented">
+                <button class="seg-btn active" data-filter="all" data-i18n="history.all">All</button>
+                <button class="seg-btn" data-filter="24h" data-i18n="history.last24h">Last 24h</button>
+                <button class="seg-btn" data-filter="week" data-i18n="history.lastWeek">Last Week</button>
+                <button class="seg-btn" data-filter="month" data-i18n="history.lastMonth">Last Month</button>
+              </div>
+            </div>
+            <div class="toolbar-right">
+              <button class="btn-outline" id="btn-export-csv"><i data-lucide="file-text"></i><span data-i18n="history.exportCsv">Export CSV</span></button>
+            </div>
+          </div>
+          <div class="glass-card">
+            <div class="table-wrap">
+              <table class="data-table" id="history-table">
+                <thead><tr><th>Timestamp</th><th>Task</th><th>Cron</th><th>Status</th><th>Duration</th></tr></thead>
+                <tbody id="history-body"></tbody>
+              </table>
+              <div class="empty-state" id="history-empty"><i data-lucide="history" class="empty-icon"></i><p>No execution history</p></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ═══ BACKUPS ═══ -->
+        <section id="page-backup" class="page">
+          <div class="page-toolbar">
+            <div class="toolbar-left"><span class="toolbar-info"><i data-lucide="hard-drive-download"></i> MySQL Backup Profiles</span></div>
+            <div class="toolbar-right">
+              <button class="btn-outline" id="btn-refresh-backups" title="Refresh"><i data-lucide="refresh-cw"></i></button>
+              <button class="btn-glow" onclick="backupPage.showCreateModal()"><i data-lucide="plus"></i><span>New Profile</span></button>
+            </div>
+          </div>
+          <div class="glass-card" style="padding:10px 16px;margin-bottom:12px;display:flex;align-items:center;gap:12px">
+            <span style="font-size:12px;color:var(--text2)"><i data-lucide="terminal" style="width:14px;height:14px;vertical-align:middle"></i> mysqldump:</span>
+            <div id="mysqldump-status" style="display:flex;align-items:center;gap:8px;flex:1"></div>
+          </div>
+          <div id="backup-profiles-list"></div>
+          <div class="empty-state" id="backup-empty" style="display:none">
+            <i data-lucide="hard-drive-download" class="empty-icon"></i>
+            <p>No backup profiles</p>
+            <span>Create a profile to schedule MySQL backups with compression and remote upload.</span>
+          </div>
+        </section>
+
+        <!-- ═══ SETTINGS ═══ -->
+        <section id="page-settings" class="page">
+          <div class="settings-grid">
+            <div class="glass-card settings-card">
+              <div class="glass-card-header"><h3><i data-lucide="user-cog"></i> Configuration Profile</h3></div>
+              <div class="settings-body">
+                <div class="form-group"><label class="form-label">Profile Name</label><input type="text" class="form-input" id="cfg-profile" value="default"></div>
+                <div class="form-group"><label class="form-label">NSSM Path</label><div class="input-with-btn"><input type="text" class="form-input" id="cfg-nssm" value="nssm"><button class="btn-outline btn-sm">Browse</button></div></div>
+                <div class="form-group">
+                  <label class="form-label" data-i18n="settings.language">Language</label>
+                  <select class="form-input" id="cfg-language">
+                    <option value="en">🇺🇸 English</option>
+                    <option value="pt-BR">🇧🇷 Português (Brasil)</option>
+                  </select>
+                </div>
+                <button class="btn-glow" id="btn-save-settings"><i data-lucide="save"></i><span data-i18n="settings.save">Save Settings</span></button>
+              </div>
+            </div>
+            <div class="glass-card settings-card">
+              <div class="glass-card-header"><h3><i data-lucide="monitor"></i> System Tray</h3></div>
+              <div class="settings-body">
+                <div class="toggle-row">
+                  <div class="toggle-info">
+                    <div class="toggle-label">Minimize to Tray on Close</div>
+                    <div class="toggle-desc">When clicking X, the app hides to the system tray instead of closing</div>
+                  </div>
+                  <label class="toggle-switch"><input type="checkbox" id="cfg-close-to-tray" checked><span class="toggle-slider"></span></label>
+                </div>
+                <div class="toggle-row">
+                  <div class="toggle-info">
+                    <div class="toggle-label">Start with Windows</div>
+                    <div class="toggle-desc">Automatically launch Kyrion Kronou when Windows starts</div>
+                  </div>
+                  <label class="toggle-switch"><input type="checkbox" id="cfg-start-windows"><span class="toggle-slider"></span></label>
+                </div>
+              </div>
+            </div>
+            <div class="glass-card settings-card">
+              <div class="glass-card-header"><h3><i data-lucide="bell"></i> Notifications</h3></div>
+              <div class="settings-body">
+                <div class="toggle-row">
+                  <div class="toggle-info">
+                    <div class="toggle-label">Push Notifications</div>
+                    <div class="toggle-desc">Show desktop notifications when tasks execute, succeed, or fail</div>
+                  </div>
+                  <label class="toggle-switch"><input type="checkbox" id="cfg-notifications" checked><span class="toggle-slider"></span></label>
+                </div>
+              </div>
+            </div>
+            <div class="glass-card settings-card">
+              <div class="glass-card-header"><h3><i data-lucide="globe"></i> API Server</h3></div>
+              <div class="settings-body">
+                <div class="toggle-row">
+                  <div class="toggle-info">
+                    <div class="toggle-label">Enable REST API</div>
+                    <div class="toggle-desc">Start an HTTP server for managing tasks via API and web dashboard</div>
+                  </div>
+                  <label class="toggle-switch"><input type="checkbox" id="cfg-api-enabled"><span class="toggle-slider"></span></label>
+                </div>
+                <div class="toggle-row">
+                  <div class="toggle-info">
+                    <div class="toggle-label">API Port</div>
+                    <div class="toggle-desc">HTTP port for the API server (default: 7600)</div>
+                  </div>
+                  <input type="number" class="form-input" id="cfg-api-port" value="7600" min="1024" max="65535" style="width:80px;text-align:center">
+                </div>
+                <div id="api-server-status" style="margin-top:8px;display:none">
+                  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                    <span class="badge" id="api-status-badge" style="font-size:11px"></span>
+                    <a id="api-dashboard-link" href="#" target="_blank" style="color:var(--primary);font-size:12px;text-decoration:none;display:none">Web Dashboard →</a>
+                    <a id="api-docs-link" href="#" target="_blank" style="color:var(--primary);font-size:12px;text-decoration:none;display:none">API Docs →</a>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="glass-card settings-card">
+              <div class="glass-card-header"><h3><i data-lucide="keyboard"></i> Keyboard Shortcuts</h3></div>
+              <div class="settings-body">
+                <div class="shortcut-row"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>N</kbd><span>New Task</span></div>
+                <div class="shortcut-row"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>E</kbd><span>Export</span></div>
+                <div class="shortcut-row"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>I</kbd><span>Import</span></div>
+                <div class="shortcut-row"><kbd>F5</kbd><span>Refresh</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ═══ LOGS ═══ -->
+        <section id="page-logs" class="page">
+          <div class="page-toolbar">
+            <div class="toolbar-left">
+              <div class="logs-tabs">
+                <button class="logs-tab active" data-log-tab="errors"><i data-lucide="alert-circle"></i> Errors</button>
+                <button class="logs-tab" data-log-tab="audit"><i data-lucide="shield"></i> Audit</button>
+                <button class="logs-tab" data-log-tab="app"><i data-lucide="scroll-text"></i> App</button>
+              </div>
+            </div>
+            <div class="toolbar-right">
+              <button class="btn-ghost btn-sm" id="btn-export-logs"><i data-lucide="download"></i> Export</button>
+              <button class="icon-btn" id="btn-refresh-logs" title="Refresh"><i data-lucide="refresh-cw"></i></button>
+            </div>
+          </div>
+
+          <div class="logs-stats" id="logs-stats"></div>
+
+          <div class="glass-card">
+            <div class="table-wrap">
+              <div id="logs-table-wrap">
+                <div class="empty-state" id="logs-empty"><i data-lucide="scroll-text" class="empty-icon"></i><p data-i18n="logs.noLogs">No logs yet</p><span data-i18n="logs.noLogsDesc">Logs will appear here as the application runs.</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Modal -->
+  <div id="modal-overlay" class="hidden"><div id="modal-content"><div id="modal-body"></div></div></div>
+
+  <!-- Toast -->
+  <div id="toast-container"></div>
+
+  <script src="codemirror.min.js"></script>
+  <script src="codemirror-modes/powershell.min.js"></script>
+  <script src="codemirror-modes/shell.min.js"></script>
+  <script src="codemirror-modes/vb.min.js"></script>
+  <script src="show-hint.min.js"></script>
+  <script src="matchbrackets.min.js"></script>
+  <script src="closebrackets.min.js"></script>
+  <script src="active-line.min.js"></script>
+  <script src="i18n.js"></script>
+  <script src="smartCron.js"></script>
+  <script src="quickCreate.js"></script>
+  <script src="quickAssist.js"></script>
+  <script src="scriptEditor.js"></script>
+  <script src="backupPage.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

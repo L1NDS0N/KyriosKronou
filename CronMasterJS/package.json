@@ -1,0 +1,86 @@
+{
+  "name": "cronmaster",
+  "version": "1.0.0",
+  "description": "Modern Task Scheduler with Cron Support — NSSM Service Manager",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --x64",
+    "build:portable": "electron-packager . CronMaster --platform=win32 --arch=x64 --out=build --overwrite --asar --icon build-resources/icon.ico",
+    "build:installer": "electron-builder --win --x64 --config",
+    "test": "mocha tests/*.js --timeout 10000",
+    "pack": "electron-builder --dir"
+  },
+  "author": "l1nds0n",
+  "license": "MIT",
+  "build": {
+    "appId": "com.cronmaster.app",
+    "productName": "CronMaster",
+    "copyright": "Copyright © 2026 l1nds0n",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build-resources"
+    },
+    "files": [
+      "src/**/*",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "src/renderer/lucide.min.js",
+        "to": "renderer/lucide.min.js"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build-resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "installerIcon": "build-resources/icon.ico",
+      "uninstallerIcon": "build-resources/icon.ico",
+      "installerHeaderIcon": "build-resources/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "CronMaster",
+      "license": "LICENSE",
+      "installerSidebar": "build-resources/sidebar.bmp",
+      "uninstallerSidebar": "build-resources/sidebar.bmp",
+      "warningsAsErrors": false
+    },
+    "portable": {
+      "artifactName": "CronMaster-${version}-portable.exe"
+    }
+  },
+  "devDependencies": {
+    "chai": "^4.5.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.13.3",
+    "electron-packager": "^17.1.2",
+    "mocha": "^11.8.0"
+  },
+  "dependencies": {
+    "basic-ftp": "^6.2.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "lucide": "^1.33.0",
+    "pngjs": "^7.0.0",
+    "ssh2-sftp-client": "^12.1.1"
+  }
+}
