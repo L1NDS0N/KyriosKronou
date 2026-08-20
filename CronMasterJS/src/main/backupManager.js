@@ -567,41 +567,61 @@ class BackupManager {
     return removed;
   }
 
-  // ─── Test Connection ───
+  // ─── Test Connection (uses mysql2 driver, not mysqldump) ───
   testConnection(host, port, user, password) {
     return new Promise((resolve) => {
-      if (!this.mysqldumpPath) {
-        resolve({ success: false, message: 'mysqldump not found' });
+      let mysql;
+      try { mysql = require('mysql2/promise'); } catch (e) {
+        resolve({ success: false, message: 'mysql2 driver not installed. Run: npm install mysql2' });
         return;
       }
-      const cmd = `"${this.mysqldumpPath}" --host="${host}" --port=${port} --user="${user}" --password="${password}" --no-data --databases information_schema 2>&1`;
-      exec(cmd, { timeout: 10000, windowsHide: true }, (error, stdout, stderr) => {
-        const output = ((stdout || '') + (stderr || '')).trim();
-        if (error) {
-          const msg = this._cleanMysqlError(output || error.message);
-          resolve({ success: false, message: msg });
-        } else {
-          resolve({ success: true, message: 'Connection OK' });
-        }
+      const conn = mysql.createConnection({
+        host: host || 'localhost',
+        port: parseInt(port) || 3306,
+        user: user || 'root',
+        password: password || '',
+        connectTimeout: 10000
+      });
+      conn.then(connection => {
+        connection.query('SELECT 1 AS ok').then(() => {
+          connection.end();
+          resolve({ success: true, message: 'Connection successful' });
+        }).catch(err => {
+          connection.end().catch(() => {});
+          resolve({ success: false, message: err.message });
+        });
+      }).catch(err => {
+        resolve({ success: false, message: err.message });
       });
     });
   }
 
-  // List databases on a connection
+  // List databases (uses mysql2 driver, not mysqldump)
   listDatabases(host, port, user, password) {
     return new Promise((resolve) => {
-      if (!this.mysqldumpPath) { resolve({ success: false, databases: [] }); return; }
-      const cmd = `"${this.mysqldumpPath}" --host="${host}" --port=${port} --user="${user}" --password="${password}" --list-databases --no-data 2>&1`;
-      exec(cmd, { timeout: 10000, windowsHide: true }, (error, stdout) => {
-        if (error) {
-          const msg = this._cleanMysqlError(error.message);
-          resolve({ success: false, databases: [], message: msg });
-          return;
-        }
-        const dbs = (stdout || '').split('\n')
-          .map(l => l.trim())
-          .filter(l => l && !l.startsWith('--') && !l.startsWith('Database') && l.length > 0);
-        resolve({ success: true, databases: dbs });
+      let mysql;
+      try { mysql = require('mysql2/promise'); } catch (e) {
+        resolve({ success: false, databases: [], message: 'mysql2 driver not installed' });
+        return;
+      }
+      const conn = mysql.createConnection({
+        host: host || 'localhost',
+        port: parseInt(port) || 3306,
+        user: user || 'root',
+        password: password || '',
+        connectTimeout: 10000
+      });
+      conn.then(connection => {
+        connection.query('SHOW DATABASES').then(([rows]) => {
+          connection.end();
+          const dbs = rows.map(r => r.Database).filter(d => d && !['information_schema', 'performance_schema'].includes(d));
+          resolve({ success: true, databases: dbs });
+        }).catch(err => {
+          connection.end().catch(() => {});
+          resolve({ success: false, databases: [], message: err.message });
+        });
+      }).catch(err => {
+        resolve({ success: false, databases: [], message: err.message });
       });
     });
   }
