@@ -65,9 +65,10 @@ function showToast(message, type = 'info') {
 // ============================================================
 // Modal (with Escape and click-outside)
 // ============================================================
-function showModal(html) {
+function showModal(html, wide) {
   document.getElementById('modal-body').innerHTML = html;
   document.getElementById('modal-overlay').classList.remove('hidden');
+  document.getElementById('modal-content').classList.toggle('wizard-wide', !!wide);
   lucide.createIcons();
   // Focus first input
   setTimeout(() => {
@@ -75,7 +76,10 @@ function showModal(html) {
     if (firstInput) firstInput.focus();
   }, 100);
 }
-function hideModal() { document.getElementById('modal-overlay').classList.add('hidden'); }
+function hideModal() {
+  document.getElementById('modal-overlay').classList.add('hidden');
+  document.getElementById('modal-content').classList.remove('wizard-wide');
+}
 document.getElementById('modal-overlay').addEventListener('click', (e) => {
   if (e.target === document.getElementById('modal-overlay')) hideModal();
 });

@@ -216,34 +216,98 @@ class BackupPage {
     const stepIcons = ['database', 'list', 'hard-drive', 'upload', 'clock'];
 
     showModal(`
-      <h2><i data-lucide="${isEdit ? 'pencil' : 'plus-circle'}"></i> ${isEdit ? 'Edit' : 'New'} Backup Profile</h2>
+      <div class="wizard-layout">
+        <div class="wizard-main">
+          <h2><i data-lucide="${isEdit ? 'pencil' : 'plus-circle'}"></i> ${isEdit ? 'Edit' : 'New'} Backup Profile</h2>
 
-      <div class="wizard-tabs">
-        ${steps.map((s, i) => `
-          <div class="wizard-tab ${i === this.currentStep ? 'active' : ''} ${i < this.currentStep ? 'completed' : ''}" onclick="backupPage.goStep(${i})">
-            <div class="wizard-tab-num">${i < this.currentStep ? '<i data-lucide=\"check\" style=\"width:12px;height:12px\"></i>' : (i + 1)}</div>
-            <span class="wizard-tab-label">${s}</span>
+          <div class="wizard-tabs">
+            ${steps.map((s, i) => `
+              <div class="wizard-tab ${i === this.currentStep ? 'active' : ''} ${i < this.currentStep ? 'completed' : ''}" onclick="backupPage.goStep(${i})">
+                <div class="wizard-tab-num">${i < this.currentStep ? '<i data-lucide=\"check\" style=\"width:12px;height:12px\"></i>' : (i + 1)}</div>
+                <span class="wizard-tab-label">${s}</span>
+              </div>
+            `).join('')}
           </div>
-        `).join('')}
-      </div>
 
-      <div class="wizard-content" id="wizard-content">
-        ${this._renderStepContent()}
-      </div>
+          <div class="wizard-content" id="wizard-content">
+            ${this._renderStepContent()}
+          </div>
 
-      <div class="wizard-nav">
-        <div>
-          ${this.currentStep > 0 ? `<button class="btn-outline" onclick="backupPage.prevStep()"><i data-lucide=\"arrow-left\"></i> Back</button>` : ''}
+          <div class="wizard-nav">
+            <div>
+              ${this.currentStep > 0 ? `<button class="btn-outline" onclick="backupPage.prevStep()"><i data-lucide=\"arrow-left\"></i> Back</button>` : ''}
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn-ghost" onclick="hideModal()">Cancel</button>
+              ${isEdit ? `<button class=\"btn-glow\" onclick=\"backupPage.saveProfile()\"><i data-lucide=\"save\"></i> Save</button>` : ''}
+              ${this.currentStep < steps.length - 1
+                ? `<button class=\"btn-outline\" onclick=\"backupPage.nextStep()\">Next <i data-lucide=\"arrow-right\"></i></button>`
+                : `<button class=\"btn-glow\" onclick=\"backupPage.saveProfile()\"><i data-lucide=\"save\"></i> Create Profile</button>`}
+            </div>
+          </div>
         </div>
-        <div style="display:flex;gap:8px">
-          <button class="btn-ghost" onclick="hideModal()">Cancel</button>
-          ${isEdit ? `<button class=\"btn-glow\" onclick=\"backupPage.saveProfile()\"><i data-lucide=\"save\"></i> Save</button>` : ''}
-          ${this.currentStep < steps.length - 1
-            ? `<button class=\"btn-outline\" onclick=\"backupPage.nextStep()\">Next <i data-lucide=\"arrow-right\"></i></button>`
-            : `<button class=\"btn-glow\" onclick=\"backupPage.saveProfile()\"><i data-lucide=\"save\"></i> Create Profile</button>`}
+        <div class="wizard-summary" id="wizard-summary">
+          ${this._renderFloatingSummary()}
         </div>
       </div>
-    `);
+    `, true);
+    lucide.createIcons();
+  }
+
+  _renderFloatingSummary() {
+    const d = this.draft;
+    const dbs = (d.Databases || []).length > 0 ? d.Databases.join(', ') : 'All databases';
+    const uploads = (d.UploadTargets || []).length > 0 ? d.UploadTargets.map(t => t.type.toUpperCase()).join(', ') : 'None';
+    const mode = d.ManagementMode || 'cronmaster';
+    return `
+      <div class="ws-header">
+        <i data-lucide="file-text" style="width:14px;height:14px"></i>
+        <span>Profile Summary</span>
+      </div>
+      <div class="ws-section">
+        <div class="ws-label">Name</div>
+        <div class="ws-value">${esc(d.Name) || '<em style="color:var(--text3)">not set</em>'}</div>
+      </div>
+      <div class="ws-section">
+        <div class="ws-label">Connection</div>
+        <div class="ws-value ws-mono">${esc(d.Host || 'localhost')}:${d.Port || 3306}</div>
+        <div class="ws-sub">${esc(d.User || 'root')}</div>
+      </div>
+      <div class="ws-section">
+        <div class="ws-label">Databases</div>
+        <div class="ws-value">${esc(dbs)}</div>
+      </div>
+      <div class="ws-section">
+        <div class="ws-label">Destination</div>
+        <div class="ws-value ws-mono" style="word-break:break-all">${esc(d.BackupPath) || '<em style="color:var(--text3)">not set</em>'}</div>
+      </div>
+      <div class="ws-section">
+        <div class="ws-label">Compression</div>
+        <div class="ws-value">${d.Compression ? d.Compression.toUpperCase() : 'ZIP'} Level ${d.CompressionLevel || 5}</div>
+      </div>
+      <div class="ws-section">
+        <div class="ws-label">Upload</div>
+        <div class="ws-value">${esc(uploads)}</div>
+      </div>
+      <div class="ws-section">
+        <div class="ws-label">Schedule</div>
+        <div class="ws-value ws-mono">${esc(d.CronExpression) || '* * * * *'}</div>
+      </div>
+      <div class="ws-section">
+        <div class="ws-label">Mode</div>
+        <div class="ws-value">${mode === 'nssm' ? '&#128736; NSSM Service' : '&#9201; Kyrion'}</div>
+      </div>
+      <div class="ws-section">
+        <div class="ws-label">Status</div>
+        <div class="ws-value">${d.Enabled !== false ? '<span style="color:var(--green)">&#9679; Enabled</span>' : '<span style="color:var(--red)">&#9679; Disabled</span>'}</div>
+      </div>
+    `;
+  }
+
+  _updateFloatingSummary() {
+    const el = document.getElementById('wizard-summary');
+    if (!el) return;
+    el.innerHTML = this._renderFloatingSummary();
     lucide.createIcons();
   }
 
@@ -252,12 +316,12 @@ class BackupPage {
     switch (this.currentStep) {
       case 0: return `
         <label class="form-label">Profile Name *</label>
-        <input type="text" class="form-input" id="wiz-name" value="${esc(d.Name)}" placeholder="Daily MySQL Backup" oninput="backupPage.draft.Name=this.value">
+        <input type="text" class="form-input" id="wiz-name" value="${esc(d.Name)}" placeholder="Daily MySQL Backup" oninput="backupPage.draft.Name=this.value; backupPage._updateFloatingSummary()">
 
         <label class="form-label">MySQL Connection</label>
         <div style="display:grid;grid-template-columns:1fr 80px;gap:8px">
-          <div class="form-group"><label class="form-label">Host</label><input type="text" class="form-input" id="wiz-host" value="${esc(d.Host)}" oninput="backupPage.draft.Host=this.value"></div>
-          <div class="form-group"><label class="form-label">Port</label><input type="number" class="form-input" id="wiz-port" value="${d.Port}" oninput="backupPage.draft.Port=parseInt(this.value)||3306"></div>
+          <div class="form-group"><label class="form-label">Host</label><input type="text" class="form-input" id="wiz-host" value="${esc(d.Host)}" oninput="backupPage.draft.Host=this.value; backupPage._updateFloatingSummary()"></div>
+          <div class="form-group"><label class="form-label">Port</label><input type="number" class="form-input" id="wiz-port" value="${d.Port}" oninput="backupPage.draft.Port=parseInt(this.value)||3306; backupPage._updateFloatingSummary()"></div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <div class="form-group"><label class="form-label">User</label><input type="text" class="form-input" id="wiz-user" value="${esc(d.User)}" oninput="backupPage.draft.User=this.value"></div>
@@ -291,7 +355,7 @@ class BackupPage {
       case 2: return `
         <label class="form-label">Backup Destination</label>
         <div style="display:flex;gap:6px;margin-bottom:12px">
-          <input type="text" class="form-input" id="wiz-path" value="${esc(d.BackupPath)}" placeholder="C:\\Backups\\MySQL" oninput="backupPage.draft.BackupPath=this.value" style="flex:1">
+          <input type="text" class="form-input" id="wiz-path" value="${esc(d.BackupPath)}" placeholder="C:\\Backups\\MySQL" oninput="backupPage.draft.BackupPath=this.value; backupPage._updateFloatingSummary()" style="flex:1">
           <button class="btn-outline btn-sm" onclick="backupPage.browseBackupPath()" title="Browse folder"><i data-lucide="folder-open"></i></button>
         </div>
 
@@ -352,7 +416,7 @@ class BackupPage {
 
       case 4: return `
         <label class="form-label">Schedule (Cron Expression)</label>
-        <input type="text" class="form-input" id="wiz-cron" value="${esc(d.CronExpression)}" oninput="backupPage._validateCron(this.value)" placeholder="0 2 * * *" style="margin-bottom:4px;font-family:monospace;font-size:14px;letter-spacing:1px">
+        <input type="text" class="form-input" id="wiz-cron" value="${esc(d.CronExpression)}" oninput="backupPage.draft.CronExpression=this.value; backupPage._validateCron(this.value); backupPage._updateFloatingSummary()" placeholder="0 2 * * *" style="margin-bottom:4px;font-family:monospace;font-size:14px;letter-spacing:1px">
         <div id="cron-validator" style="margin-bottom:8px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.02);border:1px solid var(--border);font-size:11px;min-height:36px">
           ${this._renderCronBreakdown(d.CronExpression)}
         </div>
@@ -384,18 +448,6 @@ class BackupPage {
         <div class="checkbox-row">
           <input type="checkbox" id="wiz-enabled" ${d.Enabled !== false ? 'checked' : ''} onchange="backupPage.draft.Enabled=this.checked">
           <label for="wiz-enabled">Enable this backup profile</label>
-        </div>
-
-        <div style="margin-top:16px;padding:12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,.02)">
-          <h4 style="font-size:13px;margin-bottom:8px">Summary</h4>
-          <div style="font-size:12px;color:var(--text2);display:grid;grid-template-columns:1fr 1fr;gap:4px">
-            <span>Connection:</span><span>${esc(d.Host)}:${d.Port} (${esc(d.User)})</span>
-            <span>Databases:</span><span>${(d.Databases||[]).length > 0 ? d.Databases.join(', ') : 'All'}</span>
-            <span>Destination:</span><span>${esc(d.BackupPath) || '(not set)'}</span>
-            <span>Compression:</span><span>${d.Compression.toUpperCase()} Level ${d.CompressionLevel}</span>
-            <span>Upload:</span><span>${(d.UploadTargets||[]).length > 0 ? d.UploadTargets.map(t=>t.type.toUpperCase()).join(', ') : 'None'}</span>
-            <span>Schedule:</span><span>${esc(d.CronExpression)}</span>
-          </div>
         </div>
       `;
     }
@@ -606,6 +658,7 @@ class BackupPage {
       else if (el.type === 'number' || el.type === 'range') d[key.charAt(0).toUpperCase() + key.slice(1)] = parseInt(el.value) || 0;
       else d[key.charAt(0).toUpperCase() + key.slice(1)] = el.value;
     });
+    this._updateFloatingSummary();
   }
 
   async testWizardConn() {
