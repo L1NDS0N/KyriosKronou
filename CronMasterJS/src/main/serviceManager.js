@@ -5,38 +5,97 @@ const execAsync = promisify(exec);
 const fs = require('fs');
 
 class ServiceManager {
-  constructor(logger) {
+  constructor(logger, configManager) {
     this.logger = logger;
-    this.nssmPath = 'nssm';
+    this.configManager = configManager;
+    this.nssmPath = null; // Will be resolved dynamically
   }
 
-  checkNssm(nssmPath) {
+  // Resolve the NSSM path: config > PATH > common locations
+  _resolveNssmPath() {
+    // 1. Try saved config path
+    if (this.configManager) {
+      try {
+        const saved = this.configManager.getSetting('NssmPath');
+        if (saved && saved !== 'nssm') {
+          if (fs.existsSync(saved)) {
+            try {
+              execSync(`"${saved}" version`, { encoding: 'utf8', timeout: 5000 });
+              this.nssmPath = saved;
+              return saved;
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 2. Try bare 'nssm' (in PATH)
     try {
-      const output = execSync(`"${nssmPath || this.nssmPath}" version`, { encoding: 'utf8', timeout: 5000 });
+      const output = execSync('nssm version', { encoding: 'utf8', timeout: 5000 });
       if (output.includes('NSSM')) {
-        const match = output.match(/NSSM\s+([\d.]+)/);
-        return { installed: true, path: nssmPath || this.nssmPath, version: match ? match[1] : 'unknown' };
+        this.nssmPath = 'nssm';
+        return 'nssm';
       }
     } catch (e) {}
 
+    // 3. Try 'where nssm' to find via Windows PATH
+    try {
+      const whereOut = execSync('where nssm', { encoding: 'utf8', timeout: 5000 }).trim();
+      const firstPath = whereOut.split('\n')[0].trim();
+      if (firstPath && fs.existsSync(firstPath)) {
+        this.nssmPath = firstPath;
+        return firstPath;
+      }
+    } catch (e) {}
+
+    // 4. Try common paths
     const commonPaths = [
-      `${process.env.ProgramData}\\chocolatey\\bin\\nssm.exe`,
+      `${process.env.ProgramData || 'C:\\ProgramData'}\\chocolatey\\bin\\nssm.exe`,
       'C:\\ProgramData\\chocolatey\\bin\\nssm.exe',
       'C:\\nssm\\win64\\nssm.exe',
       'C:\\nssm\\win32\\nssm.exe',
-      `${process.env.ProgramFiles}\\nssm\\nssm.exe`,
-      `${process.env['ProgramFiles(x86)']}\\nssm\\nssm.exe`,
-      `${process.env.USERPROFILE}\\nssm\\nssm.exe`
+      `${process.env.ProgramFiles || 'C:\\Program Files'}\\nssm\\nssm.exe`,
+      `${process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'}\\nssm\\nssm.exe`,
+      `${process.env.USERPROFILE || ''}\\nssm\\nssm.exe`
     ];
 
     for (const p of commonPaths) {
-      if (fs.existsSync(p)) {
-        try {
+      if (!p || p.includes('undefined')) continue;
+      try {
+        if (fs.existsSync(p)) {
           execSync(`"${p}" version`, { encoding: 'utf8', timeout: 5000 });
           this.nssmPath = p;
-          return { installed: true, path: p, version: 'found' };
-        } catch (e) {}
-      }
+          return p;
+        }
+      } catch (e) {}
+    }
+
+    return null;
+  }
+
+  checkNssm(nssmPath) {
+    // If a specific path was passed (not default), check ONLY that path
+    if (nssmPath && nssmPath !== 'nssm') {
+      try {
+        const output = execSync(`"${nssmPath}" version`, { encoding: 'utf8', timeout: 5000 });
+        if (output.includes('NSSM')) {
+          this.nssmPath = nssmPath;
+          const match = output.match(/NSSM\s+([\d.]+)/);
+          return { installed: true, path: nssmPath, version: match ? match[1] : 'unknown' };
+        }
+      } catch (e) {}
+      // Explicit path provided but invalid — do NOT fall through to auto-resolve
+      return { installed: false, path: nssmPath, version: '' };
+    }
+
+    // Auto-resolve NSSM path from config / PATH / common locations
+    const resolved = this._resolveNssmPath();
+    if (resolved) {
+      try {
+        const output = execSync(`"${resolved}" version`, { encoding: 'utf8', timeout: 5000 });
+        const match = (output || '').match(/NSSM\s+([\d.]+)/);
+        return { installed: true, path: resolved, version: match ? match[1] : 'found' };
+      } catch (e) {}
     }
 
     return { installed: false, path: '', version: '' };

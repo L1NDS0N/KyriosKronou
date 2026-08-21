@@ -315,7 +315,7 @@ function initComponents() {
   logger = new Logger(logsDir);
   config = new ConfigManager(configDir, 'default');
   taskManager = new TaskManager(config, logger, cronParser);
-  serviceManager = new ServiceManager(logger);
+  serviceManager = new ServiceManager(logger, config);
   wrapperGenerator = new WrapperGenerator(config, logger);
   backupManager = new BackupManager(config, logger);
 
@@ -1170,13 +1170,18 @@ function registerIPC() {
       if (!nssmCheck.installed) {
         return { installed: false, nssmAvailable: false, status: null };
       }
+      // Auto-save the resolved NSSM path
+      if (nssmCheck.path && nssmCheck.path !== 'nssm') {
+        config.setSetting('NssmPath', nssmCheck.path);
+      }
       const info = serviceManager.getServiceInfo(SERVICE_NAME);
       return {
         installed: !!info,
         status: info ? info.Status : null,
         nssmAvailable: true,
         serviceName: SERVICE_NAME,
-        isServiceMode
+        isServiceMode,
+        nssmPath: nssmCheck.path
       };
     } catch (err) {
       return { installed: false, nssmAvailable: false, status: null, error: err.message };

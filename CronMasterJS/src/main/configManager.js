@@ -58,6 +58,7 @@ class ConfigManager {
 
   setSetting(key, value) {
     this.settings[key] = value;
+    this.save();
   }
 
   getProfileList() {
