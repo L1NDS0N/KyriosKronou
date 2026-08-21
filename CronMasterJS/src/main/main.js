@@ -772,6 +772,15 @@ function registerIPC() {
       // Install via NSSM
       const result = serviceManager.installService(serviceName, 'powershell.exe', `-ExecutionPolicy Bypass -NoProfile -File \"${wrapperPath}\"`, wrappersDir, 'Automatic');
       if (result.success) {
+        // Set NSSM to capture stdout/stderr for debugging
+        const nssmLogDir = path.join(app.getPath('logs'), 'nssm');
+        if (!fs.existsSync(nssmLogDir)) fs.mkdirSync(nssmLogDir, { recursive: true });
+        serviceManager._runNssm('set', serviceName, 'AppStdout', path.join(nssmLogDir, `${serviceName}-stdout.log`));
+        serviceManager._runNssm('set', serviceName, 'AppStderr', path.join(nssmLogDir, `${serviceName}-stderr.log`));
+        serviceManager._runNssm('set', serviceName, 'AppStdoutCreationDisposition', 4);
+        serviceManager._runNssm('set', serviceName, 'AppStderrCreationDisposition', 4);
+        serviceManager._runNssm('set', serviceName, 'AppRotateFiles', 1);
+        serviceManager._runNssm('set', serviceName, 'AppRotateBytes', 1048576);
         serviceManager.startService(serviceName);
         backupManager.updateProfile({ Id: profileId, ManagementMode: 'nssm', NssmServiceName: serviceName });
         sendNotification('Backup Service Deployed', `${serviceName} is now running as an NSSM service`, 'success');
