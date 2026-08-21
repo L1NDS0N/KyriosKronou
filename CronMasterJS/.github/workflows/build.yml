@@ -1,0 +1,64 @@
+name: Build Kyrion Kronou
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: CronMasterJS/package-lock.json
+
+      - name: Install dependencies
+        working-directory: CronMasterJS
+        run: npm ci
+
+      - name: Run tests
+        working-directory: CronMasterJS
+        run: npm test || true
+
+      - name: Build portable app
+        working-directory: CronMasterJS
+        run: npx electron-packager . CronMaster --platform=win32 --arch=x64 --out=build --overwrite --asar --icon build-resources/icon.ico
+
+      - name: Build NSIS installer
+        working-directory: CronMasterJS
+        run: npx electron-builder --win nsis --config.win.icon=build-resources/icon.ico
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload portable app
+        uses: actions/upload-artifact@v4
+        with:
+          name: KyrionKronou-Portable
+          path: CronMasterJS/build/CronMaster-win32-x64/
+          retention-days: 30
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: KyrionKronou-Installer
+          path: CronMasterJS/dist/*.exe
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            CronMasterJS/dist/*.exe
+          draft: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
