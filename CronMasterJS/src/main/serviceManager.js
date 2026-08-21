@@ -164,6 +164,57 @@ class ServiceManager {
     }
   }
 
+  async getServiceInfoAsync(name) {
+    if (!name || !name.trim()) return null;
+    try {
+      const status = await this._runNssmAsync('status', name);
+      if (!status.success && (!status.output || status.output.includes('cannot find the file'))) return null;
+      let statusText = 'Unknown';
+      if (status.output) {
+        if (status.output.includes('SERVICE_RUNNING')) statusText = 'Running';
+        else if (status.output.includes('SERVICE_STOPPED')) statusText = 'Stopped';
+        else if (status.output.includes('SERVICE_PAUSED')) statusText = 'Paused';
+        else if (status.output.includes('SERVICE_START_PENDING')) statusText = 'Starting';
+        else if (status.output.includes('SERVICE_STOP_PENDING')) statusText = 'Stopping';
+      } else if (!status.success) return null;
+      const app = await this._runNssmAsync('get', name, 'Application');
+      const startup = await this._runNssmAsync('get', name, 'Start');
+      let startupType = 'Automatic';
+      if (startup.output && startup.output.includes('SERVICE_DEMAND_START')) startupType = 'Manual';
+      else if (startup.output && startup.output.includes('SERVICE_DISABLED')) startupType = 'Disabled';
+      return { Name: name, Status: statusText, StartupType: startupType, Application: (app.output || '').trim(), ProcessId: 0 };
+    } catch (e) { return null; }
+  }
+
+  async getAllServicesAsync() {
+    const services = [];
+    const seen = new Set();
+    try {
+      const { stdout } = await execAsync(`"${this.nssmPath}" list`, { encoding: 'utf8', timeout: 10000 });
+      const lines = stdout.split('\n').map(l => l.replace(/\r/g, '').trim()).filter(Boolean);
+      for (const name of lines) {
+        if (name.startsWith('HKLM') || name.startsWith('HKCU')) continue;
+        if (!seen.has(name)) {
+          seen.add(name);
+          const info = await this.getServiceInfoAsync(name);
+          if (info) services.push(info);
+        }
+      }
+    } catch (e) {}
+    try {
+      const psCmd = 'powershell -NoProfile -Command "Get-Service | Where-Object { $_.Name -like \'CronMaster*\' -or $_.Name -like \'KyrionBackup*\' } | ForEach-Object { Write-Output $_.Name }"';
+      const { stdout } = await execAsync(psCmd, { encoding: 'utf8', timeout: 10000 });
+      for (const name of stdout.split('\n').map(s => s.replace(/\r/g, '').trim()).filter(Boolean)) {
+        if (!seen.has(name)) {
+          seen.add(name);
+          const info = await this.getServiceInfoAsync(name);
+          if (info) services.push(info);
+        }
+      }
+    } catch (e) {}
+    return services;
+  }
+
   getServiceCount() {
     try {
       const output = execSync(`"${this.nssmPath}" list`, { encoding: 'utf8', timeout: 10000 });
@@ -220,6 +271,32 @@ class ServiceManager {
     const r = this._runNssm('remove', name, 'confirm');
     if (r.success) this.logger.log('INFO', `Service '${name}' uninstalled`);
     return { success: r.success, message: r.success ? 'Uninstalled' : r.message };
+  }
+
+  async uninstallServiceAsync(name) {
+    const r = await this._runNssmAsync('remove', name, 'confirm');
+    if (r.success) this.logger.log('INFO', `Service '${name}' uninstalled`);
+    return { success: r.success, message: r.success ? 'Uninstalled' : r.message };
+  }
+
+  async installServiceAsync(name, appPath, args, workDir, startupType) {
+    try {
+      const installArgs = ['install', name, appPath];
+      if (args) installArgs.push(args);
+      const result = await this._runNssmAsync(...installArgs);
+      if (!result.success) return { success: false, message: result.message };
+      if (workDir && fs.existsSync(workDir)) {
+        await this._runNssmAsync('set', name, 'AppDirectory', workDir);
+      }
+      const startupMap = { 'Automatic': 'SERVICE_AUTO_START', 'Manual': 'SERVICE_DEMAND_START', 'Disabled': 'SERVICE_DISABLED' };
+      if (startupMap[startupType]) {
+        await this._runNssmAsync('set', name, 'Start', startupMap[startupType]);
+      }
+      this.logger.log('INFO', `Service '${name}' installed`);
+      return { success: true, message: 'Service installed' };
+    } catch (e) {
+      return { success: false, message: e.message };
+    }
   }
 }
 

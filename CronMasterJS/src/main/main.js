@@ -378,7 +378,7 @@ function registerIPC() {
   });
 
   // ─── Services ───
-  ipcMain.handle('get-services', () => serviceManager.getAllServices());
+  ipcMain.handle('get-services', async () => serviceManager.getAllServicesAsync());
   ipcMain.handle('get-service-count', () => serviceManager.getServiceCount());
   ipcMain.handle('check-nssm', (e, p) => serviceManager.checkNssm(p));
 
@@ -396,36 +396,37 @@ function registerIPC() {
     return result;
   });
 
-  // ─── Service Management ───
-  ipcMain.handle('install-service', (e, data) => {
-    const result = serviceManager.installService(data.name, data.appPath, data.args, data.workDir, data.startupType);
+  // ─── Service Management (async to avoid UI freeze) ───
+  ipcMain.handle('install-service', async (e, data) => {
+    const result = await serviceManager.installServiceAsync(data.name, data.appPath, data.args, data.workDir, data.startupType);
     if (result.success) logger.auditServiceInstalled(data.name, data.appPath);
     return result;
   });
 
-  ipcMain.handle('start-service', (e, name) => {
-    const result = serviceManager.startService(name);
+  ipcMain.handle('start-service', async (e, name) => {
+    const result = await serviceManager._runNssmAsync('start', name);
     if (result.success) logger.auditServiceStarted(name);
-    return result;
+    return { success: result.success, message: result.success ? 'Started' : result.message };
   });
 
-  ipcMain.handle('stop-service', (e, name) => {
-    const result = serviceManager.stopService(name);
+  ipcMain.handle('stop-service', async (e, name) => {
+    const result = await serviceManager._runNssmAsync('stop', name);
     if (result.success) logger.auditServiceStopped(name);
-    return result;
+    return { success: result.success, message: result.success ? 'Stopped' : result.message };
   });
 
-  ipcMain.handle('restart-service', (e, name) => {
-    const result = serviceManager.restartService(name);
+  ipcMain.handle('restart-service', async (e, name) => {
+    await serviceManager._runNssmAsync('stop', name);
+    const result = await serviceManager._runNssmAsync('start', name);
     if (result.success) {
       logger.auditServiceStopped(name);
       logger.auditServiceStarted(name);
     }
-    return result;
+    return { success: result.success, message: result.success ? 'Restarted' : result.message };
   });
 
-  ipcMain.handle('uninstall-service', (e, name) => {
-    const result = serviceManager.uninstallService(name);
+  ipcMain.handle('uninstall-service', async (e, name) => {
+    const result = await serviceManager.uninstallServiceAsync(name);
     if (result.success) logger.auditServiceUninstalled(name);
     return result;
   });
@@ -822,8 +823,15 @@ function registerIPC() {
     try {
       const profile = backupManager.getProfile(profileId);
       if (!profile || !profile.NssmServiceName) return { success: true, status: null };
-      const info = serviceManager.getServiceInfo(profile.NssmServiceName);
-      return { success: true, status: info };
+      // Use async NSSM calls to avoid blocking main thread
+      const statusResult = await serviceManager._runNssmAsync('status', profile.NssmServiceName);
+      let statusText = null;
+      if (statusResult.output) {
+        if (statusResult.output.includes('SERVICE_RUNNING')) statusText = 'Running';
+        else if (statusResult.output.includes('SERVICE_STOPPED')) statusText = 'Stopped';
+        else if (statusResult.output.includes('SERVICE_PAUSED')) statusText = 'Paused';
+      }
+      return { success: true, status: statusText ? { Status: statusText, Name: profile.NssmServiceName } : null };
     } catch (err) {
       return { success: false, status: null };
     }

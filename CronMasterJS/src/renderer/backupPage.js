@@ -11,8 +11,18 @@ class BackupPage {
   }
 
   async load() {
-    this.profiles = await window.api.getBackupProfiles();
-    this.mysqldumpStatus = await window.api.checkMysqldump();
+    try {
+      const result = await window.api.getBackupProfiles();
+      this.profiles = Array.isArray(result) ? result : [];
+    } catch (e) {
+      console.error('Failed to load backup profiles:', e);
+      this.profiles = [];
+    }
+    try {
+      this.mysqldumpStatus = await window.api.checkMysqldump();
+    } catch (e) {
+      this.mysqldumpStatus = null;
+    }
     this.render();
     this.renderMysqldumpStatus();
   }
