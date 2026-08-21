@@ -99,6 +99,7 @@ class TaskManager {
     return new Promise((resolve) => {
       const startTime = Date.now();
       const scriptPath = task.ScriptPath;
+      const scriptType = (task.ScriptType || '').toLowerCase();
 
       if (!fs.existsSync(scriptPath)) {
         const entry = {
@@ -118,14 +119,40 @@ class TaskManager {
         return;
       }
 
-      const args = task.Arguments ? task.Arguments.split(/\s+/) : [];
       const options = {};
       if (task.WorkingDirectory && fs.existsSync(task.WorkingDirectory)) {
         options.cwd = task.WorkingDirectory;
       }
+      options.windowsHide = true;
+      options.timeout = 300000; // 5 min timeout
 
-      execFile(scriptPath, args, options, (error, stdout, stderr) => {
+      // Build the correct command based on script type
+      const ext = path.extname(scriptPath).toLowerCase();
+      let cmd, cmdArgs;
+
+      if (ext === '.ps1' || scriptType === 'ps1') {
+        // PowerShell: use powershell.exe with the script
+        const userArgs = task.Arguments ? ` ${task.Arguments}` : '';
+        cmd = 'powershell.exe';
+        cmdArgs = ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', scriptPath + userArgs];
+        this.logger.log('INFO', `Executing PowerShell: ${scriptPath}`);
+      } else if (ext === '.bat' || ext === '.cmd' || scriptType === 'bat') {
+        // Batch: use cmd.exe /c
+        const userArgs = task.Arguments ? ` ${task.Arguments}` : '';
+        cmd = 'cmd.exe';
+        cmdArgs = ['/c', '"' + scriptPath + '"' + userArgs];
+        this.logger.log('INFO', `Executing Batch: ${scriptPath}`);
+      } else {
+        // Executable or other: run directly
+        cmd = scriptPath;
+        cmdArgs = task.Arguments ? task.Arguments.split(/\s+/) : [];
+        this.logger.log('INFO', `Executing: ${scriptPath}`);
+      }
+
+      execFile(cmd, cmdArgs, options, (error, stdout, stderr) => {
         const duration = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+        const logMsg = (stdout || '').trim().substring(0, 500);
+        const errMsg = (stderr || '').trim().substring(0, 500);
         const entry = {
           Id: require('crypto').randomUUID(),
           TaskId: task.Id,
@@ -134,11 +161,19 @@ class TaskManager {
           Timestamp: new Date().toISOString(),
           Status: error ? 'Error' : 'Success',
           Duration: duration,
-          Message: error ? (error.message || stderr || 'Unknown error') : (stdout || 'Completed')
+          Message: error ? (error.message || errMsg || 'Unknown error') : (logMsg || 'Completed'),
+          Stdout: logMsg,
+          Stderr: errMsg
         };
         this.history.unshift(entry);
         this.saveHistory();
-        this.logger.log(error ? 'ERROR' : 'INFO', `Task ${task.Name}: ${entry.Status} (${duration})`);
+        if (error) {
+          this.logger.log('ERROR', `Task ${task.Name} FAILED (${duration}): ${error.message}`);
+          if (errMsg) this.logger.log('ERROR', `  stderr: ${errMsg}`);
+          if (logMsg) this.logger.log('ERROR', `  stdout: ${logMsg}`);
+        } else {
+          this.logger.log('INFO', `Task ${task.Name} completed (${duration}): ${logMsg || 'OK'}`);
+        }
         resolve(entry);
       });
     });
