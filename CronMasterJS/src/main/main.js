@@ -821,7 +821,7 @@ function registerIPC() {
 
   ipcMain.handle('test-sftp-connection', async (e, cfg) => {
     try {
-      const { Client } = require('ssh2-sftp-client');
+      const Client = require('ssh2-sftp-client');
       const sftp = new Client();
       await sftp.connect({ host: cfg.host, port: parseInt(cfg.port) || 22, username: cfg.user, password: cfg.password });
       if (cfg.path) await sftp.cwd(cfg.path);
