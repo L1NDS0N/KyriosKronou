@@ -17,6 +17,84 @@ const BackupManager = require('./backupManager');
 const isServiceMode = process.argv.includes('--service');
 const SERVICE_NAME = 'KyrionKronou';  // NSSM service name for the scheduler itself
 
+// ─── Service Mode: Bootstrap immediately (don't wait for app.whenReady) ───
+// Electron's app.whenReady() may never resolve in a Windows service context
+// because GPU/rendering initialization fails without an interactive desktop.
+if (isServiceMode) {
+  try {
+    // Init components synchronously
+    const configDir = app.getPath('userData');
+    if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+    const svcLogger = new Logger(configDir);
+    const svcConfig = new ConfigManager(configDir);
+    const svcCronParser = new CronParser();
+    const svcTaskManager = new TaskManager(svcConfig, svcLogger, svcCronParser);
+    const svcBackupManager = new BackupManager(svcConfig, svcLogger);
+
+    svcLogger.log('INFO', '=== Kyrion Kronou Service Scheduler starting (immediate bootstrap) ===');
+    svcLogger.log('INFO', `PID: ${process.pid}, Config: ${configDir}`);
+    svcLogger.audit('SERVICE_STARTED', { targetType: 'service', after: { pid: process.pid } });
+
+    // Write PID file
+    try {
+      const pidFile = path.join(configDir, 'service.pid');
+      fs.writeFileSync(pidFile, process.pid.toString());
+    } catch(e) {}
+
+    // ─── Direct scheduler loop (no Electron dependency) ───
+    let lastRun = {};
+    setInterval(() => {
+      const now = new Date();
+      try {
+        // Tasks
+        const tasks = svcTaskManager.getAllTasks();
+        if (Array.isArray(tasks)) {
+          for (const task of tasks) {
+            if (task.Enabled === false) continue;
+            if (!task.CronExpression) continue;
+            if (svcCronParser.shouldRunNow(task.CronExpression)) {
+              // Prevent double-run within 55 seconds
+              if (lastRun[task.Id] && (now - lastRun[task.Id]) < 55000) continue;
+              lastRun[task.Id] = now;
+              svcLogger.log('INFO', `[Service] Executing task: ${task.Name}`);
+              svcTaskManager.executeTask(task).then(result => {
+                svcLogger.log('INFO', `[Service] Task ${task.Name}: ${result.success !== false ? 'Success' : 'Failed'}`);
+              }).catch(err => {
+                svcLogger.error(`[Service] Task ${task.Name} error`, err);
+              });
+            }
+          }
+        }
+        // Backups
+        const profiles = svcBackupManager.getAllProfiles();
+        if (Array.isArray(profiles)) {
+          for (const profile of profiles) {
+            if (!profile.Enabled) continue;
+            if (!profile.CronExpression) continue;
+            if (svcCronParser.shouldRunNow(profile.CronExpression)) {
+              if (lastRun['bkp_' + profile.Id] && (now - lastRun['bkp_' + profile.Id]) < 55000) continue;
+              lastRun['bkp_' + profile.Id] = now;
+              svcLogger.log('INFO', `[Service] Executing backup: ${profile.Name}`);
+              svcBackupManager.executeBackup(profile.Id).then(result => {
+                svcLogger.log('INFO', `[Service] Backup ${profile.Name}: ${result.success ? 'completed' : 'failed'} ${result.duration || ''}`);
+              }).catch(err => {
+                svcLogger.error(`[Service] Backup ${profile.Name} error`, err);
+              });
+            }
+          }
+        }
+      } catch (err) {
+        svcLogger.error('[Service] Scheduler tick error', err);
+      }
+    }, 15000);
+
+    svcLogger.log('INFO', 'Scheduler loop started (15s interval). Waiting for app.whenReady()...');
+  } catch (err) {
+    console.error('Service bootstrap failed:', err);
+    process.exit(1);
+  }
+}
+
 let mainWindow;
 let tray = null;
 let cronParser, logger, config, taskManager, serviceManager, nssmInstaller;
@@ -1199,6 +1277,14 @@ process.on('unhandledRejection', (reason) => {
     logger.error('Unhandled rejection', err, { source: 'main-process' });
   }
 });
+
+// ─── Timeout for app.whenReady() in service mode ───
+// If Electron can't initialize GPU/rendering, app.whenReady() may never resolve.
+if (isServiceMode) {
+  setTimeout(() => {
+    console.log('[Service] app.whenReady() timeout - continuing with bootstrap scheduler');
+  }, 10000);
+}
 
 app.whenReady().then(() => {
   try {
