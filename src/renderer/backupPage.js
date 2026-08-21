@@ -803,6 +803,21 @@ class BackupPage {
     if (result.success) showToast('Profile exported', 'success');
   }
 
+  async importProfile() {
+    try {
+      const result = await window.api.importBackupProfile();
+      if (result.success && result.profile) {
+        showToast(`Profile "${result.profile.Name}" imported successfully`, 'success');
+        await this.load();
+        this.render();
+      } else if (result.message !== 'Cancelled') {
+        showToast(`Import failed: ${result.message}`, 'error');
+      }
+    } catch (e) {
+      showToast(`Import error: ${e.message}`, 'error');
+    }
+  }
+
   // ─── History Modal ───
   async showHistory(profileId) {
     const profile = this.profiles.find(p => p.Id === profileId);
