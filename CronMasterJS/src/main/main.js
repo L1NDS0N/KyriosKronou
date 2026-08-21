@@ -1,7 +1,8 @@
-// main.js - Electron Main Process (with System Tray + Autostart + Audit Logging)
+// main.js - Electron Main Process (with System Tray + Autostart + Audit Logging + Service Mode)
 const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { execSync } = require('child_process');
 const CronParser = require('./cronParser');
 const Logger = require('./logger');
 const ConfigManager = require('./configManager');
@@ -11,6 +12,10 @@ const NssmInstaller = require('./nssmInstaller');
 const WrapperGenerator = require('./wrapperGenerator');
 const ApiServer = require('./apiServer');
 const BackupManager = require('./backupManager');
+
+// ─── Service Mode Detection ───
+const isServiceMode = process.argv.includes('--service');
+const SERVICE_NAME = 'KyrionKronou';
 
 let mainWindow;
 let tray = null;
@@ -212,6 +217,84 @@ function initComponents() {
 
   logger.log('INFO', 'CronMaster started');
   logger.audit('APP_STARTED', { targetType: 'app', after: { version: app.getVersion() } });
+}
+
+// ─── Service Mode Scheduler (headless, no window) ───
+function startServiceScheduler() {
+  logger.log('INFO', 'Service scheduler started (checking every 15s)');
+  
+  // Run immediately on start
+  runServiceSchedulerTick();
+  
+  // Then every 15 seconds
+  schedulerInterval = setInterval(runServiceSchedulerTick, 15000);
+}
+
+function runServiceSchedulerTick() {
+  const now = new Date();
+  
+  // ── Task scheduler ──
+  try {
+    const dueTasks = taskManager.getDueTasks();
+    dueTasks.forEach(async (task) => {
+      if (task.ManagementMode === 'nssm') return; // NSSM manages itself
+      try {
+        const result = await taskManager.executeTask(task);
+        logger.auditTaskExecuted(task.Id, task.Name, result);
+        logger.log('INFO', `[Service] Task executed: ${task.Name} - ${result.success !== false ? 'Success' : 'Failed'}`);
+      } catch (err) {
+        logger.error(`[Service] Task execution failed: ${task.Name}`, err);
+      }
+    });
+  } catch (err) {
+    logger.error('[Service] Task scheduler tick error', err);
+  }
+  
+  // ── Backup scheduler ──
+  try {
+    const profiles = backupManager.getAllProfiles();
+    profiles.forEach(async (profile) => {
+      if (!profile.Enabled) return;
+      if (profile.ManagementMode === 'nssm') return;
+      if (!cronParser.shouldRunNow(profile.CronExpression)) return;
+      // Prevent double-execution within 55 seconds
+      if (profile.LastRun) {
+        const lastRun = new Date(profile.LastRun);
+        if (now - lastRun < 55000) return;
+      }
+      logger.log('INFO', `[Service] Backup scheduler triggered: ${profile.Name}`);
+      try {
+        const result = await backupManager.executeBackup(profile.Id);
+        logger.log('INFO', `[Service] Backup ${result.success ? 'completed' : 'failed'}: ${profile.Name} - ${result.duration || ''}`);
+      } catch (err) {
+        logger.error(`[Service] Backup scheduler error: ${profile.Name}`, err);
+      }
+    });
+  } catch (err) {
+    logger.error('[Service] Backup scheduler tick error', err);
+  }
+}
+
+// ─── Service Mode IPC (minimal, for health checks) ───
+function registerServiceIPC() {
+  ipcMain.handle('get-service-mode', () => ({ mode: 'service', serviceName: SERVICE_NAME }));
+  ipcMain.handle('get-service-health', () => {
+    try {
+      const tasks = taskManager.getAllTasks();
+      const profiles = backupManager.getAllProfiles();
+      return {
+        success: true,
+        uptime: process.uptime(),
+        tasks: tasks.length,
+        activeTasks: tasks.filter(t => t.Enabled).length,
+        backups: profiles.length,
+        activeBackups: profiles.filter(p => p.Enabled).length,
+        memoryUsage: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB'
+      };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
 }
 
 function startScheduler() {
@@ -975,6 +1058,109 @@ function registerIPC() {
       colno: errorData.colno
     });
   });
+
+  // ─── Kyrion Service Management (install/uninstall as Windows service) ───
+  ipcMain.handle('get-kyrion-service-status', async () => {
+    try {
+      if (!serviceManager.checkNssm().installed) {
+        return { installed: false, nssmAvailable: false, status: null };
+      }
+      const info = serviceManager.getServiceInfo(SERVICE_NAME);
+      return {
+        installed: !!info,
+        status: info ? info.Status : null,
+        nssmAvailable: true,
+        serviceName: SERVICE_NAME,
+        isServiceMode
+      };
+    } catch (err) {
+      return { installed: false, nssmAvailable: false, status: null, error: err.message };
+    }
+  });
+
+  ipcMain.handle('install-kyrion-service', async () => {
+    try {
+      if (!serviceManager.checkNssm().installed) {
+        return { success: false, message: 'NSSM is not installed' };
+      }
+      // Check if already running
+      const existing = serviceManager.getServiceInfo(SERVICE_NAME);
+      if (existing && existing.Status === 'Running') {
+        return { success: false, message: 'Service already installed and running' };
+      }
+      // Remove existing if stopped/failed
+      if (existing) {
+        serviceManager.stopService(SERVICE_NAME);
+        serviceManager.uninstallService(SERVICE_NAME);
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      // Get the current exe path (the one running the GUI)
+      const exePath = app.getPath('exe');
+      const exeDir = path.dirname(exePath);
+      // Install via NSSM: CronMaster.exe --service
+      const result = serviceManager.installService(
+        SERVICE_NAME,
+        exePath,
+        '--service',
+        exeDir,
+        'Automatic'
+      );
+      if (!result.success) {
+        return { success: false, message: result.message || 'Failed to install service' };
+      }
+      // Configure: restart on failure, below normal priority
+      serviceManager._runNssm('set', SERVICE_NAME, 'AppExit', 'Default', 'Restart');
+      serviceManager._runNssm('set', SERVICE_NAME, 'AppRestartDelay', '5000');
+      serviceManager._runNssm('set', SERVICE_NAME, 'AppPriority', 'BELOW_NORMAL_PRIORITY_CLASS');
+      // Start the service
+      const startResult = serviceManager.startService(SERVICE_NAME);
+      logger.audit('KYRION_SERVICE_INSTALLED', { targetType: 'service', after: { serviceName: SERVICE_NAME } });
+      sendServiceNotification('Installed', SERVICE_NAME, true, 'Kyrion Scheduler service installed and started');
+      return { success: true, message: `Service ${SERVICE_NAME} installed and started` };
+    } catch (err) {
+      logger.error('Failed to install Kyrion service', err);
+      return { success: false, message: `Install failed: ${err.message}` };
+    }
+  });
+
+  ipcMain.handle('uninstall-kyrion-service', async () => {
+    try {
+      if (!serviceManager.checkNssm().installed) {
+        return { success: false, message: 'NSSM is not installed' };
+      }
+      serviceManager.stopService(SERVICE_NAME);
+      const result = serviceManager.uninstallService(SERVICE_NAME);
+      logger.audit('KYRION_SERVICE_UNINSTALLED', { targetType: 'service', before: { serviceName: SERVICE_NAME } });
+      sendServiceNotification('Uninstalled', SERVICE_NAME, true, 'Kyrion Scheduler service removed');
+      return result;
+    } catch (err) {
+      logger.error('Failed to uninstall Kyrion service', err);
+      return { success: false, message: `Uninstall failed: ${err.message}` };
+    }
+  });
+
+  ipcMain.handle('restart-kyrion-service', async () => {
+    try {
+      serviceManager.stopService(SERVICE_NAME);
+      await new Promise(r => setTimeout(r, 1000));
+      const result = serviceManager.startService(SERVICE_NAME);
+      logger.audit('KYRION_SERVICE_RESTARTED', { targetType: 'service', after: { serviceName: SERVICE_NAME } });
+      return result;
+    } catch (err) {
+      return { success: false, message: `Restart failed: ${err.message}` };
+    }
+  });
+
+  ipcMain.handle('get-kyrion-service-health', async () => {
+    try {
+      // Check health by querying the running service via a named pipe or temp file
+      const nssmStatus = serviceManager._runNssm('status', SERVICE_NAME);
+      const statusText = (nssmStatus.stdout || '').trim();
+      return { success: true, status: statusText };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
 }
 
 // Global error handlers
@@ -995,29 +1181,43 @@ process.on('unhandledRejection', (reason) => {
 app.whenReady().then(() => {
   try {
     initComponents();
-    registerIPC();
-    createWindow();
-    createTray();
-    startScheduler();
 
-    // Start API server if enabled
-    const apiEnabled = config.getSetting('ApiEnabled', false);
-    if (apiEnabled) {
-      apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator);
-      apiServer.start().catch(err => {
-        logger.error('API Server failed to start', err);
-      });
-    }
+    if (isServiceMode) {
+      // ─── Service Mode: headless scheduler, no window/tray ───
+      logger.log('INFO', 'Starting in SERVICE MODE (headless scheduler)');
+      logger.audit('APP_STARTED_SERVICE', { targetType: 'app', after: { version: app.getVersion(), mode: 'service' } });
+      registerServiceIPC();
+      startServiceScheduler();
 
-    const startWithWin = config.getSetting('StartWithWindows', false);
-    const currentLogin = app.getLoginItemSettings().openAtLogin;
-    if (startWithWin !== currentLogin) {
-      app.setLoginItemSettings({ openAtLogin: startWithWin, path: app.getPath('exe') });
+      // Prevent app from exiting when all windows are closed
+      app.on('window-all-closed', () => { /* keep running */ });
+    } else {
+      // ─── GUI Mode ───
+      registerIPC();
+      createWindow();
+      createTray();
+      startScheduler();
+
+      // Start API server if enabled
+      const apiEnabled = config.getSetting('ApiEnabled', false);
+      if (apiEnabled) {
+        apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator);
+        apiServer.start().catch(err => {
+          logger.error('API Server failed to start', err);
+        });
+      }
+
+      const startWithWin = config.getSetting('StartWithWindows', false);
+      const currentLogin = app.getLoginItemSettings().openAtLogin;
+      if (startWithWin !== currentLogin) {
+        app.setLoginItemSettings({ openAtLogin: startWithWin, path: app.getPath('exe') });
+      }
     }
   } catch (err) {
     console.error('Startup error:', err);
     if (logger) logger.error('Startup failed', err);
-    dialog.showErrorBox('CronMaster Error', `Failed to start: ${err.message}`);
+    if (!isServiceMode) dialog.showErrorBox('Kyrion Error', `Failed to start: ${err.message}`);
+    else process.exit(1);
   }
 });
 

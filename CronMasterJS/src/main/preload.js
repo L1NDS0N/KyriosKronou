@@ -105,6 +105,13 @@ contextBridge.exposeInMainWorld('api', {
   exportLogs: (type, format) => ipcRenderer.invoke('export-logs', type, format),
   reportError: (errorData) => ipcRenderer.invoke('renderer-error', errorData),
 
+  // Kyrion Service Management
+  getKyrionServiceStatus: () => ipcRenderer.invoke('get-kyrion-service-status'),
+  installKyrionService: () => ipcRenderer.invoke('install-kyrion-service'),
+  uninstallKyrionService: () => ipcRenderer.invoke('uninstall-kyrion-service'),
+  restartKyrionService: () => ipcRenderer.invoke('restart-kyrion-service'),
+  getKyrionServiceHealth: () => ipcRenderer.invoke('get-kyrion-service-health'),
+
   // Events
   onDataUpdated: (callback) => ipcRenderer.on('data-updated', callback),
   onTaskExecuted: (callback) => ipcRenderer.on('task-executed', (e, result) => callback(result))

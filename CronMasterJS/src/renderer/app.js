@@ -1176,6 +1176,7 @@ async function loadSettings() {
   document.getElementById('cfg-nssm').value = await window.api.getSetting('NssmPath', 'nssm');
   loadTraySettings();
   updateApiStatus();
+  refreshKyrionService();
 }
 
 document.getElementById('btn-save-settings').addEventListener('click', async () => {
@@ -1264,6 +1265,74 @@ async function updateApiStatus() {
     docsLink.style.display = 'none';
   }
 }
+
+// ─── Kyrion Scheduler Service ───
+async function refreshKyrionService() {
+  try {
+    const status = await window.api.getKyrionServiceStatus();
+    const statusEl = document.getElementById('kyrion-svc-status');
+    const installBtn = document.getElementById('btn-install-kyrion-svc');
+    const uninstallBtn = document.getElementById('btn-uninstall-kyrion-svc');
+    const restartBtn = document.getElementById('btn-restart-kyrion-svc');
+
+    if (!status.nssmAvailable) {
+      statusEl.innerHTML = '<span class="badge" style="background:var(--glass3);color:var(--text3)">NSSM not installed - Service mode requires NSSM</span>';
+      installBtn.style.display = 'none';
+      uninstallBtn.style.display = 'none';
+      restartBtn.style.display = 'none';
+      return;
+    }
+
+    if (status.installed) {
+      const isRunning = status.status === 'Running';
+      statusEl.innerHTML = `<span class="badge ${isRunning ? 'badge-active' : 'badge-error'}" style="font-size:12px">Service: ${status.serviceName} - ${status.status}</span>`;
+      installBtn.style.display = 'none';
+      uninstallBtn.style.display = '';
+      restartBtn.style.display = isRunning ? '' : 'none';
+      restartBtn.textContent = isRunning ? 'Restart Service' : 'Start Service';
+    } else {
+      statusEl.innerHTML = '<span class="badge" style="background:var(--glass3);color:var(--text3)">Not installed - Tasks and backups run only when the app is open</span>';
+      installBtn.style.display = '';
+      uninstallBtn.style.display = 'none';
+      restartBtn.style.display = 'none';
+    }
+  } catch (err) {
+    console.error('Failed to check Kyrion service status:', err);
+  }
+}
+
+document.getElementById('btn-install-kyrion-svc').addEventListener('click', async () => {
+  showToast('Installing Kyrion Scheduler as Windows service...', 'info');
+  const result = await window.api.installKyrionService();
+  if (result.success) {
+    showToast(result.message, 'success');
+  } else {
+    showToast(result.message, 'error');
+  }
+  refreshKyrionService();
+});
+
+document.getElementById('btn-uninstall-kyrion-svc').addEventListener('click', async () => {
+  showToast('Uninstalling Kyrion Scheduler service...', 'info');
+  const result = await window.api.uninstallKyrionService();
+  if (result.success) {
+    showToast(result.message, 'success');
+  } else {
+    showToast(result.message, 'error');
+  }
+  refreshKyrionService();
+});
+
+document.getElementById('btn-restart-kyrion-svc').addEventListener('click', async () => {
+  showToast('Restarting service...', 'info');
+  const result = await window.api.restartKyrionService();
+  if (result.success) {
+    showToast(result.message || 'Service restarted', 'success');
+  } else {
+    showToast(result.message, 'error');
+  }
+  refreshKyrionService();
+});
 
 // ============================================================
 // Refresh
