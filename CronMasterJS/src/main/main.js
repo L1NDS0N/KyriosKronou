@@ -1088,61 +1088,34 @@ function registerIPC() {
   // ─── Kyrion Service Management (install/uninstall as Windows service) ───
   ipcMain.handle('get-kyrion-service-status', async () => {
     try {
-      if (!serviceManager.checkNssm().installed) {
-        return { installed: false, nssmAvailable: false, status: null };
-      }
-      const info = serviceManager.getServiceInfo(SERVICE_NAME);
-      return {
-        installed: !!info,
-        status: info ? info.Status : null,
-        nssmAvailable: true,
-        serviceName: SERVICE_NAME,
-        isServiceMode
-      };
+      const wsi = require('./windowsService');
+      const installer = new wsi(logger);
+      const status = await installer.getStatus();
+      return { ...status, nssmAvailable: false };
     } catch (err) {
-      return { installed: false, nssmAvailable: false, status: null, error: err.message };
+      return { installed: false, status: null, running: false, error: err.message };
     }
   });
 
   ipcMain.handle('install-kyrion-service', async () => {
     try {
-      if (!serviceManager.checkNssm().installed) {
-        return { success: false, message: 'NSSM is not installed' };
-      }
-      // Check if already running
-      const existing = serviceManager.getServiceInfo(SERVICE_NAME);
-      if (existing && existing.Status === 'Running') {
+      const wsi = require('./windowsService');
+      const installer = new wsi(logger);
+      // Check if already installed
+      const existing = await installer.getStatus();
+      if (existing.running) {
         return { success: false, message: 'Service already installed and running' };
       }
-      // Remove existing if stopped/failed
-      if (existing) {
-        serviceManager.stopService(SERVICE_NAME);
-        serviceManager.uninstallService(SERVICE_NAME);
-        await new Promise(r => setTimeout(r, 1000));
+      if (existing.installed) {
+        await installer.stop();
+        await installer.uninstall();
+        await new Promise(r => setTimeout(r, 2000));
       }
-      // Get the current exe path (the one running the GUI)
-      const exePath = app.getPath('exe');
-      const exeDir = path.dirname(exePath);
-      // Install via NSSM: KyrionKronou.exe --service
-      const result = serviceManager.installService(
-        SERVICE_NAME,
-        exePath,
-        '--service',
-        exeDir,
-        'Automatic'
-      );
-      if (!result.success) {
-        return { success: false, message: result.message || 'Failed to install service' };
+      const result = await installer.install();
+      if (result.success) {
+        sendServiceNotification('Installed', SERVICE_NAME, true, 'Kyrion Scheduler service installed and started');
       }
-      // Configure: restart on failure, below normal priority
-      serviceManager._runNssm('set', SERVICE_NAME, 'AppExit', 'Default', 'Restart');
-      serviceManager._runNssm('set', SERVICE_NAME, 'AppRestartDelay', '5000');
-      serviceManager._runNssm('set', SERVICE_NAME, 'AppPriority', 'BELOW_NORMAL_PRIORITY_CLASS');
-      // Start the service
-      const startResult = serviceManager.startService(SERVICE_NAME);
-      logger.audit('KYRION_SERVICE_INSTALLED', { targetType: 'service', after: { serviceName: SERVICE_NAME } });
-      sendServiceNotification('Installed', SERVICE_NAME, true, 'Kyrion Scheduler service installed and started');
-      return { success: true, message: `Service ${SERVICE_NAME} installed and started` };
+      return result;
     } catch (err) {
       logger.error('Failed to install Kyrion service', err);
       return { success: false, message: `Install failed: ${err.message}` };
@@ -1151,12 +1124,10 @@ function registerIPC() {
 
   ipcMain.handle('uninstall-kyrion-service', async () => {
     try {
-      if (!serviceManager.checkNssm().installed) {
-        return { success: false, message: 'NSSM is not installed' };
-      }
-      serviceManager.stopService(SERVICE_NAME);
-      const result = serviceManager.uninstallService(SERVICE_NAME);
-      logger.audit('KYRION_SERVICE_UNINSTALLED', { targetType: 'service', before: { serviceName: SERVICE_NAME } });
+      const wsi = require('./windowsService');
+      const installer = new wsi(logger);
+      await installer.stop();
+      const result = await installer.uninstall();
       sendServiceNotification('Uninstalled', SERVICE_NAME, true, 'Kyrion Scheduler service removed');
       return result;
     } catch (err) {
@@ -1167,9 +1138,9 @@ function registerIPC() {
 
   ipcMain.handle('restart-kyrion-service', async () => {
     try {
-      serviceManager.stopService(SERVICE_NAME);
-      await new Promise(r => setTimeout(r, 1000));
-      const result = serviceManager.startService(SERVICE_NAME);
+      const wsi = require('./windowsService');
+      const installer = new wsi(logger);
+      const result = await installer.restart();
       logger.audit('KYRION_SERVICE_RESTARTED', { targetType: 'service', after: { serviceName: SERVICE_NAME } });
       return result;
     } catch (err) {
@@ -1179,10 +1150,10 @@ function registerIPC() {
 
   ipcMain.handle('get-kyrion-service-health', async () => {
     try {
-      // Check health by querying the running service via a named pipe or temp file
-      const nssmStatus = serviceManager._runNssm('status', SERVICE_NAME);
-      const statusText = (nssmStatus.stdout || '').trim();
-      return { success: true, status: statusText };
+      const wsi = require('./windowsService');
+      const installer = new wsi(logger);
+      const status = await installer.getStatus();
+      return { success: true, status: status.status, installed: status.installed, running: status.running };
     } catch (err) {
       return { success: false, error: err.message };
     }
