@@ -1,4 +1,4 @@
-# CronMaster - Build Production Installer
+# Kyrion Kronou - Build Production Installer
 # Run this script to build the NSIS installer + portable .exe
 #
 # Requirements:
@@ -23,7 +23,7 @@ $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 Write-Host ""
 Write-Host "  ========================================" -ForegroundColor DarkGray
-Write-Host "   CronMaster - Production Build" -ForegroundColor White
+Write-Host "   Kyrion Kronou - Production Build" -ForegroundColor White
 Write-Host "  ========================================" -ForegroundColor DarkGray
 Write-Host ""
 
@@ -82,15 +82,15 @@ try {
         Write-Host "  Building portable app (electron-packager)..." -ForegroundColor Cyan
 
         # Kill any running instance
-        taskkill /F /IM CronMaster.exe 2>$null
+        taskkill /F /IM KyrionKronou.exe 2>$null
         Start-Sleep -Seconds 1
 
-        npx electron-packager . CronMaster --platform=win32 --arch=x64 --out=build --overwrite --asar
+        npx electron-packager . KyrionKronou --platform=win32 --arch=x64 --out=build --overwrite --asar
         if ($LASTEXITCODE -ne 0) {
             Write-Host "  [ERROR] electron-packager failed!" -ForegroundColor Red
             exit 1
         }
-        $exePath = "build\CronMaster-win32-x64\CronMaster.exe"
+        $exePath = "build\KyrionKronou-win32-x64\KyrionKronou.exe"
         if (Test-Path $exePath) {
             $size = (Get-Item $exePath).Length / 1MB
             Write-Host "  Portable build successful!" -ForegroundColor Green
@@ -131,7 +131,7 @@ try {
         Write-Host "  NSIS: $nsisPath" -ForegroundColor DarkGray
 
         # Verify the portable build exists
-        if (-not (Test-Path "build\CronMaster-win32-x64\CronMaster.exe")) {
+        if (-not (Test-Path "build\KyrionKronou-win32-x64\KyrionKronou.exe")) {
             Write-Host "  [ERROR] Portable build not found! Run without -Installer flag first." -ForegroundColor Red
             exit 1
         }
@@ -153,9 +153,9 @@ try {
             Write-Host "    $($_.Name) ($sizeMB MB)" -ForegroundColor DarkGray
         }
     }
-    if (Test-Path "build\CronMaster-win32-x64\CronMaster.exe") {
-        $sizeMB = [math]::Round((Get-Item "build\CronMaster-win32-x64\CronMaster.exe").Length / 1MB, 1)
-        Write-Host "    CronMaster.exe (portable, $sizeMB MB)" -ForegroundColor DarkGray
+    if (Test-Path "build\KyrionKronou-win32-x64\KyrionKronou.exe") {
+        $sizeMB = [math]::Round((Get-Item "build\KyrionKronou-win32-x64\KyrionKronou.exe").Length / 1MB, 1)
+        Write-Host "    KyrionKronou.exe (portable, $sizeMB MB)" -ForegroundColor DarkGray
     }
 
     Write-Host ""

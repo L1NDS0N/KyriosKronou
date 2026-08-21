@@ -174,7 +174,7 @@ function renderTasks() {
       <div class="task-info" onclick="event.stopPropagation(); showTaskHistory('${t.Id}')">
         <div class="task-name">${escHtml(t.Name)}
           <span class="badge ${t.Enabled ? 'badge-active' : 'badge-disabled'}">${t.Enabled ? i18n.t('tasks.active') : i18n.t('tasks.disabled')}</span>
-          <span class="badge ${t.ManagementMode === 'nssm' ? 'badge-service-running' : 'badge-info'}" style="font-size:9px;padding:1px 6px;"><i data-lucide="${t.ManagementMode === 'nssm' ? 'server' : 'monitor'}" style="width:10px;height:10px;"></i> ${t.ManagementMode === 'nssm' ? 'NSSM Service' : 'CronMaster'}</span>
+          <span class="badge ${t.ManagementMode === 'nssm' ? 'badge-service-running' : 'badge-info'}" style="font-size:9px;padding:1px 6px;"><i data-lucide="${t.ManagementMode === 'nssm' ? 'server' : 'monitor'}" style="width:10px;height:10px;"></i> ${t.ManagementMode === 'nssm' ? 'NSSM Service' : 'Κύριος Κρόνου'}</span>
           <span class="badge badge-service" id="badge-${svcId}"><i data-lucide="loader" style="width:10px;height:10px;"></i></span>
         </div>
         <div class="task-meta"><i data-lucide="clock"></i>${escHtml(t.CronExpression)}<span style="color:var(--text3)">|</span><i data-lucide="file-code"></i>${escHtml(t.ScriptPath)}${t.ScriptType ? ` <span class="badge badge-info" style="font-size:9px;padding:1px 5px;">${t.ScriptType.toUpperCase()} inline</span>` : ''}</div>
@@ -363,15 +363,15 @@ function showTaskDialog(task = null) {
       <div class="mgmt-mode-option ${(isEdit ? task.ManagementMode : 'cronmaster') === 'cronmaster' ? 'active' : ''}" id="mode-cronmaster" onclick="selectMgmtMode('cronmaster')">
         <div class="mgmt-mode-icon"><i data-lucide="monitor"></i></div>
         <div class="mgmt-mode-info">
-          <div class="mgmt-mode-name">CronMaster</div>
-          <div class="mgmt-mode-desc">Managed by CronMaster scheduler. Requires the app to be running.</div>
+          <div class="mgmt-mode-name">Κύριος Κρόνου</div>
+          <div class="mgmt-mode-desc">Managed by Kyrion Kronou scheduler. Requires the app to be running.</div>
         </div>
       </div>
       <div class="mgmt-mode-option ${(isEdit ? task.ManagementMode : '') === 'nssm' ? 'active' : ''}" id="mode-nssm" onclick="selectMgmtMode('nssm')">
         <div class="mgmt-mode-icon"><i data-lucide="server"></i></div>
         <div class="mgmt-mode-info">
           <div class="mgmt-mode-name">NSSM Service</div>
-          <div class="mgmt-mode-desc">Runs as a Windows service via NSSM. Always active, independent of CronMaster.</div>
+          <div class="mgmt-mode-desc">Runs as a Windows service via NSSM. Always active, independent of Kyrion Kronou.</div>
         </div>
       </div>
     </div>
@@ -713,16 +713,16 @@ async function refreshServices() {
   try {
     const allServices = await window.api.getServices();
     const filterManaged = document.getElementById('filter-managed-only').checked;
-    const services = filterManaged ? allServices.filter(s => s.Name && (s.Name.startsWith('CronMaster_') || s.Name.startsWith('KyrionBackup_'))) : allServices;
+    const services = filterManaged ? allServices.filter(s => s.Name && (s.Name.startsWith('Kyrion_') || s.Name.startsWith('KyrionBackup_'))) : allServices;
     const tbody = document.getElementById('services-body');
     const empty = document.getElementById('services-empty');
     if (services.length === 0) { tbody.innerHTML = ''; empty.style.display = 'block'; lucide.createIcons(); return; }
     empty.style.display = 'none';
     tbody.innerHTML = services.map(s => {
       const isRunning = s.Status === 'Running';
-      const isCronMaster = s.Name && s.Name.startsWith('CronMaster_');
-      // For CronMaster services: uninstall button should warn (removes task too)
-      return `<tr${isCronMaster ? ' class="cronmaster-service"' : ''}>
+      const isCronMaster = s.Name && s.Name.startsWith('Kyrion_');
+      // For Kyrion services: uninstall button should warn (removes task too)
+      return `<tr${isCronMaster ? ' class="kyrion-managed"' : ''}>
         <td>${escHtml(s.Name)}${isCronMaster ? ' <span class="badge badge-info" style="font-size:9px;">managed</span>' : ''}</td>
         <td><span class="badge badge-${isRunning ? 'success' : 'error'}">${s.Status}</span></td>
         <td>${escHtml(s.Application || '-')}</td>
@@ -892,9 +892,9 @@ async function saveServiceParams(serviceName) {
 }
 
 async function svcAction(action, name) {
-  // Confirm before uninstalling a CronMaster-managed service
-  if (action === 'uninstall' && name.startsWith('CronMaster_')) {
-    const taskId = name.replace('CronMaster_', '');
+  // Confirm before uninstalling a Kyrion-managed service
+  if (action === 'uninstall' && name.startsWith('Kyrion_')) {
+    const taskId = name.replace('Kyrion_', '');
     const task = allTasks.find(t => t.Id && t.Id.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20) === taskId);
     const taskName = task ? task.Name : name;
     showModal(`

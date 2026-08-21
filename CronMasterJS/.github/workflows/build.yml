@@ -30,7 +30,7 @@ jobs:
 
       - name: Build portable app
         working-directory: CronMasterJS
-        run: npx electron-packager . CronMaster --platform=win32 --arch=x64 --out=build --overwrite --asar --icon build-resources/icon.ico
+        run: npx electron-packager . KyrionKronou --platform=win32 --arch=x64 --out=build --overwrite --asar --icon build-resources/icon.ico
 
       - name: Build NSIS installer
         working-directory: CronMasterJS
@@ -42,7 +42,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: KyrionKronou-Portable
-          path: CronMasterJS/build/CronMaster-win32-x64/
+          path: CronMasterJS/build/KyrionKronou-win32-x64/
           retention-days: 30
 
       - name: Upload installer

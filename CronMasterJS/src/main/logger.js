@@ -242,9 +242,9 @@ class Logger {
 
   // ─── File Paths ───
   _dateStr() { return new Date().toISOString().substring(0, 10); }
-  _logFilePath() { return path.join(this.logDir, `cronmaster-${this._dateStr()}.log`); }
-  _errorFilePath() { return path.join(this.logDir, `cronmaster-errors-${this._dateStr()}.log`); }
-  _auditFilePath() { return path.join(this.logDir, `cronmaster-audit-${this._dateStr()}.log`); }
+  _logFilePath() { return path.join(this.logDir, `kyrion-${this._dateStr()}.log`); }
+  _errorFilePath() { return path.join(this.logDir, `kyrion-errors-${this._dateStr()}.log`); }
+  _auditFilePath() { return path.join(this.logDir, `kyrion-audit-${this._dateStr()}.log`); }
 
   // ─── Formatting ───
   _formatEntry(timestamp, level, message, meta) {

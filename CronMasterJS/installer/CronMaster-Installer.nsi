@@ -1,5 +1,5 @@
-; CronMaster NSIS Installer Script
-; Generated for CronMaster v1.0.0
+; Kyrion Kronou NSIS Installer Script
+; Generated for Kyrion Kronou v1.0.0
 ; Author: l1nds0n
 
 !include "MUI2.nsh"
@@ -8,24 +8,24 @@
 !include "WordFunc.nsh"
 
 ; ─── General ────────────────────────────────────────────
-Name "CronMaster"
-OutFile "..\dist\CronMaster-Setup-1.0.0.exe"
-InstallDir "$LOCALAPPDATA\CronMaster"
-InstallDirRegKey HKCU "Software\CronMaster" "InstallDir"
+Name "Kyrion Kronou"
+OutFile "..\dist\KyrionKronou-Setup-1.0.0.exe"
+InstallDir "$LOCALAPPDATA\KyrionKronou"
+InstallDirRegKey HKCU "Software\KyrionKronou" "InstallDir"
 RequestExecutionLevel admin
 Unicode True
 SetCompressor /SOLID lzma
-BrandingText "CronMaster v1.0.0"
+BrandingText "Kyrion Kronou v1.0.0"
 
 ; ─── Version Info ───────────────────────────────────────
 VIProductVersion "1.0.0.0"
-VIAddVersionKey "ProductName" "CronMaster"
+VIAddVersionKey "ProductName" "Kyrion Kronou"
 VIAddVersionKey "CompanyName" "l1nds0n"
-VIAddVersionKey "FileDescription" "CronMaster Installer"
+VIAddVersionKey "FileDescription" "Kyrion Kronou Installer"
 VIAddVersionKey "FileVersion" "1.0.0"
 VIAddVersionKey "ProductVersion" "1.0.0"
 VIAddVersionKey "LegalCopyright" "Copyright 2026 l1nds0n"
-VIAddVersionKey "OriginalFilename" "CronMaster-Setup-1.0.0.exe"
+VIAddVersionKey "OriginalFilename" "KyrionKronou-Setup-1.0.0.exe"
 
 ; ─── MUI Settings ──────────────────────────────────────
 !define MUI_ABORTWARNING
@@ -64,42 +64,42 @@ Function .onInit
 FunctionEnd
 
 ; ─── Installer Sections ─────────────────────────────────
-Section "CronMaster (required)" SecMain
+Section "Kyrion Kronou (required)" SecMain
   SectionIn RO
 
   ; Set output path to installation directory
   SetOutPath "$INSTDIR"
 
   ; Install all files from the unpacked build
-  File /r "..\build\CronMaster-win32-x64\*.*"
+  File /r "..\build\KyrionKronou-win32-x64\*.*"
 
   ; Create uninstaller
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
   ; Create Start Menu shortcuts
-  CreateDirectory "$SMPROGRAMS\CronMaster"
-  CreateShortCut "$SMPROGRAMS\CronMaster\CronMaster.lnk" "$INSTDIR\CronMaster.exe" "" "$INSTDIR\CronMaster.exe" 0
-  CreateShortCut "$SMPROGRAMS\CronMaster\Uninstall CronMaster.lnk" "$INSTDIR\uninstall.exe"
+  CreateDirectory "$SMPROGRAMS\Kyrion Kronou"
+  CreateShortCut "$SMPROGRAMS\Kyrion Kronou\Kyrion Kronou.lnk" "$INSTDIR\KyrionKronou.exe" "" "$INSTDIR\KyrionKronou.exe" 0
+  CreateShortCut "$SMPROGRAMS\Kyrion Kronou\Uninstall Kyrion Kronou.lnk" "$INSTDIR\uninstall.exe"
 
   ; Create Desktop shortcut
-  CreateShortCut "$DESKTOP\CronMaster.lnk" "$INSTDIR\CronMaster.exe" "" "$INSTDIR\CronMaster.exe" 0
+  CreateShortCut "$DESKTOP\Kyrion Kronou.lnk" "$INSTDIR\KyrionKronou.exe" "" "$INSTDIR\KyrionKronou.exe" 0
 
   ; Save installation path to registry
-  WriteRegStr HKCU "Software\CronMaster" "InstallDir" "$INSTDIR"
+  WriteRegStr HKCU "Software\KyrionKronou" "InstallDir" "$INSTDIR"
 
   ; Write uninstall registry keys
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\CronMaster" "DisplayName" "CronMaster"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\CronMaster" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\CronMaster" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\CronMaster" "DisplayIcon" "$\"$INSTDIR\CronMaster.exe$\""
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\CronMaster" "Publisher" "l1nds0n"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\CronMaster" "DisplayVersion" "1.0.0"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\CronMaster" "URLInfoAbout" "https://github.com/l1nds0n/CronMaster"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyrionKronou" "DisplayName" "Kyrion Kronou"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyrionKronou" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyrionKronou" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyrionKronou" "DisplayIcon" "$\"$INSTDIR\KyrionKronou.exe$\""
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyrionKronou" "Publisher" "l1nds0n"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyrionKronou" "DisplayVersion" "1.0.0"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyrionKronou" "URLInfoAbout" "https://github.com/l1nds0n/kyrion-kronou"
 
   ; Calculate and write estimated size
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
   IntFmt $0 "0x%08X" $0
-  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\CronMaster" "EstimatedSize" "$0"
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyrionKronou" "EstimatedSize" "$0"
 
   ; Add to PATH via registry (user-level)
   ReadRegStr $0 HKCU "Environment" "Path"
@@ -120,14 +120,14 @@ Section "Uninstall"
   RMDir /r "$INSTDIR"
 
   ; Remove Start Menu shortcuts
-  RMDir /r "$SMPROGRAMS\CronMaster"
+  RMDir /r "$SMPROGRAMS\Kyrion Kronou"
 
   ; Remove Desktop shortcut
-  Delete "$DESKTOP\CronMaster.lnk"
+  Delete "$DESKTOP\Kyrion Kronou.lnk"
 
   ; Remove registry keys
-  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\CronMaster"
-  DeleteRegKey HKCU "Software\CronMaster"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyrionKronou"
+  DeleteRegKey HKCU "Software\KyrionKronou"
 
   ; Remove from PATH
   ReadRegStr $0 HKCU "Environment" "Path"

@@ -1,4 +1,4 @@
-// i18n.js - Internationalization module for CronMaster
+// i18n.js - Internationalization module for Kyrion Kronou
 // Supports English (en) and Brazilian Portuguese (pt-BR)
 
 const translations = {

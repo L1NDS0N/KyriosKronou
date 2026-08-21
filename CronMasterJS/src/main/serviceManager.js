@@ -112,11 +112,11 @@ class ServiceManager {
       }
     } catch (e) { /* nssm list failed */ }
 
-    // Method 2: PowerShell Get-Service for any CronMaster-* services
+    // Method 2: PowerShell Get-Service for any Kyrion-* services
     // (catches services installed but maybe not from current nssm list)
     try {
       const psOut = execSync(
-        'powershell -NoProfile -Command "Get-Service | Where-Object { $_.Name -like \'CronMaster*\' } | ForEach-Object { Write-Output $_.Name }"',
+        'powershell -NoProfile -Command "Get-Service | Where-Object { $_.Name -like \'Kyrion*\' } | ForEach-Object { Write-Output $_.Name }"',
         { encoding: 'utf8', timeout: 10000 }
       );
       for (const name of psOut.split('\n').map(s => s.replace(/\r/g, '').trim()).filter(Boolean)) {
@@ -202,7 +202,7 @@ class ServiceManager {
       }
     } catch (e) {}
     try {
-      const psCmd = 'powershell -NoProfile -Command "Get-Service | Where-Object { $_.Name -like \'CronMaster*\' -or $_.Name -like \'KyrionBackup*\' } | ForEach-Object { Write-Output $_.Name }"';
+      const psCmd = 'powershell -NoProfile -Command "Get-Service | Where-Object { $_.Name -like \'Kyrion*\' } | ForEach-Object { Write-Output $_.Name }"';
       const { stdout } = await execAsync(psCmd, { encoding: 'utf8', timeout: 10000 });
       for (const name of stdout.split('\n').map(s => s.replace(/\r/g, '').trim()).filter(Boolean)) {
         if (!seen.has(name)) {

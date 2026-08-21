@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════
-   CronMaster — Lunar Dark Theme
+   Κύριος Κρόνου — Lunar Dark Theme
    Full Moon + Micropointillism + Muted Glass
    ═══════════════════════════════════════════════════════ */
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -254,8 +254,8 @@ html, body { height: 100%; font-family: var(--font); background: var(--bg); colo
 .badge-service-stopped { background: rgba(138,90,90,.12); color: var(--red); border: 1px solid rgba(138,90,90,.15); font-size: 11px; }
 .badge-service-off { background: var(--glass2); color: var(--text3); border: 1px solid var(--border); font-size: 11px; }
 
-.cronmaster-service { background: rgba(100,100,130,.03); }
-.cronmaster-service:hover { background: rgba(100,100,130,.06); }
+.kyrion-managed { background: rgba(100,100,130,.03); }
+.kyrion-managed:hover { background: rgba(100,100,130,.06); }
 
 /* ═══ SERVICE LOG ═══ */
 .service-log-content { max-height: 400px; overflow-y: auto; border-radius: 8px; border: 1px solid var(--border); }
@@ -645,22 +645,22 @@ kbd {
 .script-editor-wrap { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; height: 280px; }
 .script-editor-wrap .CodeMirror { height: 100%; font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace; font-size: 13px; line-height: 1.5; background: rgba(0,0,0,.3); }
 /* CodeMirror Dark Theme */
-.CodeMirror-cronmaster-dark .CodeMirror-gutters { background: rgba(0,0,0,.2); border-right: 1px solid var(--border); }
-.CodeMirror-cronmaster-dark .CodeMirror-linenumber { color: var(--text3); padding: 0 8px; }
-.CodeMirror-cronmaster-dark .CodeMirror-cursor { border-left: 2px solid var(--primary); }
-.CodeMirror-cronmaster-dark .CodeMirror-selected { background: rgba(106,90,173,.15) !important; }
-.CodeMirror-cronmaster-dark .CodeMirror-activeline-background { background: rgba(255,255,255,.03); }
-.CodeMirror-cronmaster-dark .CodeMirror-matchingbracket { color: var(--green) !important; text-decoration: underline; }
-.CodeMirror-cronmaster-dark .cm-keyword { color: #c586c0; }
-.CodeMirror-cronmaster-dark .cm-string { color: #ce9178; }
-.CodeMirror-cronmaster-dark .cm-number { color: #b5cea8; }
-.CodeMirror-cronmaster-dark .cm-comment { color: #6a9955; font-style: italic; }
-.CodeMirror-cronmaster-dark .cm-variable { color: #9cdcfe; }
-.CodeMirror-cronmaster-dark .cm-variable-2 { color: #4ec9b0; }
-.CodeMirror-cronmaster-dark .cm-builtin { color: #dcdcaa; }
-.CodeMirror-cronmaster-dark .cm-operator { color: #d4d4d4; }
-.CodeMirror-cronmaster-dark .cm-def { color: #dcdcaa; }
-.CodeMirror-cronmaster-dark .scrollbar-elider { background: var(--glass2); }
+.CodeMirror-kyrion-dark .CodeMirror-gutters { background: rgba(0,0,0,.2); border-right: 1px solid var(--border); }
+.CodeMirror-kyrion-dark .CodeMirror-linenumber { color: var(--text3); padding: 0 8px; }
+.CodeMirror-kyrion-dark .CodeMirror-cursor { border-left: 2px solid var(--primary); }
+.CodeMirror-kyrion-dark .CodeMirror-selected { background: rgba(106,90,173,.15) !important; }
+.CodeMirror-kyrion-dark .CodeMirror-activeline-background { background: rgba(255,255,255,.03); }
+.CodeMirror-kyrion-dark .CodeMirror-matchingbracket { color: var(--green) !important; text-decoration: underline; }
+.CodeMirror-kyrion-dark .cm-keyword { color: #c586c0; }
+.CodeMirror-kyrion-dark .cm-string { color: #ce9178; }
+.CodeMirror-kyrion-dark .cm-number { color: #b5cea8; }
+.CodeMirror-kyrion-dark .cm-comment { color: #6a9955; font-style: italic; }
+.CodeMirror-kyrion-dark .cm-variable { color: #9cdcfe; }
+.CodeMirror-kyrion-dark .cm-variable-2 { color: #4ec9b0; }
+.CodeMirror-kyrion-dark .cm-builtin { color: #dcdcaa; }
+.CodeMirror-kyrion-dark .cm-operator { color: #d4d4d4; }
+.CodeMirror-kyrion-dark .cm-def { color: #dcdcaa; }
+.CodeMirror-kyrion-dark .scrollbar-elider { background: var(--glass2); }
 .script-editor-status { display: flex; gap: 16px; padding: 4px 8px; font-size: 10px; color: var(--text3); background: rgba(0,0,0,.15); border-top: 1px solid var(--border); }
 .script-hint { font-size: 11px; color: var(--text2); padding: 6px 0; }
 .script-hint code { background: var(--glass2); padding: 1px 5px; border-radius: 3px; font-size: 11px; }

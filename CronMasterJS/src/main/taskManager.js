@@ -149,7 +149,7 @@ class TaskManager {
     return this.tasks.filter(task => {
       if (!task.Enabled) return false;
       // NSSM-managed tasks run independently as Windows services
-      // CronMaster should NOT execute them
+      // Kyrion should NOT execute them
       if (task.ManagementMode === 'nssm') return false;
       if (!this.cronParser.shouldRunNow(task.CronExpression)) return false;
       const recentRun = this.history.find(h =>

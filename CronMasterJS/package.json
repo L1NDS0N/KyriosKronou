@@ -1,12 +1,12 @@
 {
-  "name": "cronmaster",
+  "name": "kyrion-kronou",
   "version": "1.0.0",
-  "description": "Modern Task Scheduler with Cron Support — NSSM Service Manager",
+  "description": "Kyrion Kronou - Modern Task Scheduler with Cron Support and NSSM Service Manager",
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder --win --x64",
-    "build:portable": "electron-packager . CronMaster --platform=win32 --arch=x64 --out=build --overwrite --asar --icon build-resources/icon.ico",
+    "build:portable": "electron-packager . KyrionKronou --platform=win32 --arch=x64 --out=build --overwrite --asar --icon build-resources/icon.ico",
     "build:installer": "electron-builder --win --x64 --config",
     "test": "mocha tests/*.js --timeout 10000",
     "pack": "electron-builder --dir"
@@ -14,8 +14,8 @@
   "author": "l1nds0n",
   "license": "MIT",
   "build": {
-    "appId": "com.cronmaster.app",
-    "productName": "CronMaster",
+    "appId": "com.kyrionkronou.app",
+    "productName": "KyrionKronou",
     "copyright": "Copyright © 2026 l1nds0n",
     "directories": {
       "output": "dist",
@@ -58,14 +58,14 @@
       "installerHeaderIcon": "build-resources/icon.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "CronMaster",
+      "shortcutName": "Kyrion Kronou",
       "license": "LICENSE",
       "installerSidebar": "build-resources/sidebar.bmp",
       "uninstallerSidebar": "build-resources/sidebar.bmp",
       "warningsAsErrors": false
     },
     "portable": {
-      "artifactName": "CronMaster-${version}-portable.exe"
+      "artifactName": "KyrionKronou-${version}-portable.exe"
     }
   },
   "devDependencies": {

@@ -42,7 +42,7 @@ class BackupManager {
       // Databases
       Databases: data.Databases || [], // ['db1', 'db2'] or ['--all-databases']
       // Backup options
-      BackupPath: data.BackupPath || path.join(process.env.USERPROFILE || '', 'CronMasterBackups'),
+      BackupPath: data.BackupPath || path.join(process.env.USERPROFILE || '', 'KyrionBackups'),
       NamingPattern: data.NamingPattern || '{database}_{date}_{time}',
       Compression: data.Compression || 'zip', // none, zip, 7z
       CompressionLevel: data.CompressionLevel || 5, // 1-9

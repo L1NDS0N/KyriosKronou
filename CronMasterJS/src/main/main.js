@@ -15,7 +15,7 @@ const BackupManager = require('./backupManager');
 
 // ─── Service Mode Detection ───
 const isServiceMode = process.argv.includes('--service');
-const SERVICE_NAME = 'KyrionKronou';
+const SERVICE_NAME = 'KyrionKronou';  // NSSM service name for the scheduler itself
 
 let mainWindow;
 let tray = null;
@@ -215,7 +215,7 @@ function initComponents() {
   wrapperGenerator = new WrapperGenerator(config, logger);
   backupManager = new BackupManager(config, logger);
 
-  logger.log('INFO', 'CronMaster started');
+  logger.log('INFO', 'Κύριος Κρόνου started');
   logger.audit('APP_STARTED', { targetType: 'app', after: { version: app.getVersion() } });
 }
 
@@ -299,7 +299,7 @@ function registerServiceIPC() {
 
 function startScheduler() {
   schedulerInterval = setInterval(() => {
-    // ── Task scheduler (CronMaster mode only) ──
+    // ── Task scheduler (Kyrion mode only) ──
     if (mainWindow) {
       const dueTasks = taskManager.getDueTasks();
       dueTasks.forEach(async (task) => {
@@ -315,7 +315,7 @@ function startScheduler() {
       });
     }
 
-    // ── Backup scheduler (CronMaster mode only) ──
+    // ── Backup scheduler (Kyrion mode only) ──
     if (backupManager) {
       const profiles = backupManager.getAllProfiles();
       const now = new Date();
@@ -372,7 +372,7 @@ function registerIPC() {
 
       // If task was just disabled and is NSSM-managed, stop the service (don't remove)
       if (wasEnabled && !data.Enabled && data.ManagementMode === 'nssm') {
-        const serviceName = `CronMaster_${String(data.Id).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}`;
+        const serviceName = `Kyrion_${String(data.Id).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}`;
         try {
           const svcInfo = serviceManager.getServiceInfo(serviceName);
           if (svcInfo && svcInfo.Status === 'Running') {
@@ -386,7 +386,7 @@ function registerIPC() {
 
       // If task was just re-enabled and is NSSM-managed, start the service
       if (!wasEnabled && data.Enabled && data.ManagementMode === 'nssm') {
-        const serviceName = `CronMaster_${String(data.Id).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}`;
+        const serviceName = `Kyrion_${String(data.Id).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}`;
         try {
           const svcInfo = serviceManager.getServiceInfo(serviceName);
           if (svcInfo && svcInfo.Status !== 'Running') {
@@ -716,7 +716,7 @@ function registerIPC() {
   ipcMain.handle('undeploy-task-service', async (e, task) => {
     try {
       if (!task || !task.Id) return { success: false, message: 'Invalid task' };
-      const serviceName = `CronMaster_${task.Id.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}`;
+      const serviceName = `Kyrion_${task.Id.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}`;
       serviceManager.stopService(serviceName);
       const result = serviceManager.uninstallService(serviceName);
       wrapperGenerator.removeWrapper(task.Id);
@@ -738,7 +738,7 @@ function registerIPC() {
       if (!nssmCheck.installed) {
         return { serviceName: '', installed: false, status: null, nssmAvailable: false };
       }
-      const serviceName = `CronMaster_${String(taskId).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}`;
+      const serviceName = `Kyrion_${String(taskId).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}`;
       const info = serviceManager.getServiceInfo(serviceName);
       const wrapperPath = wrapperGenerator.getWrapperPath(taskId);
       return { serviceName, installed: !!info, status: info ? info.Status : null, nssmAvailable: true, wrapperPath };
@@ -1097,7 +1097,7 @@ function registerIPC() {
       // Get the current exe path (the one running the GUI)
       const exePath = app.getPath('exe');
       const exeDir = path.dirname(exePath);
-      // Install via NSSM: CronMaster.exe --service
+      // Install via NSSM: KyrionKronou.exe --service
       const result = serviceManager.installService(
         SERVICE_NAME,
         exePath,

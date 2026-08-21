@@ -46,7 +46,7 @@ class ScriptEditor {
 
     this.editor = CodeMirror.fromTextArea(document.getElementById('script-editor-textarea'), {
       mode: 'powershell',
-      theme: 'cronmaster-dark',
+      theme: 'kyrion-dark',
       lineNumbers: true,
       matchBrackets: true,
       autoCloseBrackets: true,
