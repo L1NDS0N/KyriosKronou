@@ -847,24 +847,6 @@ class BackupManager {
 
   // ─── NSSM Wrapper Generation ───
   generateBackupWrapper(profile) {
-    const databases = profile.Databases && profile.Databases.length > 0 ? profile.Databases : [];
-    const logDir = path.join(this.config.configDir, '..', 'logs');
-    const logPath = path.join(logDir, `backup-${profile.Id}.log`);
-
-    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
-
-    const profileName = (profile.Name || 'Backup').replace(/"/g, '""');
-    const mysqldumpPath = (this.mysqldumpPath || 'mysqldump').replace(/"/g, '""');
-    const host = (profile.Host || 'localhost').replace(/"/g, '""');
-    const port = profile.Port || 3306;
-    const user = (profile.User || 'root').replace(/"/g, '""');
-    const password = (profile.Password || '').replace(/"/g, '""');
-    const extraArgs = (profile.ExtraArgs || '').replace(/"/g, '""');
-    const backupPath = (profile.BackupPath || 'C:\\Backups').replace(/"/g, '""');
-    const namingPattern = (profile.NamingPattern || '{database}_{date}_{time}').replace(/"/g, '""');
-    const compress = profile.Compression || 'none';
-    const compressLevel = profile.CompressionLevel || 5;
-    const dbCount = databases.length;
     const cronExpr = profile.CronExpression || '0 2 * * *';
 
     const cronParts = cronExpr.trim().split(/\s+/);
@@ -874,50 +856,69 @@ class BackupManager {
     const cronMonth = cronParts[3] || '*';
     const cronDow = cronParts[4] || '*';
 
+    // Save profile config as JSON so the wrapper reads it at runtime
+    // (avoids PowerShell 5.1 Unicode encoding issues when embedding paths)
+    const configJson = {
+      Name: profile.Name || 'Backup',
+      Host: profile.Host || 'localhost',
+      Port: profile.Port || 3306,
+      User: profile.User || 'root',
+      Password: profile.Password || '',
+      MysqldumpPath: this.mysqldumpPath || 'mysqldump',
+      BackupPath: profile.BackupPath || 'C:\\Backups',
+      NamingPattern: profile.NamingPattern || '{database}_{date}_{time}',
+      Compression: profile.Compression || 'none',
+      CompressionLevel: profile.CompressionLevel || 5,
+      ExtraArgs: profile.ExtraArgs || '',
+      Databases: profile.Databases && profile.Databases.length > 0 ? profile.Databases : []
+    };
+    // Write JSON config next to the wrapper
+    const profileId = profile.Id;
+    const wrapperDir = this.wrappersDir;
+    // The caller (main.js deploy handler) will write this JSON file
+    // We store it on the instance so main.js can access it
+    this._lastGeneratedConfig = { profileId, configJson };
+
     const wrapper = [
       '# ============================================================',
       '# Kyrion Kronou - Backup NSSM Wrapper',
-      '# Profile: ' + profileName,
-      '# ID: ' + profile.Id,
+      '# Profile: ' + (profile.Name || 'Backup'),
       '# Cron: ' + cronExpr,
       '# Generated: ' + new Date().toISOString(),
-      '# Mode: nssm (service managed by NSSM, keeps process alive)',
-      '# ============================================================',
-      '#',
-      '# HOW THIS WORKS:',
-      '# - NSSM starts this PowerShell script as a Windows service',
-      '# - NSSM requires the main process to STAY ALIVE',
-      '# - This script runs an infinite loop checking the cron schedule',
-      '# - When the schedule matches, it runs mysqldump for each database',
-      '# - The backup logs are written to the log file',
-      '# - After backup finishes, the loop continues checking',
       '# ============================================================',
       '',
       '$ErrorActionPreference = "Continue"',
       '$OutputEncoding = [System.Text.Encoding]::UTF8',
       '',
-      '# --- Configuration ---',
-      '$ProfileId = "' + profile.Id + '"',
-      '$ProfileName = "' + profileName + '"',
-      '$MysqldumpPath = "' + mysqldumpPath + '"',
-      '$Host_ = "' + host + '"',
-      '$Port = ' + port,
-      '$User = "' + user + '"',
-      '$Password = "' + password + '"',
-      '$ExtraArgs = @()  # Split from config below',
-      '$BackupPath = "' + backupPath + '"',
-      '$NamingPattern = "' + namingPattern + '"',
-      '$Compress = "' + compress + '"',
-      '$CompressLevel = ' + compressLevel,
-      "$LogFile = '" + logPath + "'",
+      '# --- Load config from JSON (handles Unicode paths) ---',
+      '$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path',
+      '$ConfigPath = Join-Path $ScriptDir ("backup-profile-" + "' + profileId + '" + ".json")',
+      'if (Test-Path $ConfigPath) {',
+      '    $cfg = Get-Content -Path $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json',
+      '} else {',
+      '    Write-Host "Config not found: $ConfigPath"',
+      '    exit 1',
+      '}',
+      '',
+      '$ProfileName = $cfg.Name',
+      '$MysqldumpPath = $cfg.MysqldumpPath',
+      '$Host_ = $cfg.Host',
+      '$Port = $cfg.Port',
+      '$User = $cfg.User',
+      '$Password = $cfg.Password',
+      '$BackupPath = $cfg.BackupPath',
+      '$NamingPattern = $cfg.NamingPattern',
+      '$Compress = $cfg.Compression',
+      '$CompressLevel = $cfg.CompressionLevel',
+      '$Databases = @($cfg.Databases)',
+      '$LogFile = Join-Path $ScriptDir ("backup-" + $ProfileName + ".log")',
       '',
       '# Extra args (split into array)',
-      extraArgs ? '$ExtraArgs = \'' + extraArgs.replace(/'/g, "''") + "'.Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)" : '',
-      '',
-      '# Databases to backup',
-      dbCount > 0
-        ? '$Databases = @(' + databases.map(d => '"' + d.replace(/"/g, '""') + '"').join(', ') + ')' 
-        : '$Databases = @()  # Empty = all databases (--all-databases)',
+      'if ($cfg.ExtraArgs) {',
+      '    $ExtraArgs = $cfg.ExtraArgs.Split(" ", [System.StringSplitOptions]::RemoveEmptyEntries)',
+      '} else {',
+      '    $ExtraArgs = @()',
+      '}',
       '',
       '# Cron fields',
       '$CronMinute = "' + cronMinute + '"',

@@ -1,5 +1,7 @@
 // ServiceManager.js - NSSM Service Management
-const { execSync } = require('child_process');
+const { execSync, exec } = require('child_process');
+const { promisify } = require('util');
+const execAsync = promisify(exec);
 const fs = require('fs');
 
 class ServiceManager {
@@ -60,6 +62,31 @@ class ServiceManager {
 
       const output = execSync(cmd, { encoding: 'utf8', timeout: 10000, windowsHide: true });
       return { success: true, output };
+    } catch (e) {
+      return { success: false, message: e.message };
+    }
+  }
+
+  async _runNssmAsync(...args) {
+    try {
+      const cmd = `"${this.nssmPath}" ${args.join(' ')}`;
+      const writeCmds = ['start', 'stop', 'install', 'remove', 'set', 'restart'];
+      const needsElevation = writeCmds.includes(args[0]);
+
+      if (needsElevation) {
+        const argStr = args.join(' ').replace(/'/g, "''");
+        const psCmd = `powershell -NoProfile -NonInteractive -Command "Start-Process -FilePath '${this.nssmPath}' -ArgumentList '${argStr}' -Verb RunAs -Wait -WindowStyle Hidden"`;
+        try {
+          await execAsync(psCmd, { encoding: 'utf8', timeout: 30000, windowsHide: true });
+          return { success: true, output: '' };
+        } catch (elevErr) {
+          const { stdout } = await execAsync(cmd, { encoding: 'utf8', timeout: 15000, windowsHide: true });
+          return { success: true, output: stdout };
+        }
+      }
+
+      const { stdout } = await execAsync(cmd, { encoding: 'utf8', timeout: 15000, windowsHide: true });
+      return { success: true, output: stdout };
     } catch (e) {
       return { success: false, message: e.message };
     }

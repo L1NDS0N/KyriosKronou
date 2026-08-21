@@ -769,23 +769,30 @@ function registerIPC() {
       const BOM = Buffer.from([0xEF, 0xBB, 0xBF]);
       const contentBuffer = Buffer.from(wrapperScript, 'utf8');
       fs.writeFileSync(wrapperPath, Buffer.concat([BOM, contentBuffer]));
-      // Install via NSSM
-      const result = serviceManager.installService(serviceName, 'powershell.exe', `-ExecutionPolicy Bypass -NoProfile -File \"${wrapperPath}\"`, wrappersDir, 'Automatic');
-      if (result.success) {
+      // Write profile config as JSON (wrapper reads this at runtime)
+      if (backupManager._lastGeneratedConfig) {
+        const configPath = path.join(wrappersDir, `backup-profile-${profileId}.json`);
+        fs.writeFileSync(configPath, JSON.stringify(backupManager._lastGeneratedConfig.configJson, null, 2), 'utf8');
+      }
+      // Install via NSSM (async to avoid blocking UI)
+      const installResult = await serviceManager._runNssmAsync('install', serviceName, 'powershell.exe', `-ExecutionPolicy Bypass -NoProfile -File \"${wrapperPath}\"`);
+      if (installResult.success) {
+        await serviceManager._runNssmAsync('set', serviceName, 'AppDirectory', wrappersDir);
+        await serviceManager._runNssmAsync('set', serviceName, 'Start', 'SERVICE_AUTO_START');
         // Set NSSM to capture stdout/stderr for debugging
         const nssmLogDir = path.join(app.getPath('logs'), 'nssm');
         if (!fs.existsSync(nssmLogDir)) fs.mkdirSync(nssmLogDir, { recursive: true });
-        serviceManager._runNssm('set', serviceName, 'AppStdout', path.join(nssmLogDir, `${serviceName}-stdout.log`));
-        serviceManager._runNssm('set', serviceName, 'AppStderr', path.join(nssmLogDir, `${serviceName}-stderr.log`));
-        serviceManager._runNssm('set', serviceName, 'AppStdoutCreationDisposition', 4);
-        serviceManager._runNssm('set', serviceName, 'AppStderrCreationDisposition', 4);
-        serviceManager._runNssm('set', serviceName, 'AppRotateFiles', 1);
-        serviceManager._runNssm('set', serviceName, 'AppRotateBytes', 1048576);
-        serviceManager.startService(serviceName);
+        await serviceManager._runNssmAsync('set', serviceName, 'AppStdout', path.join(nssmLogDir, `${serviceName}-stdout.log`));
+        await serviceManager._runNssmAsync('set', serviceName, 'AppStderr', path.join(nssmLogDir, `${serviceName}-stderr.log`));
+        await serviceManager._runNssmAsync('set', serviceName, 'AppStdoutCreationDisposition', 4);
+        await serviceManager._runNssmAsync('set', serviceName, 'AppStderrCreationDisposition', 4);
+        await serviceManager._runNssmAsync('set', serviceName, 'AppRotateFiles', 1);
+        await serviceManager._runNssmAsync('set', serviceName, 'AppRotateBytes', 1048576);
+        await serviceManager._runNssmAsync('start', serviceName);
         backupManager.updateProfile({ Id: profileId, ManagementMode: 'nssm', NssmServiceName: serviceName });
         sendNotification('Backup Service Deployed', `${serviceName} is now running as an NSSM service`, 'success');
       }
-      return { success: result.success, message: result.message, serviceName };
+      return { success: installResult.success, message: installResult.message, serviceName };
     } catch (err) {
       return { success: false, message: err.message };
     }
@@ -796,12 +803,14 @@ function registerIPC() {
       if (!profile) return { success: false, message: 'Profile not found' };
       const serviceName = profile.NssmServiceName;
       if (!serviceName) return { success: false, message: 'No NSSM service linked' };
-      const result = serviceManager.stopService(serviceName);
-      serviceManager.uninstallService(serviceName);
-      // Remove wrapper script
+      await serviceManager._runNssmAsync('stop', serviceName);
+      await serviceManager._runNssmAsync('remove', serviceName, 'confirm');
+      // Remove wrapper and config files
       const wrappersDir = wrapperGenerator.wrappersDir;
       const wrapperPath = path.join(wrappersDir, `${serviceName}.ps1`);
+      const configPath = path.join(wrappersDir, `backup-profile-${profileId}.json`);
       if (fs.existsSync(wrapperPath)) fs.unlinkSync(wrapperPath);
+      if (fs.existsSync(configPath)) fs.unlinkSync(configPath);
       backupManager.updateProfile({ Id: profileId, NssmServiceName: '' });
       sendNotification('Backup Service Removed', `${serviceName} has been stopped and removed`, 'info');
       return { success: true, message: 'Service removed' };

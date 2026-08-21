@@ -713,7 +713,7 @@ async function refreshServices() {
   try {
     const allServices = await window.api.getServices();
     const filterManaged = document.getElementById('filter-managed-only').checked;
-    const services = filterManaged ? allServices.filter(s => s.Name && s.Name.startsWith('CronMaster_')) : allServices;
+    const services = filterManaged ? allServices.filter(s => s.Name && (s.Name.startsWith('CronMaster_') || s.Name.startsWith('KyrionBackup_'))) : allServices;
     const tbody = document.getElementById('services-body');
     const empty = document.getElementById('services-empty');
     if (services.length === 0) { tbody.innerHTML = ''; empty.style.display = 'block'; lucide.createIcons(); return; }
@@ -741,7 +741,15 @@ async function refreshServices() {
 }
 
 // Managed-only filter toggle
-document.getElementById('filter-managed-only').addEventListener('change', () => refreshServices());
+const filterManagedEl = document.getElementById('filter-managed-only');
+// Restore saved state from localStorage
+if (localStorage.getItem('services.filterManaged') !== null) {
+  filterManagedEl.checked = localStorage.getItem('services.filterManaged') === 'true';
+}
+filterManagedEl.addEventListener('change', () => {
+  localStorage.setItem('services.filterManaged', String(filterManagedEl.checked));
+  refreshServices();
+});
 
 
 async function restartServiceFromBadge(serviceName) {
