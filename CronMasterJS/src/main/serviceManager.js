@@ -20,6 +20,8 @@ class ServiceManager {
     } catch (e) {}
 
     const commonPaths = [
+      `${process.env.ProgramData}\\chocolatey\\bin\\nssm.exe`,
+      'C:\\ProgramData\\chocolatey\\bin\\nssm.exe',
       'C:\\nssm\\win64\\nssm.exe',
       'C:\\nssm\\win32\\nssm.exe',
       `${process.env.ProgramFiles}\\nssm\\nssm.exe`,

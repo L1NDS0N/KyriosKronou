@@ -1285,12 +1285,20 @@ async function refreshKyrionService() {
     const uninstallBtn = document.getElementById('btn-uninstall-kyrion-svc');
     const restartBtn = document.getElementById('btn-restart-kyrion-svc');
 
+    if (!status.nssmAvailable) {
+      statusEl.innerHTML = '<span class="badge" style="background:var(--glass3);color:var(--text3)">NSSM not found — install via <code>choco install nssm</code> or download from nssm.cc</span>';
+      installBtn.style.display = 'none';
+      uninstallBtn.style.display = 'none';
+      restartBtn.style.display = 'none';
+      return;
+    }
+
     if (status.installed) {
-      const isRunning = status.running || status.status === 'Running';
-      statusEl.innerHTML = `<span class="badge ${isRunning ? 'badge-active' : 'badge-error'}" style="font-size:12px">Service: KyrionKronou - ${status.status} ${status.startType ? '(' + status.startType + ')' : ''}</span>`;
+      const isRunning = status.status === 'Running';
+      statusEl.innerHTML = `<span class="badge ${isRunning ? 'badge-active' : 'badge-error'}" style="font-size:12px">Service: ${status.serviceName} - ${status.status}</span>`;
       installBtn.style.display = 'none';
       uninstallBtn.style.display = '';
-      restartBtn.style.display = '';
+      restartBtn.style.display = isRunning ? '' : 'none';
       restartBtn.textContent = isRunning ? 'Restart Service' : 'Start Service';
     } else {
       statusEl.innerHTML = '<span class="badge" style="background:var(--glass3);color:var(--text3)">Not installed - Tasks and backups run only when the app is open</span>';
