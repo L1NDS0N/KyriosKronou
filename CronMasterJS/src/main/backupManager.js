@@ -625,29 +625,36 @@ class BackupManager {
   }
 
   async uploadSFTP(filePath, target) {
-    return new Promise((resolve) => {
-      const filename = path.basename(filePath);
-      const remotePath = target.path ? `${target.path}/${filename}` : `/${filename}`;
-
-      // Try WinSCP, then psftp, then ssh
-      const hasWinSCP = fs.existsSync('C:\\Program Files (x86)\\WinSCP\\WinSCP.com');
-      const hasPscp = fs.existsSync('C:\\Program Files (x86)\\PuTTY\\pscp.exe');
-
-      if (hasWinSCP) {
-        const cmd = `"C:\\Program Files (x86)\\WinSCP\\WinSCP.com" /ini=nul /command "open sftp://${target.user}:${target.password}@${target.host}:${target.port || 22}/ -hostkey=*" "put "${filePath}" "${remotePath}"" "exit"`;
-        exec(cmd, { timeout: 600000, windowsHide: true }, (error) => {
-          if (error) resolve({ success: false, type: 'sftp', message: error.message });
-          else resolve({ success: true, type: 'sftp', remotePath });
-        });
-      } else {
-        // Fallback: try ssh/sftp from Git Bash or WSL
-        const cmd = `sftp -o StrictHostKeyChecking=no -P ${target.port || 22} ${target.user}@${target.host} <<< "put ${filePath} ${remotePath}"`;
-        exec(cmd, { timeout: 600000, windowsHide: true }, (error) => {
-          if (error) resolve({ success: false, type: 'sftp', message: error.message });
-          else resolve({ success: true, type: 'sftp', remotePath });
-        });
+    const Client = require('ssh2-sftp-client');
+    const sftp = new Client();
+    const filename = path.basename(filePath);
+    const remotePath = target.path ? `${target.path}/${filename}` : `/${filename}`;
+    try {
+      this.logger.log('INFO', `SFTP connecting to ${target.host}:${target.port || 22} as ${target.user}`);
+      await sftp.connect({
+        host: target.host,
+        port: parseInt(target.port) || 22,
+        username: target.user,
+        password: target.password,
+        readyTimeout: 15000,
+        algorithms: { kex: ['ecdh-sha2-nistp256','ecdh-sha2-nistp384','ecdh-sha2-nistp521','diffie-hellman-group-exchange-sha256','diffie-hellman-group14-sha256','diffie-hellman-group14-sha1'] }
+      });
+      this.logger.log('INFO', `SFTP connected, ensuring remote directory exists: ${target.path || '/'}`);
+      // Ensure remote directory exists
+      if (target.path) {
+        await sftp.mkdir(target.path, true);
       }
-    });
+      this.logger.log('INFO', `SFTP uploading ${filePath} -> ${remotePath}`);
+      await sftp.put(filePath, remotePath);
+      const stat = await sftp.stat(remotePath);
+      this.logger.log('INFO', `SFTP upload OK: ${filename} (${stat.size} bytes)`);
+      await sftp.end();
+      return { success: true, type: 'sftp', remotePath };
+    } catch (err) {
+      this.logger.log('ERROR', `SFTP upload failed: ${err.message}`);
+      try { await sftp.end(); } catch(e) {}
+      return { success: false, type: 'sftp', message: err.message };
+    }
   }
 
   async uploadSMB(filePath, target) {
