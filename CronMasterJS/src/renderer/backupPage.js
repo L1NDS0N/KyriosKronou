@@ -308,9 +308,6 @@ class BackupPage {
     lucide.createIcons();
   }
 
-  // (management mode removed — Kyrion handles scheduling directly)
-    this._updateFloatingSummary();
-  }
 
   _renderStepContent() {
     const d = this.draft;
