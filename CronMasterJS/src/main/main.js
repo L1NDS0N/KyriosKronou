@@ -206,12 +206,38 @@ function initComponents() {
   const configDir = path.join(appData, 'config');
   const logsDir = path.join(appData, 'logs');
 
+  // ─── Migrate config from old CronMaster path ───
+  try {
+    const oldConfigDir = path.join(appData, '..', 'CronMaster', 'config');
+    const oldLogsDir = path.join(appData, '..', 'CronMaster', 'logs');
+    if (fs.existsSync(oldConfigDir) && !fs.existsSync(path.join(configDir, 'profiles', 'default.json'))) {
+      if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+      if (!fs.existsSync(path.join(configDir, 'profiles'))) fs.mkdirSync(path.join(configDir, 'profiles'), { recursive: true });
+      // Copy config files
+      const copyDir = (src, dst) => {
+        if (!fs.existsSync(src)) return;
+        for (const f of fs.readdirSync(src)) {
+          const srcPath = path.join(src, f);
+          const dstPath = path.join(dst, f);
+          if (fs.statSync(srcPath).isDirectory()) {
+            if (!fs.existsSync(dstPath)) fs.mkdirSync(dstPath, { recursive: true });
+            copyDir(srcPath, dstPath);
+          } else {
+            fs.copyFileSync(srcPath, dstPath);
+          }
+        }
+      };
+      copyDir(oldConfigDir, configDir);
+      copyDir(oldLogsDir, logsDir);
+      console.log('Config migrated from old CronMaster directory');
+    }
+  } catch (e) { console.error('Config migration skipped:', e.message); }
+
   cronParser = new CronParser();
   logger = new Logger(logsDir);
   config = new ConfigManager(configDir, 'default');
   taskManager = new TaskManager(config, logger, cronParser);
   serviceManager = new ServiceManager(logger);
-  nssmInstaller = new NssmInstaller(logger);
   wrapperGenerator = new WrapperGenerator(config, logger);
   backupManager = new BackupManager(config, logger);
 
@@ -784,7 +810,7 @@ function registerIPC() {
       const ftp = require('basic-ftp');
       const client = new ftp.Client();
       client.ftp.verbose = false;
-      await client.access({ host: config.host, user: config.user, password: config.password, port: 21 });
+      await client.access({ host: config.host, user: config.user, password: config.password, port: parseInt(config.port) || 21 });
       if (config.path) await client.cd(config.path);
       await client.close();
       return { success: true, message: 'FTP connection successful' };

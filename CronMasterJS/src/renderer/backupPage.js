@@ -53,57 +53,27 @@ class BackupPage {
     }
     if (empty) empty.style.display = 'none';
 
-    // Load stats and NSSM status for all profiles
+    // Load stats for all profiles
     const statsMap = {};
-    const nssmStatusMap = {};
     for (const p of this.profiles) {
       try {
         const stats = await window.api.getBackupHistoryStats(p.Id);
         statsMap[p.Id] = stats.stats || {};
       } catch (e) { statsMap[p.Id] = {}; }
-      if ((p.ManagementMode || 'cronmaster') === 'nssm' && p.NssmServiceName) {
-        try {
-          const statusResult = await window.api.getBackupNssmStatus(p.Id);
-          nssmStatusMap[p.Id] = statusResult.status || null;
-        } catch (e) { nssmStatusMap[p.Id] = null; }
-      }
     }
 
     content.innerHTML = this.profiles.map(p => {
       const st = statsMap[p.Id] || {};
-      const mode = p.ManagementMode || 'cronmaster';
-      const isNssm = mode === 'nssm';
-      const serviceName = p.NssmServiceName || '';
-      const nssmInfo = nssmStatusMap[p.Id];
-      const nssmStatusText = nssmInfo?.status || null;
       return `
       <div class="glass-card backup-profile-card ${p.Enabled ? '' : 'disabled'}">
         <div class="backup-profile-header">
           <div class="backup-profile-info">
             <h3 class="backup-profile-name">${esc(p.Name)}</h3>
             <span class="badge ${p.Enabled ? 'badge-active' : 'badge-disabled'}">${p.Enabled ? 'Active' : 'Disabled'}</span>
-            ${isNssm ? `
-              <span class="badge badge-warning" style="font-size:10px">&#128736; NSSM Managed</span>
-              ${serviceName ? `<span class="badge" style="font-size:9px;background:rgba(255,255,255,0.06);color:var(--text3);font-family:monospace">${esc(serviceName)}</span>` : ''}
-              ${nssmStatusText ? `<span class="badge badge-${nssmStatusText === 'Running' ? 'active' : 'disabled'}" style="font-size:9px">${nssmStatusText === 'Running' ? '\u25cf Running' : '\u25cf Stopped'}</span>` : (serviceName ? `<span class="badge badge-disabled" style="font-size:9px">\u25cf Unknown</span>` : '')}
-            ` : `
-              <span class="badge badge-info" style="font-size:10px">&#9201; Kyrion</span>
-            `}
             <span class="badge badge-info">${esc(p.Databases?.length ? p.Databases.join(', ') : 'All DBs')}</span>
             ${p.Compression !== 'none' ? `<span class="badge badge-info" style="font-size:10px">${p.Compression.toUpperCase()} L${p.CompressionLevel}</span>` : ''}
           </div>
           <div class="backup-profile-actions">
-            ${isNssm ? `
-              ${serviceName ? `
-                <button class="btn-nssm-toggle btn-sm btn-nssm-active" onclick="backupPage.undeployBackupNssm('${p.Id}')" title="Stop NSSM service">
-                  <i data-lucide="power-off"></i> Stop
-                </button>
-              ` : `
-                <button class="btn-nssm-toggle btn-sm" onclick="backupPage.deployBackupNssm('${p.Id}')" title="Deploy as NSSM service">
-                  <i data-lucide="play-circle"></i> Deploy
-                </button>
-              `}
-            ` : ''}
             <button class="btn-glow btn-sm" onclick="backupPage.runBackup('${p.Id}')"><i data-lucide="play"></i> Run</button>
             <button class="btn-secondary-sm" onclick="backupPage.showHistory('${p.Id}')" title="Execution History"><i data-lucide="history"></i></button>
             <button class="btn-secondary-sm" onclick="backupPage.editProfile('${p.Id}')" title="Edit Profile"><i data-lucide="pencil"></i> Edit</button>
@@ -290,7 +260,6 @@ class BackupPage {
     const d = this.draft;
     const dbs = (d.Databases || []).length > 0 ? d.Databases.join(', ') : 'All databases';
     const uploads = (d.UploadTargets || []).length > 0 ? d.UploadTargets.map(t => t.type.toUpperCase()).join(', ') : 'None';
-    const mode = d.ManagementMode || 'cronmaster';
     return `
       <div class="ws-header">
         <i data-lucide="file-text" style="width:14px;height:14px"></i>
@@ -326,10 +295,6 @@ class BackupPage {
         <div class="ws-value ws-mono">${esc(d.CronExpression) || '* * * * *'}</div>
       </div>
       <div class="ws-section">
-        <div class="ws-label">Mode</div>
-        <div class="ws-value">${mode === 'nssm' ? '&#128736; NSSM Service' : '&#9201; Kyrion'}</div>
-      </div>
-      <div class="ws-section">
         <div class="ws-label">Status</div>
         <div class="ws-value">${d.Enabled !== false ? '<span style="color:var(--green)">&#9679; Enabled</span>' : '<span style="color:var(--red)">&#9679; Disabled</span>'}</div>
       </div>
@@ -343,18 +308,7 @@ class BackupPage {
     lucide.createIcons();
   }
 
-  setMode(mode) {
-    this.draft.ManagementMode = mode;
-    // Toggle active class on mode buttons
-    document.querySelectorAll('.bp-mode-option').forEach(el => el.classList.remove('active'));
-    // Find the correct label by checking the onclick attribute or data value
-    const labels = document.querySelectorAll('.bp-mode-option');
-    labels.forEach(label => {
-      const isCron = label.getAttribute('onclick').includes("'cronmaster'");
-      if ((mode === 'cronmaster' && isCron) || (mode === 'nssm' && !isCron)) {
-        label.classList.add('active');
-      }
-    });
+  // (management mode removed — Kyrion handles scheduling directly)
     this._updateFloatingSummary();
   }
 
@@ -477,21 +431,6 @@ class BackupPage {
           <span class="bp-db-chip" onclick="backupPage._setCron('0 0 1 * *')">1st of month</span>
         </div>
 
-        <label class="form-label" style="margin-top:12px">Management Mode</label>
-        <p style="font-size:12px;color:var(--text3);margin-bottom:8px">Kyrion runs backup when the app is open. NSSM keeps it running as a Windows service even when the app is closed.</p>
-        <div style="display:flex;gap:8px;margin-bottom:8px">
-          <label class="bp-mode-option ${(d.ManagementMode || 'cronmaster') === 'cronmaster' ? 'active' : ''}" onclick="backupPage.setMode('cronmaster')">
-            <input type="radio" name="mgmt-mode" value="cronmaster" ${(d.ManagementMode || 'cronmaster') === 'cronmaster' ? 'checked' : ''} style="display:none">
-            <i data-lucide="monitor" style="width:16px;height:16px"></i>
-            <div><strong>Kyrion</strong><br><small>App must be open</small></div>
-          </label>
-          <label class="bp-mode-option ${d.ManagementMode === 'nssm' ? 'active' : ''}" onclick="backupPage.setMode('nssm')">
-            <input type="radio" name="mgmt-mode" value="nssm" ${d.ManagementMode === 'nssm' ? 'checked' : ''} style="display:none">
-            <i data-lucide="server" style="width:16px;height:16px"></i>
-            <div><strong>NSSM Service</strong><br><small>Always running</small></div>
-          </label>
-        </div>
-
         <div class="checkbox-row">
           <input type="checkbox" id="wiz-enabled" ${d.Enabled !== false ? 'checked' : ''} onchange="backupPage.draft.Enabled=this.checked">
           <label for="wiz-enabled">Enable this backup profile</label>
@@ -512,6 +451,8 @@ class BackupPage {
 
   _renderTarget(t, i) {
     const isSmb = t.type === 'smb';
+    const defaultPort = t.type === 'sftp' ? 22 : t.type === 'smb' ? 445 : 21;
+    const port = t.port || defaultPort;
     return `
       <div class="bp-target-card" data-idx="${i}" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;background:rgba(255,255,255,.02)">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
@@ -525,9 +466,15 @@ class BackupPage {
           <button class="btn-danger btn-sm" onclick="this.closest('.bp-target-card').remove(); backupPage._syncTargets()" title="Remove"><i data-lucide="trash-2"></i></button>
         </div>
         <div style="display:grid;grid-template-columns:1fr;gap:6px">
-          <div>
-            <label class="form-label" style="margin-bottom:2px;font-size:10px">Host</label>
-            <input type="text" class="form-input" id="wiz-t-host-${i}" value="${esc(t.host || t.url || '')}" placeholder="ftp.example.com" oninput="backupPage._syncTargets()">
+          <div style="display:grid;grid-template-columns:2fr 1fr;gap:6px">
+            <div>
+              <label class="form-label" style="margin-bottom:2px;font-size:10px">Host</label>
+              <input type="text" class="form-input" id="wiz-t-host-${i}" value="${esc(t.host || t.url || '')}" placeholder="ftp.example.com" oninput="backupPage._syncTargets()">
+            </div>
+            <div>
+              <label class="form-label" style="margin-bottom:2px;font-size:10px">Port</label>
+              <input type="number" class="form-input" id="wiz-t-port-${i}" value="${port}" min="1" max="65535" oninput="backupPage._syncTargets()">
+            </div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
             <div>
@@ -578,6 +525,7 @@ class BackupPage {
   async testTarget(i) {
     const type = document.getElementById(`wiz-t-type-${i}`)?.value;
     const host = document.getElementById(`wiz-t-host-${i}`)?.value;
+    const port = parseInt(document.getElementById(`wiz-t-port-${i}`)?.value) || (type === 'sftp' ? 22 : type === 'smb' ? 445 : 21);
     const user = document.getElementById(`wiz-t-user-${i}`)?.value;
     const pass = document.getElementById(`wiz-t-pass-${i}`)?.value;
     const path = document.getElementById(`wiz-t-path-${i}`)?.value;
@@ -586,17 +534,17 @@ class BackupPage {
     if (resultEl) { resultEl.style.display='block'; resultEl.innerHTML='<span style="color:var(--text3)">Testing connection...</span>'; }
     try {
       if (type === 'ftp') {
-        const r = await window.api.testFtpConnection({ host, user, password: pass, path: path || '/' });
+        const r = await window.api.testFtpConnection({ host, port, user, password: pass, path: path || '/' });
         if (resultEl) resultEl.innerHTML = r.success
           ? `<span style="color:var(--green)">&#10003; Connected successfully</span>`
           : `<span style="color:var(--red)">&#10007; ${esc(r.message || 'Connection failed')}</span>`;
       } else if (type === 'sftp') {
-        const r = await window.api.testSftpConnection({ host, user, password: pass, path: path || '/' });
+        const r = await window.api.testSftpConnection({ host, port, user, password: pass, path: path || '/' });
         if (resultEl) resultEl.innerHTML = r.success
           ? `<span style="color:var(--green)">&#10003; Connected successfully</span>`
           : `<span style="color:var(--red)">&#10007; ${esc(r.message || 'Connection failed')}</span>`;
       } else {
-        const r = await window.api.testSmbConnection({ host, user, password: pass, path: path || '' });
+        const r = await window.api.testSmbConnection({ host, port, user, password: pass, path: path || '' });
         if (resultEl) resultEl.innerHTML = r.success
           ? `<span style="color:var(--green)">&#10003; ${esc(r.message || 'Path accessible')}</span>`
           : `<span style="color:var(--red)">&#10007; ${esc(r.message || 'Cannot access path')}</span>`;
@@ -613,6 +561,7 @@ class BackupPage {
       targets.push({
         type: document.getElementById(`wiz-t-type-${i}`)?.value || 'ftp',
         host: document.getElementById(`wiz-t-host-${i}`)?.value || '',
+        port: parseInt(document.getElementById(`wiz-t-port-${i}`)?.value) || 21,
         user: document.getElementById(`wiz-t-user-${i}`)?.value || '',
         password: document.getElementById(`wiz-t-pass-${i}`)?.value || '',
         path: document.getElementById(`wiz-t-path-${i}`)?.value || ''
@@ -934,29 +883,6 @@ class BackupPage {
     showToast('CSV exported', 'success');
   }
 
-  // ─── NSSM Deploy/Undeploy ───
-  async deployBackupNssm(profileId) {
-    showToast('Deploying NSSM service...', 'info');
-    const result = await window.api.deployBackupNssm(profileId);
-    if (result.success) {
-      showToast(`Service deployed: ${result.serviceName}`, 'success');
-    } else {
-      showToast(result.message || 'Deploy failed', 'error');
-    }
-    this.load();
-  }
-
-  async undeployBackupNssm(profileId) {
-    if (!confirm('Stop and remove the NSSM service for this backup?')) return;
-    showToast('Removing NSSM service...', 'info');
-    const result = await window.api.undeployBackupNssm(profileId);
-    if (result.success) {
-      showToast('Service removed', 'success');
-    } else {
-      showToast(result.message || 'Remove failed', 'error');
-    }
-    this.load();
-  }
 }
 
 const backupPage = new BackupPage();

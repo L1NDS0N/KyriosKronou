@@ -593,10 +593,12 @@ class BackupManager {
     return new Promise((resolve) => {
       const filename = path.basename(filePath);
       const remotePath = target.path ? `${target.path}/${filename}` : filename;
+      const port = target.port || 21;
+      const ftpUrl = target.url || `ftp://${target.host}:${port}`;
 
       // Use PowerShell FTP
       const cmd = `powershell -NoProfile -Command "
-        $ftp = New-Object System.Net.FtpWebRequest('${target.url}/${remotePath}');
+        $ftp = New-Object System.Net.FtpWebRequest('${ftpUrl}/${remotePath}');
         $ftp.Method = [System.Net.WebRequestMethods+Ftp]::UploadFile;
         $ftp.Credentials = New-Object System.Net.NetworkCredential('${target.user || ''}', '${target.password || ''}');
         $ftp.UseBinary = $true;

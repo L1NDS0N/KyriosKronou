@@ -711,6 +711,30 @@ async function runTask(id) {
 async function refreshServices() {
   setLoading('page-services', true);
   try {
+    // Update Kyrion service banner
+    try {
+      const kStatus = await window.api.getKyrionServiceStatus();
+      const bannerStatus = document.getElementById('kyrion-svc-banner-status');
+      const bannerBtn = document.getElementById('btn-kyrion-svc-toggle');
+      if (kStatus.installed) {
+        const running = kStatus.status === 'Running';
+        bannerStatus.innerHTML = `<span style="color:${running ? 'var(--green)' : 'var(--red)'}">\u25cf ${kStatus.status}</span> \u2014 ${kStatus.serviceName}`;
+        bannerBtn.textContent = running ? 'Stop' : 'Start';
+        bannerBtn.onclick = async () => {
+          if (running) await window.api.uninstallKyrionService();
+          else await window.api.restartKyrionService();
+          refreshServices();
+        };
+      } else if (kStatus.nssmAvailable) {
+        bannerStatus.textContent = 'Not installed \u2014 tasks and backups run only when the app is open';
+        bannerBtn.textContent = 'Install';
+        bannerBtn.onclick = async () => { await window.api.installKyrionService(); refreshServices(); };
+      } else {
+        bannerStatus.textContent = 'NSSM not available \u2014 install NSSM to enable background service';
+        bannerBtn.style.display = 'none';
+      }
+    } catch (e) { console.error('Kyrion service status error:', e); }
+
     const allServices = await window.api.getServices();
     const filterManaged = document.getElementById('filter-managed-only').checked;
     const services = filterManaged ? allServices.filter(s => s.Name && (s.Name.startsWith('Kyrion_') || s.Name.startsWith('KyrionBackup_'))) : allServices;
