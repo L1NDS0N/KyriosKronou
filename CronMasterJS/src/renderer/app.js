@@ -168,29 +168,28 @@ function renderTasks() {
   empty.style.display = 'none';
 
   list.innerHTML = filtered.map(t => {
-    const svcId = `svc-${t.Id}`;
     return `
-    <div class="task-card ${t.ManagementMode === 'nssm' ? 'task-card-nssm' : ''}" style="cursor:pointer">
+    <div class="task-card ${t.Enabled ? '' : 'task-disabled'}" style="cursor:pointer">
       <div class="task-info" onclick="event.stopPropagation(); showTaskHistory('${t.Id}')">
         <div class="task-name">${escHtml(t.Name)}
-          <span class="badge ${t.Enabled ? 'badge-active' : 'badge-disabled'}">${t.Enabled ? i18n.t('tasks.active') : i18n.t('tasks.disabled')}</span>
-          <span class="badge ${t.ManagementMode === 'nssm' ? 'badge-service-running' : 'badge-info'}" style="font-size:9px;padding:1px 6px;"><i data-lucide="${t.ManagementMode === 'nssm' ? 'server' : 'monitor'}" style="width:10px;height:10px;"></i> ${t.ManagementMode === 'nssm' ? 'NSSM Service' : 'Κύριος Κρόνου'}</span>
-          <span class="badge badge-service" id="badge-${svcId}"><i data-lucide="loader" style="width:10px;height:10px;"></i></span>
+          ${t.ScriptType ? `<span class="badge badge-info" style="font-size:9px;padding:1px 5px;">${t.ScriptType.toUpperCase()} inline</span>` : ''}
         </div>
-        <div class="task-meta"><i data-lucide="clock"></i>${escHtml(t.CronExpression)}<span style="color:var(--text3)">|</span><i data-lucide="file-code"></i>${escHtml(t.ScriptPath)}${t.ScriptType ? ` <span class="badge badge-info" style="font-size:9px;padding:1px 5px;">${t.ScriptType.toUpperCase()} inline</span>` : ''}</div>
+        <div class="task-meta"><i data-lucide="clock"></i>${escHtml(t.CronExpression)}<span style="color:var(--text3)">|</span><i data-lucide="file-code"></i>${escHtml(t.ScriptPath || 'inline')}</div>
         ${t.Description ? `<div class="task-desc">${escHtml(t.Description)}</div>` : ''}
       </div>
       <div class="task-actions" onclick="event.stopPropagation()">
-        ${t.ManagementMode !== 'nssm' ? `<button class="btn-glow btn-sm" onclick="runTask('${t.Id}')"><i data-lucide="play"></i>${i18n.t('tasks.run')}</button>` : ''}
+        <label class="toggle-switch" title="Enable/Disable" style="margin-right:4px">
+          <input type="checkbox" ${t.Enabled ? 'checked' : ''} onchange="toggleTaskEnabled('${t.Id}', this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+        <button class="btn-glow btn-sm" onclick="runTask('${t.Id}')"><i data-lucide="play"></i>${i18n.t('tasks.run')}</button>
         <button class="btn-secondary-sm" onclick="editTask('${t.Id}')"><i data-lucide="pencil"></i>${i18n.t('tasks.edit')}</button>
-        ${t.ManagementMode === 'nssm' ? `<button class="btn-secondary-sm btn-deploy" id="btn-deploy-${t.Id}" onclick="toggleDeploy('${t.Id}')"><i data-lucide="package-plus"></i>${i18n.t('tasks.deploy')}</button>` : ''}
         <button class="btn-danger" onclick="deleteTask('${t.Id}','${escHtml(t.Name)}')"><i data-lucide="trash-2"></i></button>
       </div>
     </div>`;
   }).join('');
   lucide.createIcons();
   // Check service status for each task
-  filtered.forEach(t => checkTaskServiceStatus(t.Id));
   // Also render in quick panel
   renderQuickTasks();
 }
@@ -358,24 +357,6 @@ function showTaskDialog(task = null) {
       <input type="checkbox" id="dlg-enabled" ${isEdit && !task.Enabled ? '' : 'checked'}>
       <label for="dlg-enabled">Enable this task</label>
     </div>
-    <label class="form-label">Management Mode</label>
-    <div class="mgmt-mode-selector">
-      <div class="mgmt-mode-option ${(isEdit ? task.ManagementMode : 'cronmaster') === 'cronmaster' ? 'active' : ''}" id="mode-cronmaster" onclick="selectMgmtMode('cronmaster')">
-        <div class="mgmt-mode-icon"><i data-lucide="monitor"></i></div>
-        <div class="mgmt-mode-info">
-          <div class="mgmt-mode-name">Κύριος Κρόνου</div>
-          <div class="mgmt-mode-desc">Managed by Kyrion Kronou scheduler. Requires the app to be running.</div>
-        </div>
-      </div>
-      <div class="mgmt-mode-option ${(isEdit ? task.ManagementMode : '') === 'nssm' ? 'active' : ''}" id="mode-nssm" onclick="selectMgmtMode('nssm')">
-        <div class="mgmt-mode-icon"><i data-lucide="server"></i></div>
-        <div class="mgmt-mode-info">
-          <div class="mgmt-mode-name">NSSM Service</div>
-          <div class="mgmt-mode-desc">Runs as a Windows service via NSSM. Always active, independent of Kyrion Kronou.</div>
-        </div>
-      </div>
-    </div>
-    <input type="hidden" id="dlg-mgmt-mode" value="${isEdit ? task.ManagementMode || 'cronmaster' : 'cronmaster'}">
     <div class="modal-actions">
       <button class="btn-ghost" onclick="hideModal()">Cancel</button>
       <button class="btn-glow" id="btn-save-task" onclick="saveTask(${isEdit ? `'${task.Id}'` : 'null'})">${isEdit ? '<i data-lucide="save"></i> Save Changes' : '<i data-lucide="plus"></i> Create Task'}</button>
@@ -401,11 +382,7 @@ function showTaskDialog(task = null) {
 
 // Script mode switching
 let _scriptMode = 'file';
-function selectMgmtMode(mode) {
-  document.getElementById('dlg-mgmt-mode').value = mode;
-  document.getElementById('mode-cronmaster').classList.toggle('active', mode === 'cronmaster');
-  document.getElementById('mode-nssm').classList.toggle('active', mode === 'nssm');
-}
+
 
 function scriptEditorSwitchMode(mode) {
   _scriptMode = mode;
@@ -464,7 +441,6 @@ async function saveTask(editId) {
     Arguments: document.getElementById('dlg-args').value,
     WorkingDirectory: document.getElementById('dlg-workdir').value,
     Description: document.getElementById('dlg-desc').value,
-    ManagementMode: document.getElementById('dlg-mgmt-mode').value,
     Enabled: document.getElementById('dlg-enabled').checked
   };
 
@@ -691,6 +667,16 @@ async function toggleDeploy(taskId) {
   if (btn) { btn.disabled = false; }
   checkTaskServiceStatus(taskId);
   refreshServices();
+  refreshDashboard();
+}
+
+async function toggleTaskEnabled(id, enabled) {
+  const task = allTasks.find(t => t.Id === id);
+  if (!task) return;
+  task.Enabled = enabled;
+  await window.api.updateTask(task);
+  showToast(`${task.Name} ${enabled ? 'enabled' : 'disabled'}`, 'info');
+  renderTasks();
   refreshDashboard();
 }
 

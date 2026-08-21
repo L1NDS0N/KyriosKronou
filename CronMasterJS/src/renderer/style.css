@@ -627,8 +627,8 @@ kbd {
 .mgmt-mode-info { flex: 1; }
 .mgmt-mode-name { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
 .mgmt-mode-desc { font-size: 11px; color: var(--text2); line-height: 1.4; }
-.task-card-nssm { border-left: 2px solid rgba(106,138,110,.3); }
-.task-card-nssm:hover { border-left-color: var(--green); }
+.task-disabled { opacity: 0.5; }
+.task-disabled:hover { opacity: 0.7; }
 
 .script-mode-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
 .script-mode-tab { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; font-size: 12px; font-weight: 500; border-radius: 8px; border: 1px solid var(--border); background: var(--glass2); color: var(--text2); cursor: pointer; transition: all .2s; }
