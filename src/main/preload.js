@@ -111,6 +111,10 @@ contextBridge.exposeInMainWorld('api', {
   uninstallKyrionService: () => ipcRenderer.invoke('uninstall-kyrion-service'),
   restartKyrionService: () => ipcRenderer.invoke('restart-kyrion-service'),
   getKyrionServiceHealth: () => ipcRenderer.invoke('get-kyrion-service-health'),
+  startKyrionService: () => ipcRenderer.invoke('start-kyrion-service'),
+  stopKyrionService: () => ipcRenderer.invoke('stop-kyrion-service'),
+  getSchedulerOwnership: () => ipcRenderer.invoke('get-scheduler-ownership'),
+  onSchedulerOwnershipChanged: (cb) => ipcRenderer.on('scheduler-ownership-changed', (_e, data) => cb(data)),
 
   // Events
   onDataUpdated: (callback) => ipcRenderer.on('data-updated', callback),

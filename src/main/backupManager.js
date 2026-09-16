@@ -25,6 +25,13 @@ class BackupManager {
     return [];
   }
 
+  // Re-read profiles from disk. The scheduler calls this every tick so the
+  // service picks up changes the GUI made in another process.
+  reload() {
+    this.profiles = this.loadProfiles();
+    return this.profiles;
+  }
+
   saveProfiles() {
     fs.writeFileSync(this.profilesFile, JSON.stringify(this.profiles, null, 2), 'utf8');
   }
@@ -890,7 +897,7 @@ class BackupManager {
 
     const wrapper = [
       '# ============================================================',
-      '# Kyrion Kronou - Backup NSSM Wrapper',
+      '# Kyrios Chronos - Backup NSSM Wrapper',
       '# Profile: ' + (profile.Name || 'Backup'),
       '# Cron: ' + cronExpr,
       '# Generated: ' + new Date().toISOString(),

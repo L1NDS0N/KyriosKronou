@@ -1,4 +1,4 @@
-// i18n.js - Internationalization module for Kyrion Kronou
+// i18n.js - Internationalization module for Kyrios Chronos
 // Supports English (en) and Brazilian Portuguese (pt-BR)
 
 const translations = {
@@ -134,10 +134,10 @@ const translations = {
     'taskDialog.descriptionPlaceholder': 'Optional description',
     'taskDialog.enable': 'Enable this task',
     'taskDialog.mgmtMode': 'Management Mode',
-    'taskDialog.cronmasterMode': 'Κύριος Κρόνου',
-    'taskDialog.cronmasterDesc': 'Managed by Kyrion Kronou scheduler. Requires the app to be running.',
+    'taskDialog.cronmasterMode': 'Κύριος Χρόνος',
+    'taskDialog.cronmasterDesc': 'Managed by the Kyrios Chronos scheduler. Runs in the background via the Windows service, or in the app when the service is not installed.',
     'taskDialog.nssmMode': 'NSSM Service',
-    'taskDialog.nssmDesc': 'Runs as a Windows service via NSSM. Always active, independent of Kyrion Kronou.',
+    'taskDialog.nssmDesc': 'Runs as a Windows service via NSSM. Always active, independent of Kyrios Chronos.',
     'taskDialog.saveChanges': 'Save Changes',
     'taskDialog.createTask': 'Create Task',
     'taskDialog.cancel': 'Cancel',
@@ -223,7 +223,7 @@ const translations = {
     'settings.closeToTray': 'Minimize to Tray on Close',
     'settings.closeToTrayDesc': 'When clicking X, the app hides to the system tray instead of closing',
     'settings.startWithWindows': 'Start with Windows',
-    'settings.startWithWindowsDesc': 'Automatically launch Kyrion Kronou when Windows starts',
+    'settings.startWithWindowsDesc': 'Automatically launch Kyrios Chronos when Windows starts',
     'settings.willCloseToTray': 'Will minimize to tray on close',
     'settings.willCloseNormally': 'Will close normally',
     'settings.willStartWithWindows': 'Will start with Windows',
@@ -450,10 +450,10 @@ const translations = {
     'taskDialog.descriptionPlaceholder': 'Descrição opcional',
     'taskDialog.enable': 'Ativar esta tarefa',
     'taskDialog.mgmtMode': 'Modo de Gerenciamento',
-    'taskDialog.cronmasterMode': 'Κύριος Κρόνου',
-    'taskDialog.cronmasterDesc': 'Gerenciado pelo agendador do Kyrion Kronou. Requer o app aberto.',
+    'taskDialog.cronmasterMode': 'Κύριος Χρόνος',
+    'taskDialog.cronmasterDesc': 'Gerenciado pelo agendador do Kyrios Chronos. Executa em segundo plano pelo serviço do Windows, ou pelo app quando o serviço não está instalado.',
     'taskDialog.nssmMode': 'Serviço NSSM',
-    'taskDialog.nssmDesc': 'Executa como serviço Windows via NSSM. Sempre ativo, independente do Kyrion Kronou.',
+    'taskDialog.nssmDesc': 'Executa como serviço Windows via NSSM. Sempre ativo, independente do Kyrios Chronos.',
     'taskDialog.saveChanges': 'Salvar Alterações',
     'taskDialog.createTask': 'Criar Tarefa',
     'taskDialog.cancel': 'Cancelar',
@@ -539,7 +539,7 @@ const translations = {
     'settings.closeToTray': 'Minimizar ao Fechar',
     'settings.closeToTrayDesc': 'Ao clicar em X, o app minimiza para a bandeja ao invés de fechar',
     'settings.startWithWindows': 'Iniciar com o Windows',
-    'settings.startIniciarWindowsDesc': 'Iniciar automaticamente o Kyrion Kronou quando o Windows ligar',
+    'settings.startIniciarWindowsDesc': 'Iniciar automaticamente o Kyrios Chronos quando o Windows ligar',
     'settings.willCloseToTray': 'Minimizará para a bandeja ao fechar',
     'settings.willCloseNormally': 'Fechará normalmente',
     'settings.willStartWithWindows': 'Iniciará com o Windows',

@@ -12,96 +12,30 @@ const NssmInstaller = require('./nssmInstaller');
 const WrapperGenerator = require('./wrapperGenerator');
 const ApiServer = require('./apiServer');
 const BackupManager = require('./backupManager');
+const KyrionService = require('./kyrionService');
+const paths = require('./paths');
+const { SchedulerCore, ROLE_GUI, readOwner } = require('./schedulerCore');
 
-// ─── Service Mode Detection ───
-const isServiceMode = process.argv.includes('--service');
-const SERVICE_NAME = 'KyrionKronou';  // NSSM service name for the scheduler itself
-
-// ─── Service Mode: Bootstrap immediately (don't wait for app.whenReady) ───
-// Electron's app.whenReady() may never resolve in a Windows service context
-// because GPU/rendering initialization fails without an interactive desktop.
-if (isServiceMode) {
-  try {
-    // Init components synchronously
-    const configDir = app.getPath('userData');
-    if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
-    const svcLogger = new Logger(configDir);
-    const svcConfig = new ConfigManager(configDir);
-    const svcCronParser = new CronParser();
-    const svcTaskManager = new TaskManager(svcConfig, svcLogger, svcCronParser);
-    const svcBackupManager = new BackupManager(svcConfig, svcLogger);
-
-    svcLogger.log('INFO', '=== Kyrion Kronou Service Scheduler starting (immediate bootstrap) ===');
-    svcLogger.log('INFO', `PID: ${process.pid}, Config: ${configDir}`);
-    svcLogger.audit('SERVICE_STARTED', { targetType: 'service', after: { pid: process.pid } });
-
-    // Write PID file
-    try {
-      const pidFile = path.join(configDir, 'service.pid');
-      fs.writeFileSync(pidFile, process.pid.toString());
-    } catch(e) {}
-
-    // ─── Direct scheduler loop (no Electron dependency) ───
-    let lastRun = {};
-    setInterval(() => {
-      const now = new Date();
-      try {
-        // Tasks
-        const tasks = svcTaskManager.getAllTasks();
-        if (Array.isArray(tasks)) {
-          for (const task of tasks) {
-            if (task.Enabled === false) continue;
-            if (!task.CronExpression) continue;
-            if (svcCronParser.shouldRunNow(task.CronExpression)) {
-              // Prevent double-run within 55 seconds
-              if (lastRun[task.Id] && (now - lastRun[task.Id]) < 55000) continue;
-              lastRun[task.Id] = now;
-              svcLogger.log('INFO', `[Service] Executing task: ${task.Name}`);
-              svcTaskManager.executeTask(task).then(result => {
-                svcLogger.log('INFO', `[Service] Task ${task.Name}: ${result.success !== false ? 'Success' : 'Failed'}`);
-              }).catch(err => {
-                svcLogger.error(`[Service] Task ${task.Name} error`, err);
-              });
-            }
-          }
-        }
-        // Backups
-        const profiles = svcBackupManager.getAllProfiles();
-        if (Array.isArray(profiles)) {
-          for (const profile of profiles) {
-            if (!profile.Enabled) continue;
-            if (!profile.CronExpression) continue;
-            if (svcCronParser.shouldRunNow(profile.CronExpression)) {
-              if (lastRun['bkp_' + profile.Id] && (now - lastRun['bkp_' + profile.Id]) < 55000) continue;
-              lastRun['bkp_' + profile.Id] = now;
-              svcLogger.log('INFO', `[Service] Executing backup: ${profile.Name}`);
-              svcBackupManager.executeBackup(profile.Id).then(result => {
-                svcLogger.log('INFO', `[Service] Backup ${profile.Name}: ${result.success ? 'completed' : 'failed'} ${result.duration || ''}`);
-              }).catch(err => {
-                svcLogger.error(`[Service] Backup ${profile.Name} error`, err);
-              });
-            }
-          }
-        }
-      } catch (err) {
-        svcLogger.error('[Service] Scheduler tick error', err);
-      }
-    }, 15000);
-
-    svcLogger.log('INFO', 'Scheduler loop started (15s interval). Waiting for app.whenReady()...');
-  } catch (err) {
-    console.error('Service bootstrap failed:', err);
-    process.exit(1);
-  }
+// ─── Single instance ───
+// Only one GUI process may exist. A second launch (double-clicked icon, tray
+// relaunch, autostart racing a manual start) must surface the existing window
+// instead of starting a second scheduler.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+  process.exit(0);
 }
+
+const SERVICE_NAME = KyrionService.SERVICE_NAME;
 
 let mainWindow;
 let tray = null;
 let cronParser, logger, config, taskManager, serviceManager, nssmInstaller;
+let kyrionService;
+let scheduler;
 let wrapperGenerator;
 let apiServer;
 let backupManager;
-let schedulerInterval;
 let isQuitting = false;
 
 // ─── Push Notifications ───
@@ -170,7 +104,7 @@ function createWindow() {
       mainWindow.hide();
       return;
     }
-    if (schedulerInterval) clearInterval(schedulerInterval);
+    if (scheduler) scheduler.stop();
     if (logger) logger.flush();
   });
 
@@ -207,10 +141,10 @@ function createTray() {
   }
 
   tray = new Tray(trayIcon);
-  tray.setToolTip('Κύριος Κρόνου - Task Scheduler');
+  tray.setToolTip('Κύριος Χρόνος - Task Scheduler');
 
   const contextMenu = Menu.buildFromTemplate([
-    { label: 'Κύριος Κρόνου', enabled: false },
+    { label: 'Κύριος Χρόνος', enabled: false },
     { type: 'separator' },
     {
       label: 'Show Window', click: () => {
@@ -280,176 +214,63 @@ async function runDueTasksFromTray() {
 }
 
 function initComponents() {
-  const appData = app.getPath('userData');
-  const configDir = path.join(appData, 'config');
-  const logsDir = path.join(appData, 'logs');
-
-  // ─── Migrate config from old CronMaster path ───
-  try {
-    const oldConfigDir = path.join(appData, '..', 'CronMaster', 'config');
-    const oldLogsDir = path.join(appData, '..', 'CronMaster', 'logs');
-    if (fs.existsSync(oldConfigDir) && !fs.existsSync(path.join(configDir, 'profiles', 'default.json'))) {
-      if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
-      if (!fs.existsSync(path.join(configDir, 'profiles'))) fs.mkdirSync(path.join(configDir, 'profiles'), { recursive: true });
-      // Copy config files
-      const copyDir = (src, dst) => {
-        if (!fs.existsSync(src)) return;
-        for (const f of fs.readdirSync(src)) {
-          const srcPath = path.join(src, f);
-          const dstPath = path.join(dst, f);
-          if (fs.statSync(srcPath).isDirectory()) {
-            if (!fs.existsSync(dstPath)) fs.mkdirSync(dstPath, { recursive: true });
-            copyDir(srcPath, dstPath);
-          } else {
-            fs.copyFileSync(srcPath, dstPath);
-          }
-        }
-      };
-      copyDir(oldConfigDir, configDir);
-      copyDir(oldLogsDir, logsDir);
-      console.log('Config migrated from old CronMaster directory');
-    }
-  } catch (e) { console.error('Config migration skipped:', e.message); }
+  // Config lives in %ProgramData% so the GUI (running as the user) and the
+  // service (running as LocalSystem) read and write the SAME files.
+  const { configDir, logsDir } = paths.ensureDirs();
+  const migration = paths.migrateLegacyData();
 
   cronParser = new CronParser();
   logger = new Logger(logsDir);
   config = new ConfigManager(configDir, 'default');
   taskManager = new TaskManager(config, logger, cronParser);
   serviceManager = new ServiceManager(logger, config);
+  kyrionService = new KyrionService(logger, serviceManager);
   wrapperGenerator = new WrapperGenerator(config, logger);
   backupManager = new BackupManager(config, logger);
 
-  logger.log('INFO', 'Κύριος Κρόνου started');
+  if (migration.migrated) {
+    logger.log('INFO', `Migrated ${migration.copied} file(s) from ${migration.sources.join(', ')} to ${paths.dataDir()}`);
+  }
+
+  logger.log('INFO', `Κύριος Χρόνος started (data: ${paths.dataDir()})`);
   logger.audit('APP_STARTED', { targetType: 'app', after: { version: app.getVersion() } });
 }
 
-// ─── Service Mode Scheduler (headless, no window) ───
-function startServiceScheduler() {
-  logger.log('INFO', 'Service scheduler started (checking every 15s)');
-  
-  // Run immediately on start
-  runServiceSchedulerTick();
-  
-  // Then every 15 seconds
-  schedulerInterval = setInterval(runServiceSchedulerTick, 15000);
-}
-
-function runServiceSchedulerTick() {
-  const now = new Date();
-  
-  // ── Task scheduler ──
-  try {
-    const dueTasks = taskManager.getDueTasks();
-    dueTasks.forEach(async (task) => {
-      if (task.ManagementMode === 'nssm') return; // NSSM manages itself
-      try {
-        const result = await taskManager.executeTask(task);
-        logger.auditTaskExecuted(task.Id, task.Name, result);
-        logger.log('INFO', `[Service] Task executed: ${task.Name} - ${result.success !== false ? 'Success' : 'Failed'}`);
-      } catch (err) {
-        logger.error(`[Service] Task execution failed: ${task.Name}`, err);
-      }
-    });
-  } catch (err) {
-    logger.error('[Service] Task scheduler tick error', err);
-  }
-  
-  // ── Backup scheduler ──
-  try {
-    const profiles = backupManager.getAllProfiles();
-    profiles.forEach(async (profile) => {
-      if (!profile.Enabled) return;
-      if (profile.ManagementMode === 'nssm') return;
-      if (!cronParser.shouldRunNow(profile.CronExpression)) return;
-      // Prevent double-execution within 55 seconds
-      if (profile.LastRun) {
-        const lastRun = new Date(profile.LastRun);
-        if (now - lastRun < 55000) return;
-      }
-      logger.log('INFO', `[Service] Backup scheduler triggered: ${profile.Name}`);
-      try {
-        const result = await backupManager.executeBackup(profile.Id);
-        logger.log('INFO', `[Service] Backup ${result.success ? 'completed' : 'failed'}: ${profile.Name} - ${result.duration || ''}`);
-      } catch (err) {
-        logger.error(`[Service] Backup scheduler error: ${profile.Name}`, err);
-      }
-    });
-  } catch (err) {
-    logger.error('[Service] Backup scheduler tick error', err);
-  }
-}
-
-// ─── Service Mode IPC (minimal, for health checks) ───
-function registerServiceIPC() {
-  ipcMain.handle('get-service-mode', () => ({ mode: 'service', serviceName: SERVICE_NAME }));
-  ipcMain.handle('get-service-health', () => {
-    try {
-      const tasks = taskManager.getAllTasks();
-      const profiles = backupManager.getAllProfiles();
-      return {
-        success: true,
-        uptime: process.uptime(),
-        tasks: tasks.length,
-        activeTasks: tasks.filter(t => t.Enabled).length,
-        backups: profiles.length,
-        activeBackups: profiles.filter(p => p.Enabled).length,
-        memoryUsage: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB'
-      };
-    } catch (err) {
-      return { success: false, error: err.message };
-    }
-  });
-}
-
+// ─── GUI scheduler ───
+// Same engine the service runs. It only executes when it holds the ownership
+// lease, so with the service installed the GUI stays a passive viewer and jobs
+// never fire twice.
 function startScheduler() {
-  schedulerInterval = setInterval(() => {
-    // ── Task scheduler (Kyrion mode only) ──
-    if (mainWindow) {
-      const dueTasks = taskManager.getDueTasks();
-      dueTasks.forEach(async (task) => {
-        // Skip tasks managed by NSSM — they run independently
-        if (task.ManagementMode === 'nssm') return;
-        const result = await taskManager.executeTask(task);
-        logger.auditTaskExecuted(task.Id, task.Name, result);
+  scheduler = new SchedulerCore(
+    { taskManager, backupManager, cronParser, logger },
+    ROLE_GUI,
+    {
+      onTaskExecuted: (task, result) => {
         sendTaskNotification(task, result);
         if (mainWindow && mainWindow.webContents) {
           mainWindow.webContents.send('task-executed', result);
           mainWindow.webContents.send('data-updated');
         }
-      });
-    }
-
-    // ── Backup scheduler (Kyrion mode only) ──
-    if (backupManager) {
-      const profiles = backupManager.getAllProfiles();
-      const now = new Date();
-      profiles.forEach(async (profile) => {
-        if (!profile.Enabled) return;
-        if (profile.ManagementMode === 'nssm') return; // NSSM manages itself
-        if (!cronParser.shouldRunNow(profile.CronExpression)) return;
-        // Prevent double-execution within 55 seconds
-        if (profile.LastRun) {
-          const lastRun = new Date(profile.LastRun);
-          if (now - lastRun < 55000) return;
+      },
+      onBackupExecuted: (profile, result) => {
+        sendNotification(
+          result && result.success ? '✅ Backup Completed' : '❌ Backup Failed',
+          `${profile.Name}
+${result && result.success ? 'Backup successful' : 'Backup failed'}
+Duration: ${(result && result.duration) || '-'}`,
+          result && result.success ? 'success' : 'error'
+        );
+        if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('data-updated');
+      },
+      onOwnershipChange: (isOwner) => {
+        if (mainWindow && mainWindow.webContents) {
+          mainWindow.webContents.send('scheduler-ownership-changed', { isOwner });
         }
-        logger.log('INFO', `Backup scheduler triggered: ${profile.Name}`);
-        try {
-          const result = await backupManager.executeBackup(profile.Id);
-          sendNotification(
-            result.success ? '\u2705 Backup Completed' : '\u274c Backup Failed',
-            `${profile.Name}\n${result.success ? 'Backup successful' : 'Backup failed'}\nDuration: ${result.duration}`,
-            result.success ? 'success' : 'error'
-          );
-          if (mainWindow && mainWindow.webContents) {
-            mainWindow.webContents.send('data-updated');
-          }
-        } catch (err) {
-          logger.error(`Backup scheduler error: ${profile.Name}`, err);
-        }
-      });
+      },
     }
-  }, 30000);
+  ).start();
 }
+
 
 // IPC Handlers with audit logging and error wrappers
 function registerIPC() {
@@ -1163,108 +984,79 @@ function registerIPC() {
     });
   });
 
-  // ─── Kyrion Service Management (install/uninstall as Windows service) ───
+  // ─── Service management (install/uninstall the headless Windows service) ───
   ipcMain.handle('get-kyrion-service-status', async () => {
     try {
       const nssmCheck = serviceManager.checkNssm();
-      if (!nssmCheck.installed) {
-        return { installed: false, nssmAvailable: false, status: null };
-      }
-      // Auto-save the resolved NSSM path
-      if (nssmCheck.path && nssmCheck.path !== 'nssm') {
+      if (nssmCheck.installed && nssmCheck.path && nssmCheck.path !== 'nssm') {
         config.setSetting('NssmPath', nssmCheck.path);
       }
-      const info = serviceManager.getServiceInfo(SERVICE_NAME);
+      const health = await kyrionService.getHealth();
       return {
-        installed: !!info,
-        status: info ? info.Status : null,
-        nssmAvailable: true,
+        ...health,
+        nssmAvailable: nssmCheck.installed,
+        nssmPath: nssmCheck.path,
         serviceName: SERVICE_NAME,
-        isServiceMode,
-        nssmPath: nssmCheck.path
       };
     } catch (err) {
-      return { installed: false, nssmAvailable: false, status: null, error: err.message };
+      return { installed: false, running: false, nssmAvailable: false, status: null, error: err.message };
     }
   });
 
   ipcMain.handle('install-kyrion-service', async () => {
     try {
-      const nssmCheck = serviceManager.checkNssm();
-      if (!nssmCheck.installed) {
-        return { success: false, message: `NSSM not found at: ${nssmCheck.path || 'searched all paths'}. Install NSSM first.` };
-      }
-      // Check if already running
-      const existing = serviceManager.getServiceInfo(SERVICE_NAME);
-      if (existing && existing.Status === 'Running') {
-        return { success: false, message: 'Service already installed and running' };
-      }
-      // Remove existing if stopped/failed
-      if (existing) {
-        serviceManager.stopService(SERVICE_NAME);
-        serviceManager.uninstallService(SERVICE_NAME);
-        await new Promise(r => setTimeout(r, 1000));
-      }
-      const exePath = app.getPath('exe');
-      const exeDir = path.dirname(exePath);
-      // Install via NSSM
-      const result = serviceManager.installService(
-        SERVICE_NAME,
-        exePath,
-        '--service',
-        exeDir,
-        'Automatic'
-      );
-      if (!result.success) {
-        return { success: false, message: result.message || 'Failed to install service' };
-      }
-      // Configure: restart on failure
-      serviceManager._runNssm('set', SERVICE_NAME, 'AppExit', 'Default', 'Restart');
-      serviceManager._runNssm('set', SERVICE_NAME, 'AppRestartDelay', '5000');
-      serviceManager._runNssm('set', SERVICE_NAME, 'AppPriority', 'BELOW_NORMAL_PRIORITY_CLASS');
-      serviceManager.startService(SERVICE_NAME);
-      logger.audit('KYRION_SERVICE_INSTALLED', { targetType: 'service', after: { serviceName: SERVICE_NAME } });
-      sendServiceNotification('Installed', SERVICE_NAME, true, 'Kyrion Scheduler service installed and started');
-      return { success: true, message: `Service ${SERVICE_NAME} installed and started via NSSM` };
+      const result = await kyrionService.install();
+      sendServiceNotification('Installed', SERVICE_NAME, result.success, result.message);
+      return result;
     } catch (err) {
-      logger.error('Failed to install Kyrion service', err);
+      logger.error('Failed to install service', err);
       return { success: false, message: `Install failed: ${err.message}` };
     }
   });
 
   ipcMain.handle('uninstall-kyrion-service', async () => {
     try {
-      serviceManager.stopService(SERVICE_NAME);
-      const result = serviceManager.uninstallService(SERVICE_NAME);
-      logger.audit('KYRION_SERVICE_UNINSTALLED', { targetType: 'service', before: { serviceName: SERVICE_NAME } });
-      sendServiceNotification('Uninstalled', SERVICE_NAME, true, 'Kyrion Scheduler service removed');
+      const result = await kyrionService.uninstall();
+      sendServiceNotification('Uninstalled', SERVICE_NAME, result.success, result.message);
       return result;
     } catch (err) {
-      logger.error('Failed to uninstall Kyrion service', err);
+      logger.error('Failed to uninstall service', err);
       return { success: false, message: `Uninstall failed: ${err.message}` };
     }
   });
 
   ipcMain.handle('restart-kyrion-service', async () => {
     try {
-      serviceManager.stopService(SERVICE_NAME);
-      await new Promise(r => setTimeout(r, 1000));
-      const result = serviceManager.startService(SERVICE_NAME);
-      logger.audit('KYRION_SERVICE_RESTARTED', { targetType: 'service', after: { serviceName: SERVICE_NAME } });
+      const result = await kyrionService.restart();
+      sendServiceNotification('Restarted', SERVICE_NAME, result.success, result.message);
       return result;
     } catch (err) {
       return { success: false, message: `Restart failed: ${err.message}` };
     }
   });
 
+  ipcMain.handle('start-kyrion-service', async () => kyrionService.start());
+  ipcMain.handle('stop-kyrion-service', async () => kyrionService.stop());
+
   ipcMain.handle('get-kyrion-service-health', async () => {
     try {
-      const nssmStatus = serviceManager._runNssm('status', SERVICE_NAME);
-      const statusText = (nssmStatus.stdout || '').trim();
-      return { success: true, status: statusText };
+      return { success: true, ...(await kyrionService.getHealth()) };
     } catch (err) {
       return { success: false, error: err.message };
     }
+  });
+
+  // Who is currently allowed to execute tasks - drives the GUI banner that
+  // explains why the app itself is not running jobs.
+  ipcMain.handle('get-scheduler-ownership', () => {
+    const owner = readOwner();
+    return {
+      owner,
+      selfIsOwner: !!(scheduler && scheduler.isOwner),
+      role: ROLE_GUI,
+      pid: process.pid,
+      dataDir: paths.dataDir(),
+    };
   });
 }
 
@@ -1283,61 +1075,58 @@ process.on('unhandledRejection', (reason) => {
   }
 });
 
-// ─── Timeout for app.whenReady() in service mode ───
-// If Electron can't initialize GPU/rendering, app.whenReady() may never resolve.
-if (isServiceMode) {
-  setTimeout(() => {
-    console.log('[Service] app.whenReady() timeout - continuing with bootstrap scheduler');
-  }, 10000);
-}
+// A second launch hands its argv to the running instance and raises its window.
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  } else {
+    createWindow();
+  }
+});
 
 app.whenReady().then(() => {
   try {
     initComponents();
+    registerIPC();
+    createWindow();
+    createTray();
+    startScheduler();
 
-    if (isServiceMode) {
-      // ─── Service Mode: headless scheduler, no window/tray ───
-      logger.log('INFO', 'Starting in SERVICE MODE (headless scheduler)');
-      logger.audit('APP_STARTED_SERVICE', { targetType: 'app', after: { version: app.getVersion(), mode: 'service' } });
-      registerServiceIPC();
-      startServiceScheduler();
+    // Start API server if enabled
+    const apiEnabled = config.getSetting('ApiEnabled', false);
+    if (apiEnabled) {
+      apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator);
+      apiServer.start().catch(err => {
+        logger.error('API Server failed to start', err);
+      });
+    }
 
-      // Prevent app from exiting when all windows are closed
-      app.on('window-all-closed', () => { /* keep running */ });
-    } else {
-      // ─── GUI Mode ───
-      registerIPC();
-      createWindow();
-      createTray();
-      startScheduler();
-
-      // Start API server if enabled
-      const apiEnabled = config.getSetting('ApiEnabled', false);
-      if (apiEnabled) {
-        apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator);
-        apiServer.start().catch(err => {
-          logger.error('API Server failed to start', err);
-        });
-      }
-
-      const startWithWin = config.getSetting('StartWithWindows', false);
-      const currentLogin = app.getLoginItemSettings().openAtLogin;
-      if (startWithWin !== currentLogin) {
-        app.setLoginItemSettings({ openAtLogin: startWithWin, path: app.getPath('exe') });
-      }
+    const startWithWin = config.getSetting('StartWithWindows', false);
+    const currentLogin = app.getLoginItemSettings().openAtLogin;
+    if (startWithWin !== currentLogin) {
+      app.setLoginItemSettings({ openAtLogin: startWithWin, path: app.getPath('exe') });
     }
   } catch (err) {
     console.error('Startup error:', err);
     if (logger) logger.error('Startup failed', err);
-    if (!isServiceMode) dialog.showErrorBox('Kyrion Error', `Failed to start: ${err.message}`);
-    else process.exit(1);
+    dialog.showErrorBox('Κύριος Χρόνος', `Failed to start: ${err.message}`);
   }
+});
+
+// Release the execution lease on exit so the service (or a later GUI run) can
+// take over immediately instead of waiting for the heartbeat to go stale.
+app.on('before-quit', () => {
+  isQuitting = true;
+  if (scheduler) scheduler.stop();
+  if (logger) logger.flush();
 });
 
 app.on('window-all-closed', () => {
   const closeToTray = config ? config.getSetting('CloseToTray', true) : true;
   if (!closeToTray || isQuitting) {
-    if (schedulerInterval) clearInterval(schedulerInterval);
+    if (scheduler) scheduler.stop();
     if (logger) {
       logger.audit('APP_CLOSED', { targetType: 'app' });
       logger.flush();

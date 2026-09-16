@@ -1,12 +1,12 @@
 {
-  "name": "kyrion-kronou",
+  "name": "kyrios-chronos",
   "version": "1.0.0",
-  "description": "Kyrion Kronou - Modern Task Scheduler with Cron Support and NSSM Service Manager",
+  "description": "Kyrios Chronos - Modern Task Scheduler with Cron Support and Windows Service Manager",
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder --win --x64",
-    "build:portable": "electron-packager . KyrionKronou --platform=win32 --arch=x64 --out=build --overwrite --asar --icon build-resources/icon.ico",
+    "build:portable": "electron-packager . KyriosChronos --platform=win32 --arch=x64 --out=build --overwrite --asar --icon build-resources/icon.ico",
     "build:installer": "electron-builder --win --x64 --config",
     "test": "mocha tests/*.js --timeout 10000",
     "pack": "electron-builder --dir"
@@ -14,8 +14,8 @@
   "author": "l1nds0n",
   "license": "MIT",
   "build": {
-    "appId": "com.kyrionkronou.app",
-    "productName": "KyrionKronou",
+    "appId": "com.kyrioschronos.app",
+    "productName": "KyriosChronos",
     "copyright": "Copyright © 2026 l1nds0n",
     "directories": {
       "output": "dist",
@@ -58,14 +58,14 @@
       "installerHeaderIcon": "build-resources/icon.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Kyrion Kronou",
+      "shortcutName": "Kyrios Chronos",
       "license": "LICENSE",
       "installerSidebar": "build-resources/sidebar.bmp",
       "uninstallerSidebar": "build-resources/sidebar.bmp",
       "warningsAsErrors": false
     },
     "portable": {
-      "artifactName": "KyrionKronou-${version}-portable.exe"
+      "artifactName": "KyriosChronos-${version}-portable.exe"
     }
   },
   "devDependencies": {
@@ -81,7 +81,6 @@
     "express": "^5.2.1",
     "lucide": "^1.33.0",
     "mysql2": "^3.23.4",
-    "node-windows": "^1.0.0-beta.8",
     "pngjs": "^7.0.0",
     "ssh2-sftp-client": "^12.1.1"
   }

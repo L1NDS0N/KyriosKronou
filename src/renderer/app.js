@@ -1276,7 +1276,7 @@ async function updateApiStatus() {
   }
 }
 
-// ─── Kyrion Scheduler Service ───
+// ─── Kyrios Chronos Scheduler Service ───
 async function refreshKyrionService() {
   try {
     const status = await window.api.getKyrionServiceStatus();
@@ -1295,7 +1295,15 @@ async function refreshKyrionService() {
 
     if (status.installed) {
       const isRunning = status.status === 'Running';
-      statusEl.innerHTML = `<span class="badge ${isRunning ? 'badge-active' : 'badge-error'}" style="font-size:12px">Service: ${status.serviceName} - ${status.status}</span>`;
+      // "Running" only means the SCM started the process. The heartbeat is what
+      // proves the scheduler loop is actually alive and processing tasks.
+      let detail = '';
+      if (isRunning && status.schedulerAlive) {
+        detail = '<span class="badge badge-active" style="font-size:11px;margin-left:6px">Scheduler active</span>';
+      } else if (isRunning) {
+        detail = `<span class="badge badge-error" style="font-size:11px;margin-left:6px">Running, but the scheduler is not responding${status.heartbeatStale ? ' (stale heartbeat)' : ''}</span>`;
+      }
+      statusEl.innerHTML = `<span class="badge ${isRunning ? 'badge-active' : 'badge-error'}" style="font-size:12px">Service: ${status.serviceName} - ${status.status}</span>${detail}`;
       installBtn.style.display = 'none';
       uninstallBtn.style.display = '';
       restartBtn.style.display = isRunning ? '' : 'none';
@@ -1312,7 +1320,7 @@ async function refreshKyrionService() {
 }
 
 document.getElementById('btn-install-kyrion-svc').addEventListener('click', async () => {
-  showToast('Installing Kyrion Scheduler as Windows service...', 'info');
+  showToast('Installing Kyrios Chronos Scheduler as Windows service...', 'info');
   const result = await window.api.installKyrionService();
   if (result.success) {
     showToast(result.message, 'success');
@@ -1323,7 +1331,7 @@ document.getElementById('btn-install-kyrion-svc').addEventListener('click', asyn
 });
 
 document.getElementById('btn-uninstall-kyrion-svc').addEventListener('click', async () => {
-  showToast('Uninstalling Kyrion Scheduler service...', 'info');
+  showToast('Uninstalling Kyrios Chronos Scheduler service...', 'info');
   const result = await window.api.uninstallKyrionService();
   if (result.success) {
     showToast(result.message, 'success');

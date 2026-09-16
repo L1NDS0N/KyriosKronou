@@ -1,4 +1,4 @@
-# Kyrion Kronou - Build Production Installer
+# Kyrios Chronos - Build Production Installer
 # Run this script to build the NSIS installer + portable .exe
 #
 # Requirements:
@@ -23,7 +23,7 @@ $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 Write-Host ""
 Write-Host "  ========================================" -ForegroundColor DarkGray
-Write-Host "   Kyrion Kronou - Production Build" -ForegroundColor White
+Write-Host "   Kyrios Chronos - Production Build" -ForegroundColor White
 Write-Host "  ========================================" -ForegroundColor DarkGray
 Write-Host ""
 
@@ -82,15 +82,15 @@ try {
         Write-Host "  Building portable app (electron-packager)..." -ForegroundColor Cyan
 
         # Kill any running instance
-        taskkill /F /IM KyrionKronou.exe 2>$null
+        taskkill /F /IM KyriosChronos.exe 2>$null
         Start-Sleep -Seconds 1
 
-        npx electron-packager . KyrionKronou --platform=win32 --arch=x64 --out=build --overwrite --asar
+        npx electron-packager . KyriosChronos --platform=win32 --arch=x64 --out=build --overwrite --asar
         if ($LASTEXITCODE -ne 0) {
             Write-Host "  [ERROR] electron-packager failed!" -ForegroundColor Red
             exit 1
         }
-        $exePath = "build\KyrionKronou-win32-x64\KyrionKronou.exe"
+        $exePath = "build\KyriosChronos-win32-x64\KyriosChronos.exe"
         if (Test-Path $exePath) {
             $size = (Get-Item $exePath).Length / 1MB
             Write-Host "  Portable build successful!" -ForegroundColor Green
@@ -131,12 +131,12 @@ try {
         Write-Host "  NSIS: $nsisPath" -ForegroundColor DarkGray
 
         # Verify the portable build exists
-        if (-not (Test-Path "build\KyrionKronou-win32-x64\KyrionKronou.exe")) {
+        if (-not (Test-Path "build\KyriosChronos-win32-x64\KyriosChronos.exe")) {
             Write-Host "  [ERROR] Portable build not found! Run without -Installer flag first." -ForegroundColor Red
             exit 1
         }
 
-        & "$nsisPath" installer\CronMaster-Installer.nsi
+        & "$nsisPath" installer\KyriosChronos-Installer.nsi
         if ($LASTEXITCODE -ne 0) {
             Write-Host "  [ERROR] NSIS compilation failed!" -ForegroundColor Red
             exit 1
@@ -153,9 +153,9 @@ try {
             Write-Host "    $($_.Name) ($sizeMB MB)" -ForegroundColor DarkGray
         }
     }
-    if (Test-Path "build\KyrionKronou-win32-x64\KyrionKronou.exe") {
-        $sizeMB = [math]::Round((Get-Item "build\KyrionKronou-win32-x64\KyrionKronou.exe").Length / 1MB, 1)
-        Write-Host "    KyrionKronou.exe (portable, $sizeMB MB)" -ForegroundColor DarkGray
+    if (Test-Path "build\KyriosChronos-win32-x64\KyriosChronos.exe") {
+        $sizeMB = [math]::Round((Get-Item "build\KyriosChronos-win32-x64\KyriosChronos.exe").Length / 1MB, 1)
+        Write-Host "    KyriosChronos.exe (portable, $sizeMB MB)" -ForegroundColor DarkGray
     }
 
     Write-Host ""

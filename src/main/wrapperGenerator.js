@@ -42,7 +42,7 @@ class WrapperGenerator {
     // Characters like em-dash (U+2014) break when read as Windows-1252.
     const wrapper = [
       '# ============================================================',
-      '# Kyrion Kronou NSSM Wrapper Script',
+      '# Kyrios Chronos NSSM Wrapper Script',
       '# Task: ' + taskName,
       '# ID: ' + task.Id,
       '# Cron: ' + task.CronExpression,

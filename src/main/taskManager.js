@@ -130,22 +130,26 @@ class TaskManager {
       const ext = path.extname(scriptPath).toLowerCase();
       let cmd, cmdArgs;
 
+      // execFile quotes each argument itself. Adding our own quotes here made
+      // cmd.exe receive a literally-escaped \"C:\path\" and refuse to run it -
+      // which meant .bat/.cmd tasks never executed at all. Pass bare values and
+      // let execFile do the quoting.
+      const userArgs = task.Arguments ? task.Arguments.split(/\s+/).filter(Boolean) : [];
+
       if (ext === '.ps1' || scriptType === 'ps1') {
-        // PowerShell: use powershell.exe with the script
-        const userArgs = task.Arguments ? ` ${task.Arguments}` : '';
+        // PowerShell: -File must be followed by the path alone, then arguments.
         cmd = 'powershell.exe';
-        cmdArgs = ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', scriptPath + userArgs];
+        cmdArgs = ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-NonInteractive', '-File', scriptPath, ...userArgs];
         this.logger.log('INFO', `Executing PowerShell: ${scriptPath}`);
       } else if (ext === '.bat' || ext === '.cmd' || scriptType === 'bat') {
-        // Batch: use cmd.exe /c
-        const userArgs = task.Arguments ? ` ${task.Arguments}` : '';
+        // Batch: cmd.exe /c <script> [args]
         cmd = 'cmd.exe';
-        cmdArgs = ['/c', '"' + scriptPath + '"' + userArgs];
+        cmdArgs = ['/c', scriptPath, ...userArgs];
         this.logger.log('INFO', `Executing Batch: ${scriptPath}`);
       } else {
         // Executable or other: run directly
         cmd = scriptPath;
-        cmdArgs = task.Arguments ? task.Arguments.split(/\s+/) : [];
+        cmdArgs = userArgs;
         this.logger.log('INFO', `Executing: ${scriptPath}`);
       }
 

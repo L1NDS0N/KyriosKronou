@@ -1,5 +1,5 @@
-; Kyrion Kronou NSIS Installer Script
-; Generated for Kyrion Kronou v1.0.0
+; Kyrios Chronos NSIS Installer Script
+; Generated for Kyrios Chronos v1.0.0
 ; Author: l1nds0n
 
 !include "MUI2.nsh"
@@ -8,24 +8,24 @@
 !include "WordFunc.nsh"
 
 ; ─── General ────────────────────────────────────────────
-Name "Kyrion Kronou"
-OutFile "..\dist\KyrionKronou-Setup-1.0.0.exe"
-InstallDir "$LOCALAPPDATA\KyrionKronou"
-InstallDirRegKey HKCU "Software\KyrionKronou" "InstallDir"
+Name "Kyrios Chronos"
+OutFile "..\dist\KyriosChronos-Setup-1.0.0.exe"
+InstallDir "$LOCALAPPDATA\KyriosChronos"
+InstallDirRegKey HKCU "Software\KyriosChronos" "InstallDir"
 RequestExecutionLevel admin
 Unicode True
 SetCompressor /SOLID lzma
-BrandingText "Kyrion Kronou v1.0.0"
+BrandingText "Kyrios Chronos v1.0.0"
 
 ; ─── Version Info ───────────────────────────────────────
 VIProductVersion "1.0.0.0"
-VIAddVersionKey "ProductName" "Kyrion Kronou"
+VIAddVersionKey "ProductName" "Kyrios Chronos"
 VIAddVersionKey "CompanyName" "l1nds0n"
-VIAddVersionKey "FileDescription" "Kyrion Kronou Installer"
+VIAddVersionKey "FileDescription" "Kyrios Chronos Installer"
 VIAddVersionKey "FileVersion" "1.0.0"
 VIAddVersionKey "ProductVersion" "1.0.0"
 VIAddVersionKey "LegalCopyright" "Copyright 2026 l1nds0n"
-VIAddVersionKey "OriginalFilename" "KyrionKronou-Setup-1.0.0.exe"
+VIAddVersionKey "OriginalFilename" "KyriosChronos-Setup-1.0.0.exe"
 
 ; ─── MUI Settings ──────────────────────────────────────
 !define MUI_ABORTWARNING
@@ -64,42 +64,42 @@ Function .onInit
 FunctionEnd
 
 ; ─── Installer Sections ─────────────────────────────────
-Section "Kyrion Kronou (required)" SecMain
+Section "Kyrios Chronos (required)" SecMain
   SectionIn RO
 
   ; Set output path to installation directory
   SetOutPath "$INSTDIR"
 
   ; Install all files from the unpacked build
-  File /r "..\build\KyrionKronou-win32-x64\*.*"
+  File /r "..\build\KyriosChronos-win32-x64\*.*"
 
   ; Create uninstaller
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
   ; Create Start Menu shortcuts
-  CreateDirectory "$SMPROGRAMS\Kyrion Kronou"
-  CreateShortCut "$SMPROGRAMS\Kyrion Kronou\Kyrion Kronou.lnk" "$INSTDIR\KyrionKronou.exe" "" "$INSTDIR\KyrionKronou.exe" 0
-  CreateShortCut "$SMPROGRAMS\Kyrion Kronou\Uninstall Kyrion Kronou.lnk" "$INSTDIR\uninstall.exe"
+  CreateDirectory "$SMPROGRAMS\Kyrios Chronos"
+  CreateShortCut "$SMPROGRAMS\Kyrios Chronos\Kyrios Chronos.lnk" "$INSTDIR\KyriosChronos.exe" "" "$INSTDIR\KyriosChronos.exe" 0
+  CreateShortCut "$SMPROGRAMS\Kyrios Chronos\Uninstall Kyrios Chronos.lnk" "$INSTDIR\uninstall.exe"
 
   ; Create Desktop shortcut
-  CreateShortCut "$DESKTOP\Kyrion Kronou.lnk" "$INSTDIR\KyrionKronou.exe" "" "$INSTDIR\KyrionKronou.exe" 0
+  CreateShortCut "$DESKTOP\Kyrios Chronos.lnk" "$INSTDIR\KyriosChronos.exe" "" "$INSTDIR\KyriosChronos.exe" 0
 
   ; Save installation path to registry
-  WriteRegStr HKCU "Software\KyrionKronou" "InstallDir" "$INSTDIR"
+  WriteRegStr HKCU "Software\KyriosChronos" "InstallDir" "$INSTDIR"
 
   ; Write uninstall registry keys
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyrionKronou" "DisplayName" "Kyrion Kronou"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyrionKronou" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyrionKronou" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyrionKronou" "DisplayIcon" "$\"$INSTDIR\KyrionKronou.exe$\""
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyrionKronou" "Publisher" "l1nds0n"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyrionKronou" "DisplayVersion" "1.0.0"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyrionKronou" "URLInfoAbout" "https://github.com/l1nds0n/kyrion-kronou"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyriosChronos" "DisplayName" "Kyrios Chronos"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyriosChronos" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyriosChronos" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyriosChronos" "DisplayIcon" "$\"$INSTDIR\KyriosChronos.exe$\""
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyriosChronos" "Publisher" "l1nds0n"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyriosChronos" "DisplayVersion" "1.0.0"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyriosChronos" "URLInfoAbout" "https://github.com/l1nds0n/kyrion-kronou"
 
   ; Calculate and write estimated size
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
   IntFmt $0 "0x%08X" $0
-  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyrionKronou" "EstimatedSize" "$0"
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyriosChronos" "EstimatedSize" "$0"
 
   ; Add to PATH via registry (user-level)
   ReadRegStr $0 HKCU "Environment" "Path"
@@ -120,14 +120,14 @@ Section "Uninstall"
   RMDir /r "$INSTDIR"
 
   ; Remove Start Menu shortcuts
-  RMDir /r "$SMPROGRAMS\Kyrion Kronou"
+  RMDir /r "$SMPROGRAMS\Kyrios Chronos"
 
   ; Remove Desktop shortcut
-  Delete "$DESKTOP\Kyrion Kronou.lnk"
+  Delete "$DESKTOP\Kyrios Chronos.lnk"
 
   ; Remove registry keys
-  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyrionKronou"
-  DeleteRegKey HKCU "Software\KyrionKronou"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KyriosChronos"
+  DeleteRegKey HKCU "Software\KyriosChronos"
 
   ; Remove from PATH
   ReadRegStr $0 HKCU "Environment" "Path"

@@ -1,4 +1,4 @@
-// apiServer.js - HTTP API Server + Web Dashboard for Kyrion Kronou
+// apiServer.js - HTTP API Server + Web Dashboard for Kyrios Chronos
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -287,7 +287,7 @@ class ApiServer {
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Kyrion Kronou Dashboard</title>
+<title>Kyrios Chronos Dashboard</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{--bg:#08080c;--card:#0f0f14;--border:rgba(255,255,255,.06);--text:#c0c0d0;--text2:#808094;--primary:#6a5acd;--green:#6a8a6e;--red:#8a5a5a;--amber:#8a7a5a}
@@ -330,7 +330,7 @@ code{background:rgba(255,255,255,.06);padding:1px 4px;border-radius:3px;font-siz
 </head>
 <body>
 <div class="container">
-  <h1>⚙ Kyrion Kronou Dashboard</h1>
+  <h1>⚙ Kyrios Chronos Dashboard</h1>
   <div class="stats">
     <div class="stat"><div class="stat-label">Total Tasks</div><div class="stat-num" id="stat-total">-</div></div>
     <div class="stat"><div class="stat-label">Active</div><div class="stat-num" id="stat-active" style="color:var(--green)">-</div></div>
@@ -478,7 +478,7 @@ loadTasks();
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Kyrion Kronou API Docs</title>
+<title>Kyrios Chronos API Docs</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{--bg:#08080c;--card:#0f0f14;--border:rgba(255,255,255,.06);--text:#c0c0d0;--text2:#808094;--primary:#6a5acd;--green:#6a8a6e;--red:#8a5a5a;--amber:#8a7a5a}
@@ -510,7 +510,7 @@ th{color:var(--text2);text-transform:uppercase;font-size:10px;letter-spacing:.5p
 </head>
 <body>
 <div class="container">
-  <h1>Kyrion Kronou API</h1>
+  <h1>Kyrios Chronos API</h1>
   <p class="subtitle">REST API for managing scheduled tasks, services, and scripts</p>
   <div class="nav">
     <a href="#auth">Auth</a><a href="#tasks">Tasks</a><a href="#scripts">Scripts</a>
