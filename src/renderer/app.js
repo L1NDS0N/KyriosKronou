@@ -696,6 +696,20 @@ async function runTask(id) {
 // ============================================================
 async function refreshServices() {
   setLoading('page-services', true);
+  // Querying the service control manager takes a moment. Say so, instead of
+  // dimming the page and leaving it looking frozen.
+  const tbodyEl = document.getElementById('services-body');
+  const emptyEl = document.getElementById('services-empty');
+  const bannerEl = document.getElementById('kyrion-svc-banner-status');
+  if (emptyEl) emptyEl.style.display = 'none';
+  if (tbodyEl) {
+    tbodyEl.innerHTML = `<tr><td colspan="5" class="tbl-loading">
+      <i data-lucide="loader-circle"></i>${i18n.t('services.loading')}
+    </td></tr>`;
+    lucide.createIcons();
+  }
+  if (bannerEl) bannerEl.innerHTML = `<span class="inline-loading">${i18n.t('services.checkingStatus')}</span>`;
+
   try {
     // Update Kyrion service banner
     try {

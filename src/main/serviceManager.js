@@ -9,6 +9,16 @@ class ServiceManager {
     this.logger = logger;
     this.configManager = configManager;
     this.nssmPath = null; // Will be resolved dynamically
+    // Resolving NSSM runs several execSync probes, which block the Electron
+    // main process and freeze the UI. Where NSSM lives does not change while
+    // the app runs, so resolve it once and reuse the answer.
+    this._nssmCache = null;
+  }
+
+  /** Drop the cached NSSM location (after installing NSSM, or on user request). */
+  clearNssmCache() {
+    this._nssmCache = null;
+    this.nssmPath = null;
   }
 
   // Resolve the NSSM path: config > PATH > common locations
@@ -89,16 +99,23 @@ class ServiceManager {
     }
 
     // Auto-resolve NSSM path from config / PATH / common locations
+    if (this._nssmCache) {
+      this.nssmPath = this._nssmCache.path || this.nssmPath;
+      return this._nssmCache;
+    }
+
     const resolved = this._resolveNssmPath();
     if (resolved) {
       try {
         const output = execSync(`"${resolved}" version`, { encoding: 'utf8', timeout: 5000 });
         const match = (output || '').match(/NSSM\s+([\d.]+)/);
-        return { installed: true, path: resolved, version: match ? match[1] : 'found' };
+        this._nssmCache = { installed: true, path: resolved, version: match ? match[1] : 'found' };
+        return this._nssmCache;
       } catch (e) {}
     }
 
-    return { installed: false, path: '', version: '' };
+    this._nssmCache = { installed: false, path: '', version: '' };
+    return this._nssmCache;
   }
 
   _runNssm(...args) {

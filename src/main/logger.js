@@ -241,7 +241,7 @@ class Logger {
   }
 
   // ─── File Paths ───
-  _dateStr() { return new Date().toISOString().substring(0, 10); }
+  _dateStr(date) { return (date || new Date()).toISOString().substring(0, 10); }
   _logFilePath() { return path.join(this.logDir, `kyrion-${this._dateStr()}.log`); }
   _errorFilePath() { return path.join(this.logDir, `kyrion-errors-${this._dateStr()}.log`); }
   _auditFilePath() { return path.join(this.logDir, `kyrion-audit-${this._dateStr()}.log`); }
@@ -271,6 +271,69 @@ class Logger {
   // ─── Query Methods ───
   getRecentLogs(count = 50) {
     return this.inMemoryLogs.slice(-count);
+  }
+
+  /**
+   * Recent log lines from every process that writes to this log directory.
+   *
+   * inMemoryLogs only holds what THIS process logged. Tasks and backups run in
+   * the service process, so reading memory alone showed the GUI nothing about
+   * them. The log files on disk are the shared record, so read those and merge
+   * in whatever this process has buffered but not yet flushed.
+   */
+  getRecentLogsFromDisk(count = 200, days = 2) {
+    const entries = [];
+
+    for (let i = 0; i < days; i++) {
+      const day = new Date(Date.now() - i * 86400000);
+      const file = path.join(this.logDir, `kyrion-${this._dateStr(day)}.log`);
+      let content;
+      try {
+        if (!fs.existsSync(file)) continue;
+        content = fs.readFileSync(file, 'utf8');
+      } catch (e) { continue; }
+
+      for (const line of content.split('\n')) {
+        const parsed = this._parseLogLine(line);
+        if (parsed) entries.push(parsed);
+      }
+    }
+
+    // Lines this process logged since the last flush are not on disk yet.
+    const onDisk = new Set(entries.map(e => `${e.timestamp.getTime()}|${e.message}`));
+    for (const mem of this.inMemoryLogs) {
+      const key = `${new Date(mem.timestamp).setMilliseconds(0)}|${mem.message}`;
+      if (!onDisk.has(key)) {
+        entries.push({ timestamp: new Date(mem.timestamp), level: mem.level, message: mem.message, meta: mem.meta });
+      }
+    }
+
+    entries.sort((a, b) => a.timestamp - b.timestamp);
+    return entries.slice(-count);
+  }
+
+  /** Parse a line written by _formatEntry: "[ts] [LEVEL] message | {meta}" */
+  _parseLogLine(line) {
+    const match = /^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] \[([A-Z]+)\] ([\s\S]*)$/.exec(line.trim());
+    if (!match) return null;
+
+    const [, ts, level, rest] = match;
+    let message = rest;
+    let meta = null;
+
+    // Meta is appended as " | {json}". Split on the LAST such separator so a
+    // pipe inside the message itself does not truncate it.
+    const sep = rest.lastIndexOf(' | {');
+    if (sep !== -1) {
+      try {
+        meta = JSON.parse(rest.slice(sep + 3));
+        message = rest.slice(0, sep);
+      } catch (e) { /* not meta after all - keep the whole line as the message */ }
+    }
+
+    const timestamp = new Date(ts.replace(' ', 'T') + 'Z');
+    if (isNaN(timestamp.getTime())) return null;
+    return { timestamp, level, message, meta };
   }
 
   getRecentErrors(count = 50) {

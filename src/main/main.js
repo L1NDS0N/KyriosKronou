@@ -395,11 +395,14 @@ function registerIPC() {
   ipcMain.handle('nssm-check-managers', () => nssmInstaller.checkPackageManagers());
   ipcMain.handle('nssm-install-via', async (e, manager) => {
     const result = await nssmInstaller.installVia(manager);
+    // NSSM's location just changed, so the cached "not found" answer is stale.
+    serviceManager.clearNssmCache();
     logger.auditNssmInstalled(manager, result.success);
     return result;
   });
   ipcMain.handle('nssm-download-manual', async () => {
     const result = await nssmInstaller.downloadManual(app.getPath('userData'));
+    serviceManager.clearNssmCache();
     logger.auditNssmInstalled('manual-download', result.success);
     return result;
   });
@@ -954,7 +957,9 @@ function registerIPC() {
   });
 
   // ─── Log Access (for UI) ───
-  ipcMain.handle('get-logs', () => logger.getRecentLogs(200));
+  // Read from disk, not from this process's memory: tasks and backups run in
+  // the service process, and their log lines only reach the GUI via the files.
+  ipcMain.handle('get-logs', () => logger.getRecentLogsFromDisk(200));
   ipcMain.handle('get-errors', () => logger.getRecentErrors(200));
   ipcMain.handle('get-audit-logs', () => logger.getRecentAudit(200));
   ipcMain.handle('get-log-stats', () => logger.getStats());

@@ -715,3 +715,98 @@ describe('Service: end-to-end headless execution', function () {
     expect(ran, 'service did not reload tasks.json written by another process').to.equal(true);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Backups and tasks run in the service process, which has its own Logger and
+// its own in-memory buffer. The dashboard reads the GUI process's logger, so
+// unless it goes to disk the operator sees nothing about what the service did.
+describe('Service: log visibility across processes', () => {
+  const Logger = require('../src/main/logger');
+  let dir;
+
+  beforeEach(() => { dir = tempDir('logs'); });
+
+  it('GUI sees log lines written by the service process', () => {
+    const serviceLogger = new Logger(dir);
+    serviceLogger.log('INFO', '[service] Executing backup: Nightly');
+    serviceLogger.log('ERROR', '[service] Backup Nightly: failed');
+    serviceLogger.flush();
+
+    // A separate Logger instance stands in for the GUI process.
+    const guiLogger = new Logger(dir);
+    expect(guiLogger.getRecentLogs(200)).to.deep.equal([], 'memory is empty, as in the bug');
+
+    const fromDisk = guiLogger.getRecentLogsFromDisk(200);
+    const messages = fromDisk.map(e => e.message);
+    expect(messages).to.include('[service] Executing backup: Nightly');
+    expect(messages).to.include('[service] Backup Nightly: failed');
+  });
+
+  it('preserves level and timestamp when reading back from disk', () => {
+    const svc = new Logger(dir);
+    svc.log('ERROR', 'mysqldump exited with code 1');
+    svc.flush();
+
+    const entry = new Logger(dir).getRecentLogsFromDisk(200)
+      .find(e => e.message === 'mysqldump exited with code 1');
+    expect(entry).to.not.equal(undefined);
+    expect(entry.level).to.equal('ERROR');
+    expect(entry.timestamp).to.be.instanceOf(Date);
+    expect(isNaN(entry.timestamp.getTime())).to.equal(false);
+  });
+
+  it('parses structured meta back out of the line', () => {
+    const svc = new Logger(dir);
+    svc.log('INFO', 'Backup finished', { profile: 'Nightly', size: 1234 });
+    svc.flush();
+
+    const entry = new Logger(dir).getRecentLogsFromDisk(200)
+      .find(e => e.message === 'Backup finished');
+    expect(entry.meta).to.deep.equal({ profile: 'Nightly', size: 1234 });
+  });
+
+  it('does not truncate a message that itself contains a pipe', () => {
+    const svc = new Logger(dir);
+    svc.log('ERROR', 'mysqldump | gzip failed');
+    svc.flush();
+
+    const messages = new Logger(dir).getRecentLogsFromDisk(200).map(e => e.message);
+    expect(messages).to.include('mysqldump | gzip failed');
+  });
+
+  it('merges its own unflushed lines with what is already on disk', () => {
+    const svc = new Logger(dir);
+    svc.log('INFO', 'from the service');
+    svc.flush();
+
+    const gui = new Logger(dir);
+    gui.log('INFO', 'from the gui, not yet flushed');
+
+    const messages = gui.getRecentLogsFromDisk(200).map(e => e.message);
+    expect(messages).to.include('from the service');
+    expect(messages).to.include('from the gui, not yet flushed');
+  });
+
+  it('returns entries oldest-to-newest and honours the count limit', () => {
+    const svc = new Logger(dir);
+    for (let i = 0; i < 20; i++) svc.log('INFO', `line ${i}`);
+    svc.flush();
+
+    const entries = new Logger(dir).getRecentLogsFromDisk(5);
+    expect(entries).to.have.length(5);
+    for (let i = 1; i < entries.length; i++) {
+      expect(entries[i].timestamp >= entries[i - 1].timestamp).to.equal(true);
+    }
+  });
+
+  it('survives a truncated or garbled log file', () => {
+    fs.writeFileSync(path.join(dir, `kyrion-${new Date().toISOString().slice(0, 10)}.log`),
+      'not a log line\n[broken\n\n', 'utf8');
+    const gui = new Logger(dir);
+    expect(() => gui.getRecentLogsFromDisk(200)).to.not.throw();
+  });
+
+  it('returns an empty list when nothing has been logged yet', () => {
+    expect(new Logger(dir).getRecentLogsFromDisk(200)).to.deep.equal([]);
+  });
+});

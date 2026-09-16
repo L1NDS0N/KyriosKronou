@@ -881,11 +881,27 @@ class BackupPage {
     const result = await window.api.getBackupHistory(profileId);
     const history = result.history || [];
     if (history.length === 0) { showToast('No history to export', 'error'); return; }
-    const header = 'Timestamp,Status,Duration,Databases,TotalSize,SizeHuman\n';
+    // Error and Stderr matter most: a row saying "Error, 0.1s, 0 B" with no
+    // message is undiagnosable, which is exactly what an exported failure
+    // needs to explain.
+    const csv = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`;
+    const header = 'Timestamp,Status,Duration,Databases,TotalSize,SizeHuman,Error,Stderr,LogPath\n';
     const rows = history.map(h => {
-      const ts = h.Timestamp || '';
-      const dbs = (h.Databases || []).join(';');
-      return `"${ts}","${h.Status}","${h.Duration}","${dbs}","${h.TotalSize || 0}","${h.TotalSizeHuman || ''}"`;
+      const results = h.Results || [];
+      const failed = results.filter(r => !r.success);
+      const message = failed.map(r => `${r.database}: ${r.message || ''}`).join(' | ');
+      const stderr = failed.map(r => r.stderr || '').filter(Boolean).join(' | ');
+      return [
+        csv(h.Timestamp || ''),
+        csv(h.Status),
+        csv(h.Duration),
+        csv((h.Databases || []).join(';')),
+        csv(h.TotalSize || 0),
+        csv(h.TotalSizeHuman || ''),
+        csv(message),
+        csv(stderr),
+        csv(h.LogPath || ''),
+      ].join(',');
     }).join('\n');
     const blob = new Blob([header + rows], { type: 'text/csv' });
     const a = document.createElement('a');

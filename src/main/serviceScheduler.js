@@ -74,8 +74,9 @@ function bootstrap() {
     logger.flush();
   });
 
-  // Flush buffered log lines periodically; a service can run for months.
-  setInterval(() => { try { logger.flush(); } catch (e) {} }, 60000);
+  // Flush frequently. The GUI reads these files to show what the service did,
+  // so buffered lines that never reach disk are invisible to the operator.
+  setInterval(() => { try { logger.flush(); } catch (e) {} }, 10000);
 
   logger.log('INFO', 'Scheduler loop running (15s interval)');
   logger.flush();

@@ -97,7 +97,18 @@ try {
         Start-Sleep -Seconds 1
 
         $ErrorActionPreference = 'Continue'
-        npx electron-packager . KyriosChronos --platform=win32 --arch=x64 --out=build --overwrite --asar
+        # --icon is required: without it the packaged exe keeps the default
+        # Electron icon, which then propagates to the installed app and every
+        # shortcut the installer creates.
+        # --ignore is essential: without it the packager bundles dist/ and
+        # build/ into app.asar, so every build embeds the previous installer
+        # and the artifact grows on each run. tests/ and .git/ are dead weight
+        # in a shipped app too.
+        # No "|" in these regexes: npx runs through cmd.exe, which would treat
+        # it as a pipe. Single-quoted so PowerShell leaves the rest alone.
+        # "^/build/" and "^/build$" are kept separate so build-resources/ (which
+        # holds the icon the app loads at runtime) is NOT excluded.
+        npx electron-packager . KyriosChronos --platform=win32 --arch=x64 --out=build --overwrite --asar --icon build-resources/icon.ico '--ignore=^/dist' '--ignore=^/build/' '--ignore=^/build$' '--ignore=^/tests' '--ignore=^/\.github' '--ignore=^/logo\.png'
         $packExit = $LASTEXITCODE
         $ErrorActionPreference = 'Stop'
         if ($packExit -ne 0) {

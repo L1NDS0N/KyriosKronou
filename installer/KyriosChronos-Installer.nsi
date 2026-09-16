@@ -52,6 +52,10 @@ VIAddVersionKey "OriginalFilename" "KyriosChronos-Setup-1.0.0.exe"
 !insertmacro MUI_LANGUAGE "English"
 !insertmacro MUI_LANGUAGE "PortugueseBR"
 
+; Uninstall prompts
+LangString KeepDataMsg ${LANG_ENGLISH} "Keep your tasks, backup profiles, schedules and logs?$\r$\n$\r$\nYes - keep them, so reinstalling restores everything.$\r$\nNo - delete all data permanently."
+LangString KeepDataMsg ${LANG_PORTUGUESEBR} "Manter suas tarefas, perfis de backup, agendamentos e logs?$\r$\n$\r$\nSim - manter, para que a reinstalacao restaure tudo.$\r$\nNao - apagar todos os dados permanentemente."
+
 ; ─── Installer Init ─────────────────────────────────────
 Function .onInit
   ; Set language based on system
@@ -115,6 +119,43 @@ SectionEnd
 
 ; ─── Uninstaller Section ────────────────────────────────
 Section "Uninstall"
+
+  ; Stop and remove the Windows service first. Without this the uninstaller
+  ; leaves an orphaned service pointing at an executable it just deleted.
+  DetailPrint "Stopping the Kyrios Chronos service..."
+  nsExec::ExecToLog 'net stop "KyriosChronos"'
+  Pop $0
+  nsExec::ExecToLog 'sc delete "KyriosChronos"'
+  Pop $0
+
+  ; Close a running instance so $INSTDIR is not locked.
+  nsExec::ExecToLog 'taskkill /F /IM KyriosChronos.exe'
+  Pop $0
+  Sleep 1000
+
+  ; Ask before destroying the user's configuration. Reinstalling is routine
+  ; during upgrades and nobody wants to rebuild every task by hand.
+  MessageBox MB_YESNO|MB_ICONQUESTION "$(KeepDataMsg)" /SD IDYES IDYES KeepData IDNO DeleteData
+
+  DeleteData:
+    DetailPrint "Removing configuration and logs..."
+    ; Read ProgramData from the environment rather than assuming an NSIS
+    ; constant exists for it.
+    ReadEnvStr $R0 "ProgramData"
+    ${If} $R0 != ""
+      RMDir /r "$R0\KyriosChronos"
+    ${EndIf}
+    ; Legacy per-user locations from earlier versions
+    RMDir /r "$APPDATA\KyriosChronos"
+    RMDir /r "$APPDATA\KyrionKronou"
+    RMDir /r "$APPDATA\CronMaster"
+    Goto DataDone
+
+  KeepData:
+    ReadEnvStr $R0 "ProgramData"
+    DetailPrint "Keeping configuration in $R0\KyriosChronos"
+
+  DataDone:
 
   ; Remove files
   RMDir /r "$INSTDIR"
