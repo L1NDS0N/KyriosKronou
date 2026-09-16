@@ -104,11 +104,10 @@ try {
         # build/ into app.asar, so every build embeds the previous installer
         # and the artifact grows on each run. tests/ and .git/ are dead weight
         # in a shipped app too.
-        # No "|" in these regexes: npx runs through cmd.exe, which would treat
-        # it as a pipe. Single-quoted so PowerShell leaves the rest alone.
-        # "^/build/" and "^/build$" are kept separate so build-resources/ (which
-        # holds the icon the app loads at runtime) is NOT excluded.
-        npx electron-packager . KyriosChronos --platform=win32 --arch=x64 --out=build --overwrite --asar --icon build-resources/icon.ico '--ignore=^/dist' '--ignore=^/build/' '--ignore=^/build$' '--ignore=^/tests' '--ignore=^/\.github' '--ignore=^/logo\.png'
+        # Driven by a script, not a command line: the packager's --ignore
+        # values are regexes, and cmd.exe eats "^" (its escape character) and
+        # reads "|" as a pipe, silently corrupting them. See scripts/package-app.js.
+        node scripts/package-app.js
         $packExit = $LASTEXITCODE
         $ErrorActionPreference = 'Stop'
         if ($packExit -ne 0) {

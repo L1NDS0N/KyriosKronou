@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "build": "electron-builder --win --x64",
-    "build:portable": "electron-packager . KyriosChronos --platform=win32 --arch=x64 --out=build --overwrite --asar --icon build-resources/icon.ico",
+    "build:portable": "node scripts/package-app.js",
     "build:installer": "electron-builder --win --x64 --config",
     "test": "mocha tests/*.js --timeout 60000",
     "pack": "electron-builder --dir"

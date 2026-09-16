@@ -174,6 +174,11 @@ class ServiceManager {
     const services = [];
     const seen = new Set();
 
+    // Without a resolved NSSM path the command below becomes `"null" list`,
+    // which the shell reports as an unknown command on every refresh.
+    if (!this.nssmPath) this.checkNssm();
+    if (!this.nssmPath) return services;
+
     // Method 1: nssm list — output is just service names, one per line
     // (e.g. "nginx\nphpcgi\nphpfpm")
     try {
@@ -267,6 +272,9 @@ class ServiceManager {
   async getAllServicesAsync() {
     const services = [];
     const seen = new Set();
+
+    if (!this.nssmPath) this.checkNssm();
+    if (!this.nssmPath) return services;
     try {
       const { stdout } = await execAsync(`"${this.nssmPath}" list`, { encoding: 'utf8', timeout: 10000 });
       const lines = stdout.split('\n').map(l => l.replace(/\r/g, '').trim()).filter(Boolean);
@@ -294,6 +302,7 @@ class ServiceManager {
   }
 
   getServiceCount() {
+    if (!this.nssmPath) return 0;
     try {
       const output = execSync(`"${this.nssmPath}" list`, { encoding: 'utf8', timeout: 10000 });
       return (output.match(/HKLM\\/g) || []).length;

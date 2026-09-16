@@ -224,6 +224,9 @@ function initComponents() {
   config = new ConfigManager(configDir, 'default');
   taskManager = new TaskManager(config, logger, cronParser);
   serviceManager = new ServiceManager(logger, config);
+  // Was declared and used by the nssm-* IPC handlers but never constructed,
+  // so every one of them threw "Cannot read properties of undefined".
+  nssmInstaller = new NssmInstaller(logger);
   kyrionService = new KyrionService(logger, serviceManager);
   wrapperGenerator = new WrapperGenerator(config, logger);
   backupManager = new BackupManager(config, logger);
