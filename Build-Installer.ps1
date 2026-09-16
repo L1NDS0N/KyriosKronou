@@ -53,8 +53,13 @@ try {
 
     # Run tests first
     Write-Host "  Running tests..." -ForegroundColor Yellow
+    # stderr from a native command must not abort the build; $LASTEXITCODE is
+    # the authoritative pass/fail signal.
+    $ErrorActionPreference = 'Continue'
     npm test
-    if ($LASTEXITCODE -ne 0) {
+    $testExit = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    if ($testExit -ne 0) {
         Write-Host "  [ERROR] Tests failed! Fix errors before building." -ForegroundColor Red
         exit 1
     }
@@ -64,8 +69,11 @@ try {
     # Generate icon assets from logo.png
     if (Test-Path "logo.png") {
         Write-Host "  Generating icon assets from logo.png..." -ForegroundColor Yellow
+        $ErrorActionPreference = 'Continue'
         node scripts/generate-icons.js
-        if ($LASTEXITCODE -ne 0) {
+        $iconExit = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+        if ($iconExit -ne 0) {
             Write-Host "  [ERROR] Icon generation failed!" -ForegroundColor Red
             exit 1
         }
@@ -82,11 +90,17 @@ try {
         Write-Host "  Building portable app (electron-packager)..." -ForegroundColor Cyan
 
         # Kill any running instance
-        taskkill /F /IM KyriosChronos.exe 2>$null
+        # Stop a running instance if there is one. taskkill writes to stderr
+        # when the process is absent, which PowerShell 5.1 turns into a
+        # terminating NativeCommandError under ErrorActionPreference=Stop.
+        Get-Process -Name KyriosChronos -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 1
 
+        $ErrorActionPreference = 'Continue'
         npx electron-packager . KyriosChronos --platform=win32 --arch=x64 --out=build --overwrite --asar
-        if ($LASTEXITCODE -ne 0) {
+        $packExit = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+        if ($packExit -ne 0) {
             Write-Host "  [ERROR] electron-packager failed!" -ForegroundColor Red
             exit 1
         }
@@ -136,8 +150,11 @@ try {
             exit 1
         }
 
+        $ErrorActionPreference = 'Continue'
         & "$nsisPath" installer\KyriosChronos-Installer.nsi
-        if ($LASTEXITCODE -ne 0) {
+        $nsisExit = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+        if ($nsisExit -ne 0) {
             Write-Host "  [ERROR] NSIS compilation failed!" -ForegroundColor Red
             exit 1
         }
