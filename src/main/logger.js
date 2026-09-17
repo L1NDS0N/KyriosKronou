@@ -83,10 +83,12 @@ class Logger {
       user: details.user || 'system',
       target: details.target || null,
       targetType: details.targetType || null,
+      actor: details.actor || null,
+      via: details.via || null,
       before: details.before || null,
       after: details.after || null,
       result: details.result || 'success',
-      ipAddress: details.ipAddress || null,
+      ipAddress: details.ipAddress || details.ip || null,
       metadata: details.metadata || null
     };
 
@@ -263,6 +265,11 @@ class Logger {
       `target=${entry.target || '-'}`
     ];
     if (entry.result !== 'success') parts.push(`result=${entry.result}`);
+    // Who did it, and from where. Without these the audit trail on disk can
+    // only say that something changed, not who changed it.
+    if (entry.actor) parts.push(`actor=${entry.actor}`);
+    if (entry.via) parts.push(`via=${entry.via}`);
+    if (entry.ipAddress) parts.push(`ip=${entry.ipAddress}`);
     if (entry.before) parts.push(`before=${JSON.stringify(entry.before)}`);
     if (entry.after) parts.push(`after=${JSON.stringify(entry.after)}`);
     return parts.join(' ');
@@ -310,6 +317,144 @@ class Logger {
 
     entries.sort((a, b) => a.timestamp - b.timestamp);
     return entries.slice(-count);
+  }
+
+
+  /**
+   * Recent ERROR entries from every process that writes here.
+   *
+   * inMemoryErrors only holds what THIS process logged, so nothing the Windows
+   * service recorded ever reached the Logs screen - the same gap that was fixed
+   * for the application log.
+   */
+  getRecentErrorsFromDisk(count = 200, days = 3) {
+    const entries = [];
+
+    for (let i = 0; i < days; i++) {
+      const day = new Date(Date.now() - i * 86400000);
+      const file = path.join(this.logDir, `kyrion-errors-${this._dateStr(day)}.log`);
+      for (const line of this._readTail(file)) {
+        const parsed = this._parseLogLine(line);
+        if (!parsed) continue;
+        // The error log stores { error, context } as the meta blob.
+        const meta = parsed.meta || {};
+        entries.push({
+          timestamp: parsed.timestamp,
+          level: parsed.level || 'ERROR',
+          message: parsed.message,
+          error: meta.error || null,
+          context: meta.context || null,
+        });
+      }
+    }
+
+    for (const mem of this.inMemoryErrors) {
+      entries.push(mem);
+    }
+
+    return this._dedupeSort(entries, count);
+  }
+
+  /** Recent AUDIT entries from every process that writes here. */
+  getRecentAuditFromDisk(count = 200, days = 7) {
+    const entries = [];
+
+    for (let i = 0; i < days; i++) {
+      const day = new Date(Date.now() - i * 86400000);
+      const file = path.join(this.logDir, `kyrion-audit-${this._dateStr(day)}.log`);
+      for (const line of this._readTail(file)) {
+        const parsed = this._parseAuditLine(line);
+        if (parsed) entries.push(parsed);
+      }
+    }
+
+    for (const mem of this.inMemoryAudit) {
+      entries.push(Object.assign({}, mem, { timestamp: new Date(mem.timestamp) }));
+    }
+
+    return this._dedupeSort(entries, count);
+  }
+
+  /** Parse a line written by _formatAuditEntry. */
+  _parseAuditLine(line) {
+    const head = /^\[([^\]]+)\] \[AUDIT\] (.*)$/.exec(line.trim());
+    if (!head) return null;
+
+    const timestamp = new Date(head[1]);
+    if (isNaN(timestamp.getTime())) return null;
+
+    const rest = head[2];
+    const entry = { timestamp, action: '', target: null, result: 'success', before: null, after: null };
+
+    const action = /(?:^|\s)action=(\S+)/.exec(rest);
+    if (action) entry.action = action[1];
+    const target = /(?:^|\s)target=(\S+)/.exec(rest);
+    if (target && target[1] !== '-') entry.target = target[1];
+    const result = /(?:^|\s)result=(\S+)/.exec(rest);
+    if (result) entry.result = result[1];
+
+    // before= and after= hold JSON; take each up to the next " key=" boundary.
+    for (const key of ['before', 'after']) {
+      const at = rest.indexOf(` ${key}=`);
+      if (at === -1) continue;
+      let json = rest.slice(at + key.length + 2);
+      const next = json.search(/\s(?:before|after)=/);
+      if (next !== -1) json = json.slice(0, next);
+      try { entry[key] = JSON.parse(json); } catch (e) { entry[key] = json; }
+    }
+
+    // The web interface records who did it; surface that rather than burying it.
+    const actor = /(?:^|\s)actor=([^\s]+(?: \([^)]*\))?)/.exec(rest);
+    if (actor) entry.actor = actor[1];
+    const via = /(?:^|\s)via=(\S+)/.exec(rest);
+    if (via) entry.via = via[1];
+    const ip = /(?:^|\s)ip=(\S+)/.exec(rest);
+    if (ip) entry.ipAddress = ip[1];
+
+    return entry;
+  }
+
+  /**
+   * Last N KB of a log file, as lines.
+   * Reading a whole day of a busy service meant parsing megabytes on every
+   * refresh; only the tail is ever shown.
+   */
+  _readTail(file, maxBytes = 512 * 1024) {
+    let handle;
+    try {
+      const stat = fs.statSync(file);
+      const start = Math.max(0, stat.size - maxBytes);
+      const length = stat.size - start;
+      if (length <= 0) return [];
+
+      const buffer = Buffer.alloc(length);
+      handle = fs.openSync(file, 'r');
+      fs.readSync(handle, buffer, 0, length, start);
+
+      const text = buffer.toString('utf8');
+      const lines = text.split('\n');
+      // A partial first line when the file was truncated mid-entry.
+      if (start > 0) lines.shift();
+      return lines.filter(Boolean);
+    } catch (e) {
+      return [];
+    } finally {
+      if (handle !== undefined) { try { fs.closeSync(handle); } catch (e) {} }
+    }
+  }
+
+  /** Drop duplicates (a line can be both on disk and still in memory), newest last. */
+  _dedupeSort(entries, count) {
+    const seen = new Set();
+    const unique = [];
+    for (const entry of entries) {
+      const key = `${new Date(entry.timestamp).setMilliseconds(0)}|${entry.action || entry.message || ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push(entry);
+    }
+    unique.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    return count ? unique.slice(-count) : unique;
   }
 
   /** Parse a line written by _formatEntry: "[ts] [LEVEL] message | {meta}" */

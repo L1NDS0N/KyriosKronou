@@ -476,11 +476,15 @@
 
           <div class="logs-stats" id="logs-stats"></div>
 
+          <div id="logs-filters"></div>
+
           <div class="glass-card">
             <div class="table-wrap">
-              <div id="logs-table-wrap">
-                <div class="empty-state" id="logs-empty"><i data-lucide="scroll-text" class="empty-icon"></i><p data-i18n="logs.noLogs">No logs yet</p><span data-i18n="logs.noLogsDesc">Logs will appear here as the application runs.</span></div>
-              </div>
+              <!-- Sibling, not child: renderLogsTable replaces #logs-table-wrap
+                   wholesale, which used to destroy this node and crash the next
+                   render on a null reference. -->
+              <div id="logs-table-wrap"></div>
+              <div class="empty-state" id="logs-empty"><i data-lucide="scroll-text" class="empty-icon"></i><p data-i18n="logs.noLogs">No logs yet</p><span data-i18n="logs.noLogsDesc">Logs will appear here as the application runs.</span></div>
             </div>
           </div>
         </section>

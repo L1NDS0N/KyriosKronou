@@ -1107,8 +1107,10 @@ function registerIPC() {
   // Read from disk, not from this process's memory: tasks and backups run in
   // the service process, and their log lines only reach the GUI via the files.
   ipcMain.handle('get-logs', () => logger.getRecentLogsFromDisk(200));
-  ipcMain.handle('get-errors', () => logger.getRecentErrors(200));
-  ipcMain.handle('get-audit-logs', () => logger.getRecentAudit(200));
+  // From disk, like the app log: errors and audit entries written by the
+  // Windows service were invisible while these read process memory only.
+  ipcMain.handle('get-errors', () => logger.getRecentErrorsFromDisk(300));
+  ipcMain.handle('get-audit-logs', () => logger.getRecentAuditFromDisk(300));
   ipcMain.handle('get-log-stats', () => logger.getStats());
 
   ipcMain.handle('export-logs', async (e, type, format) => {

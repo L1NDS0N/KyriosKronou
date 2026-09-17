@@ -2009,6 +2009,10 @@ let allAudit = [];
 function switchLogTab(tab) {
   currentLogTab = tab;
   document.querySelectorAll('.logs-tab').forEach(t => t.classList.toggle('active', t.dataset.logTab === tab));
+  // A level filter from one tab means nothing on another.
+  logFilters.level = '';
+  logPageSize = LOG_PAGE;
+  renderLogFilters();
   renderLogsTable();
 }
 
@@ -2025,6 +2029,9 @@ async function refreshLogs() {
     ]), ([errors, audit, logs]) => {
       allErrors = errors; allAudit = audit; allLogs = logs;
       renderLogsStats();
+      // The level/action options come from the data, so the filter bar has to
+      // be rebuilt whenever the data changes - not only on the fallback path.
+      renderLogFilters();
       renderLogsTable();
     });
     return;
@@ -2037,10 +2044,145 @@ async function refreshLogs() {
       window.api.getLogs()
     ]);
     renderLogsStats();
+    renderLogFilters();
     renderLogsTable();
   } catch (e) {
     console.error('Failed to load logs:', e);
   }
+}
+
+// ─── Logs screen ───
+//
+// Rewritten after a crash report found in the app's own error log:
+// renderLogsTable wrote into #logs-table-wrap with innerHTML, which destroyed
+// the #logs-empty element living inside it, and the next render then did
+// empty.style.display on null. The empty state is now a sibling that is never
+// replaced.
+//
+// Filters live here rather than in the main process: the data is already
+// loaded, and filtering in the renderer keeps typing instant.
+
+let logFilters = { text: '', level: '', since: '24h' };
+const LOG_PAGE = 200;
+let logPageSize = LOG_PAGE;
+
+function logsSince() {
+  const now = Date.now();
+  switch (logFilters.since) {
+    case '1h': return now - 3600000;
+    case '24h': return now - 86400000;
+    case '7d': return now - 7 * 86400000;
+    default: return 0;
+  }
+}
+
+/** Rows for the current tab, after filters. */
+function filteredLogRows() {
+  const since = logsSince();
+  const text = logFilters.text.trim().toLowerCase();
+
+  const matches = (haystack) => !text || String(haystack).toLowerCase().includes(text);
+  const inRange = (ts) => new Date(ts).getTime() >= since;
+
+  if (currentLogTab === 'errors') {
+    return allErrors.filter(e => inRange(e.timestamp)
+      && matches(e.message + ' ' + (e.error ? e.error.message : '') + ' ' + JSON.stringify(e.context || '')));
+  }
+
+  if (currentLogTab === 'audit') {
+    return allAudit.filter(a => inRange(a.timestamp)
+      && (!logFilters.level || a.action === logFilters.level)
+      && matches([a.action, a.target, a.actor, JSON.stringify(a.before || ''), JSON.stringify(a.after || '')].join(' ')));
+  }
+
+  return allLogs.filter(l => inRange(l.timestamp)
+    && (!logFilters.level || (l.level || 'INFO').toUpperCase() === logFilters.level)
+    && matches(l.message + ' ' + JSON.stringify(l.meta || '')));
+}
+
+function renderLogFilters() {
+  const host = document.getElementById('logs-filters');
+  if (!host) return;
+
+  // A background refresh must not yank the caret out of the search box.
+  if (document.activeElement && document.activeElement.id === 'log-search') {
+    updateLogCount();
+    return;
+  }
+
+  // The level filter offers what is actually present, so it never lists an
+  // option that would return nothing.
+  let levelOptions = '';
+  if (currentLogTab === 'app') {
+    const levels = [...new Set(allLogs.map(l => (l.level || 'INFO').toUpperCase()))].sort();
+    levelOptions = `<select class="form-input" id="log-level">
+      <option value="">${escHtml(i18n.t('logs.allLevels'))}</option>
+      ${levels.map(lv => `<option value="${escHtml(lv)}" ${logFilters.level === lv ? 'selected' : ''}>${escHtml(lv)}</option>`).join('')}
+    </select>`;
+  } else if (currentLogTab === 'audit') {
+    const actions = [...new Set(allAudit.map(a => a.action).filter(Boolean))].sort();
+    levelOptions = `<select class="form-input" id="log-level">
+      <option value="">${escHtml(i18n.t('logs.allActions'))}</option>
+      ${actions.map(a => `<option value="${escHtml(a)}" ${logFilters.level === a ? 'selected' : ''}>${escHtml(a)}</option>`).join('')}
+    </select>`;
+  }
+
+  host.innerHTML = `
+    <div class="logs-filter-row">
+      <div class="search-input logs-search">
+        <i data-lucide="search" class="search-icon"></i>
+        <input type="text" id="log-search" placeholder="${escHtml(i18n.t('logs.searchPlaceholder'))}" value="${escHtml(logFilters.text)}">
+      </div>
+      ${levelOptions}
+      <select class="form-input" id="log-since">
+        <option value="1h" ${logFilters.since === '1h' ? 'selected' : ''}>${escHtml(i18n.t('logs.lastHour'))}</option>
+        <option value="24h" ${logFilters.since === '24h' ? 'selected' : ''}>${escHtml(i18n.t('logs.last24h'))}</option>
+        <option value="7d" ${logFilters.since === '7d' ? 'selected' : ''}>${escHtml(i18n.t('logs.last7d'))}</option>
+        <option value="all" ${logFilters.since === 'all' ? 'selected' : ''}>${escHtml(i18n.t('logs.allTime'))}</option>
+      </select>
+      <button class="btn-ghost btn-sm" id="log-clear-filters">${escHtml(i18n.t('logs.clearFilters'))}</button>
+      <span class="logs-count" id="logs-count"></span>
+    </div>`;
+
+  const search = document.getElementById('log-search');
+  let typing = null;
+  search.addEventListener('input', () => {
+    clearTimeout(typing);
+    typing = setTimeout(() => {
+      logFilters.text = search.value;
+      logPageSize = LOG_PAGE;
+      renderLogsTable();
+      // Re-rendering the filter bar would steal focus mid-word.
+      updateLogCount();
+    }, 180);
+  });
+
+  const level = document.getElementById('log-level');
+  if (level) level.addEventListener('change', () => { logFilters.level = level.value; logPageSize = LOG_PAGE; renderLogsTable(); updateLogCount(); });
+
+  document.getElementById('log-since').addEventListener('change', (e) => {
+    logFilters.since = e.target.value; logPageSize = LOG_PAGE; renderLogsTable(); updateLogCount();
+  });
+
+  document.getElementById('log-clear-filters').addEventListener('click', () => {
+    logFilters = { text: '', level: '', since: '24h' };
+    logPageSize = LOG_PAGE;
+    renderLogFilters();
+    renderLogsTable();
+  });
+
+  lucide.createIcons();
+  updateLogCount();
+}
+
+function updateLogCount() {
+  const el = document.getElementById('logs-count');
+  if (!el) return;
+  const total = currentLogTab === 'errors' ? allErrors.length : currentLogTab === 'audit' ? allAudit.length : allLogs.length;
+  const shown = filteredLogRows().length;
+  el.textContent = shown === total
+    ? i18n.t('logs.showingAll', { n: total })
+    : i18n.t('logs.showingFiltered', { n: shown, total });
 }
 
 function renderLogsStats() {
@@ -2049,15 +2191,15 @@ function renderLogsStats() {
   stats.innerHTML = `
     <div class="logs-stat">
       <div class="logs-stat-icon errors"><i data-lucide="alert-circle"></i></div>
-      <div class="logs-stat-info"><div class="logs-stat-value">${allErrors.length}</div><div class="logs-stat-label">Errors</div></div>
+      <div class="logs-stat-info"><div class="logs-stat-value">${allErrors.length}</div><div class="logs-stat-label">${escHtml(i18n.t('logs.errors'))}</div></div>
     </div>
     <div class="logs-stat">
       <div class="logs-stat-icon audit"><i data-lucide="shield"></i></div>
-      <div class="logs-stat-info"><div class="logs-stat-value">${allAudit.length}</div><div class="logs-stat-label">Audit Events</div></div>
+      <div class="logs-stat-info"><div class="logs-stat-value">${allAudit.length}</div><div class="logs-stat-label">${escHtml(i18n.t('logs.auditEvents'))}</div></div>
     </div>
     <div class="logs-stat">
       <div class="logs-stat-icon total"><i data-lucide="scroll-text"></i></div>
-      <div class="logs-stat-info"><div class="logs-stat-value">${allLogs.length}</div><div class="logs-stat-label">Total Logs</div></div>
+      <div class="logs-stat-info"><div class="logs-stat-value">${allLogs.length}</div><div class="logs-stat-label">${escHtml(i18n.t('logs.totalLogs'))}</div></div>
     </div>
   `;
   lucide.createIcons();
@@ -2068,37 +2210,46 @@ function renderLogsTable() {
   const empty = document.getElementById('logs-empty');
   if (!wrap) return;
 
+  const rows = filteredLogRows().slice().reverse();
+
+  // The empty state is a sibling of the table host, so replacing the table
+  // never destroys it - the previous version did, and the next render then
+  // crashed on a null reference.
+  if (empty) empty.style.display = rows.length ? 'none' : 'block';
+  if (!rows.length) { wrap.innerHTML = ''; lucide.createIcons(); return; }
+
+  const page = rows.slice(0, logPageSize);
+  const more = rows.length - page.length;
+
+  let table;
   if (currentLogTab === 'errors') {
-    if (allErrors.length === 0) { wrap.innerHTML = ''; wrap.appendChild(empty); empty.style.display = 'block'; lucide.createIcons(); return; }
-    empty.style.display = 'none';
-    const rows = allErrors.slice().reverse();
-    wrap.innerHTML = `<table class="logs-table"><thead><tr><th>Time</th><th>Level</th><th>Message</th><th>Details</th></tr></thead><tbody>${
-      rows.map(e => `<tr class="log-row-error">
+    table = `<table class="logs-table"><thead><tr>
+        <th>${escHtml(i18n.t('logs.colTime'))}</th><th>${escHtml(i18n.t('logs.colLevel'))}</th>
+        <th>${escHtml(i18n.t('logs.colMessage'))}</th><th>${escHtml(i18n.t('logs.colDetails'))}</th>
+      </tr></thead><tbody>${page.map(e => `<tr class="log-row-error">
         <td class="log-ts">${formatTime(e.timestamp)}</td>
         <td><span class="log-level error">ERROR</span></td>
         <td class="log-message">${escHtml(e.message)}</td>
-        <td class="log-meta" onclick="this.style.maxHeight=this.style.maxHeight==='none'?'60px':'none'">${e.error ? escHtml(e.error.message) : ''}${e.context ? `<br><span style="color:var(--text3)">context: ${escHtml(JSON.stringify(e.context))}</span>` : ''}</td>
-      </tr>`).join('')
-    }</tbody></table>`;
+        <td class="log-meta" onclick="this.classList.toggle('expanded')">${e.error ? escHtml(e.error.message) : ''}${e.context ? `<br><span style="color:var(--text3)">${escHtml(JSON.stringify(e.context))}</span>` : ''}</td>
+      </tr>`).join('')}</tbody></table>`;
   } else if (currentLogTab === 'audit') {
-    if (allAudit.length === 0) { wrap.innerHTML = ''; wrap.appendChild(empty); empty.style.display = 'block'; lucide.createIcons(); return; }
-    empty.style.display = 'none';
-    const rows = allAudit.slice().reverse();
-    wrap.innerHTML = `<table class="logs-table"><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Before</th><th>After</th></tr></thead><tbody>${
-      rows.map(a => `<tr class="log-row-audit">
+    table = `<table class="logs-table"><thead><tr>
+        <th>${escHtml(i18n.t('logs.colTime'))}</th><th>${escHtml(i18n.t('logs.colAction'))}</th>
+        <th>${escHtml(i18n.t('logs.colActor'))}</th><th>${escHtml(i18n.t('logs.colTarget'))}</th>
+        <th>${escHtml(i18n.t('logs.colChange'))}</th>
+      </tr></thead><tbody>${page.map(a => `<tr class="log-row-audit">
         <td class="log-ts">${formatTime(a.timestamp)}</td>
         <td><span class="log-action">${escHtml(a.action)}</span></td>
+        <td class="log-actor">${a.actor ? escHtml(a.actor) : `<span class="muted">${escHtml(i18n.t('logs.system'))}</span>`}${a.ipAddress ? `<br><span class="log-ip">${escHtml(a.ipAddress)}</span>` : ''}</td>
         <td class="log-target">${a.target ? escHtml(String(a.target)) : '-'}</td>
-        <td class="log-meta" onclick="this.style.maxHeight=this.style.maxHeight==='none'?'60px':'none'">${a.before ? escHtml(JSON.stringify(a.before)) : '-'}</td>
-        <td class="log-meta" onclick="this.style.maxHeight=this.style.maxHeight==='none'?'60px':'none'">${a.after ? escHtml(JSON.stringify(a.after)) : '-'}</td>
-      </tr>`).join('')
-    }</tbody></table>`;
+        <td class="log-meta" onclick="this.classList.toggle('expanded')">${
+          [a.before ? escHtml(i18n.t('logs.before')) + ': ' + escHtml(JSON.stringify(a.before)) : '', a.after ? escHtml(i18n.t('logs.after')) + ': ' + escHtml(JSON.stringify(a.after)) : ''].filter(Boolean).join('<br>') || '-'
+        }</td>
+      </tr>`).join('')}</tbody></table>`;
   } else {
-    if (allLogs.length === 0) { wrap.innerHTML = ''; wrap.appendChild(empty); empty.style.display = 'block'; lucide.createIcons(); return; }
-    empty.style.display = 'none';
-    const rows = allLogs.slice().reverse();
-    wrap.innerHTML = `<table class="logs-table"><thead><tr><th>Time</th><th>Level</th><th>Message</th></tr></thead><tbody>${
-      rows.map(l => {
+    table = `<table class="logs-table"><thead><tr>
+        <th>${escHtml(i18n.t('logs.colTime'))}</th><th>${escHtml(i18n.t('logs.colLevel'))}</th><th>${escHtml(i18n.t('logs.colMessage'))}</th>
+      </tr></thead><tbody>${page.map(l => {
         const level = (l.level || 'INFO').toLowerCase();
         const rowClass = level === 'error' ? 'log-row-error' : level === 'warn' ? 'log-row-warn' : '';
         return `<tr class="${rowClass}">
@@ -2106,9 +2257,18 @@ function renderLogsTable() {
           <td><span class="log-level ${level}">${escHtml(l.level || 'INFO')}</span></td>
           <td class="log-message">${escHtml(l.message)}${l.meta ? `<br><span class="log-meta">${escHtml(JSON.stringify(l.meta))}</span>` : ''}</td>
         </tr>`;
-      }).join('')
-    }</tbody></table>`;
+      }).join('')}</tbody></table>`;
   }
+
+  // Rendering thousands of rows at once is what made the screen feel stuck.
+  if (more > 0) {
+    table += `<button class="btn-ghost logs-more" id="logs-more">${escHtml(i18n.t('logs.loadMore', { n: Math.min(more, LOG_PAGE) }))}</button>`;
+  }
+
+  wrap.innerHTML = table;
+  const moreBtn = document.getElementById('logs-more');
+  if (moreBtn) moreBtn.addEventListener('click', () => { logPageSize += LOG_PAGE; renderLogsTable(); });
+
   lucide.createIcons();
 }
 
