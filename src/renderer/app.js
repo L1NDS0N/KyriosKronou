@@ -409,8 +409,9 @@ function renderTasks() {
 
   list.innerHTML = filtered.map(t => {
     return `
-    <div class="task-card ${t.Enabled ? '' : 'task-disabled'}" style="cursor:pointer">
-      <div class="task-info" onclick="event.stopPropagation(); showTaskHistory('${t.Id}')">
+    <div class="task-card clickable ${t.Enabled ? '' : 'task-disabled'}"
+         onclick="editTask('${t.Id}')" title="${escHtml(i18n.t('tasks.clickToEdit'))}">
+      <div class="task-info">
         <div class="task-name">${escHtml(t.Name)}
           ${window.RunMonitor ? RunMonitor.runningBadge(t.Id) : ''}
           ${t.ScriptType ? `<span class="badge badge-info" style="font-size:9px;padding:1px 5px;">${t.ScriptType.toUpperCase()} inline</span>` : ''}
@@ -419,13 +420,13 @@ function renderTasks() {
         ${t.Description ? `<div class="task-desc">${escHtml(t.Description)}</div>` : ''}
       </div>
       <div class="task-actions" onclick="event.stopPropagation()">
-        <label class="toggle-switch" title="Enable/Disable" style="margin-right:4px">
+        <label class="toggle-switch" title="${escHtml(i18n.t('tasks.toggleEnabled'))}" style="margin-right:4px">
           <input type="checkbox" ${t.Enabled ? 'checked' : ''} onchange="toggleTaskEnabled('${t.Id}', this.checked)">
           <span class="toggle-slider"></span>
         </label>
         <button class="btn-glow btn-sm" onclick="runTask('${t.Id}')"><i data-lucide="play"></i>${i18n.t('tasks.run')}</button>
-        <button class="btn-secondary-sm" onclick="editTask('${t.Id}')"><i data-lucide="pencil"></i>${i18n.t('tasks.edit')}</button>
-        <button class="btn-danger" onclick="deleteTask('${t.Id}','${escHtml(t.Name)}')"><i data-lucide="trash-2"></i></button>
+        <button class="btn-secondary-sm" onclick="showTaskHistory('${t.Id}')" title="${escHtml(i18n.t('profile.history'))}"><i data-lucide="history"></i></button>
+        <button class="btn-danger" onclick="deleteTask('${t.Id}','${escHtml(t.Name)}')" title="${escHtml(i18n.t('profile.delete'))}"><i data-lucide="trash-2"></i></button>
       </div>
     </div>`;
   }).join('');

@@ -167,7 +167,10 @@
       clearTimeout(timer);
       timer = setTimeout(() => { open(box); query(box); }, DEBOUNCE_MS);
     });
-    input.addEventListener('focus', () => open(box));
+    // Not on focus: showModal auto-focuses the first text input, which popped
+    // this open over the form before the user had touched anything. A click or
+    // a keystroke is a real intent to browse.
+    input.addEventListener('click', () => open(box));
     // Validate once the user has moved on, not while they are still typing.
     input.addEventListener('blur', () => { setTimeout(() => validate(box), 120); });
 

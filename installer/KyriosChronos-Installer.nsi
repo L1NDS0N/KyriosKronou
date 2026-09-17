@@ -77,16 +77,21 @@ Section "Kyrios Chronos (required)" SecMain
   ; Install all files from the unpacked build
   File /r "..\build\KyriosChronos-win32-x64\*.*"
 
+  ; Ship the icon as a loose file. A shortcut pointing at an icon INDEX
+  ; inside the exe kept showing the Electron logo; an explicit .ico is
+  ; unambiguous and survives Windows' icon cache being rebuilt.
+  File "..\build-resources\icon.ico"
+
   ; Create uninstaller
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
   ; Create Start Menu shortcuts
   CreateDirectory "$SMPROGRAMS\Kyrios Chronos"
-  CreateShortCut "$SMPROGRAMS\Kyrios Chronos\Kyrios Chronos.lnk" "$INSTDIR\KyriosChronos.exe" "" "$INSTDIR\KyriosChronos.exe" 0
+  CreateShortCut "$SMPROGRAMS\Kyrios Chronos\Kyrios Chronos.lnk" "$INSTDIR\KyriosChronos.exe" "" "$INSTDIR\icon.ico" 0
   CreateShortCut "$SMPROGRAMS\Kyrios Chronos\Uninstall Kyrios Chronos.lnk" "$INSTDIR\uninstall.exe"
 
   ; Create Desktop shortcut
-  CreateShortCut "$DESKTOP\Kyrios Chronos.lnk" "$INSTDIR\KyriosChronos.exe" "" "$INSTDIR\KyriosChronos.exe" 0
+  CreateShortCut "$DESKTOP\Kyrios Chronos.lnk" "$INSTDIR\KyriosChronos.exe" "" "$INSTDIR\icon.ico" 0
 
   ; Save installation path to registry
   WriteRegStr HKCU "Software\KyriosChronos" "InstallDir" "$INSTDIR"

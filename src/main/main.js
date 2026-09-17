@@ -28,6 +28,11 @@ if (!gotSingleInstanceLock) {
 }
 
 const SERVICE_NAME = KyrionService.SERVICE_NAME;
+
+// Must match the NSIS shortcut's AppUserModelID, or Windows treats the running
+// window as a different application and falls back to Electron's icon.
+const APP_USER_MODEL_ID = 'com.kyrioschronos.app';
+if (process.platform === 'win32') app.setAppUserModelId(APP_USER_MODEL_ID);
 // Passed by the Windows startup entry when "start minimized" is on.
 const MINIMIZED_FLAG = '--minimized';
 const startedMinimized = process.argv.includes(MINIMIZED_FLAG);
@@ -96,7 +101,28 @@ function applyLoginItem() {
   });
 }
 
+/**
+ * The application icon, as a file path.
+ *
+ * Without this the window - and therefore the taskbar button - fell back to
+ * Electron's own logo, even though the packaged .exe carried the right icon.
+ * The exe icon and the window icon are two different things on Windows.
+ */
+function appIconPath() {
+  const candidates = [
+    path.join(__dirname, '..', '..', 'build-resources', 'icon.ico'),
+    path.join(process.resourcesPath || '', 'app.asar', 'build-resources', 'icon.ico'),
+    path.join(process.resourcesPath || '', 'app', 'build-resources', 'icon.ico'),
+    path.join(path.dirname(process.execPath), 'icon.ico'),
+  ];
+  for (const candidate of candidates) {
+    try { if (fs.existsSync(candidate)) return candidate; } catch (e) {}
+  }
+  return null;
+}
+
 function createWindow() {
+  const iconPath = appIconPath();
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -105,6 +131,7 @@ function createWindow() {
     frame: false,
     backgroundColor: '#050508',
     show: false,
+    ...(iconPath ? { icon: iconPath } : {}),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

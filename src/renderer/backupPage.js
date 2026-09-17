@@ -88,6 +88,10 @@ class BackupPage {
           </div>
           <!-- stopPropagation so an action button never opens the editor too -->
           <div class="backup-profile-actions" onclick="event.stopPropagation()">
+            <label class="toggle-switch" title="${esc(i18n.t('tasks.toggleEnabled'))}" style="margin-right:4px">
+              <input type="checkbox" ${p.Enabled ? 'checked' : ''} onchange="backupPage.toggleEnabled('${p.Id}', this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
             <button class="btn-glow btn-sm" onclick="backupPage.runBackup('${p.Id}')"><i data-lucide="play"></i> ${esc(i18n.t('profile.run'))}</button>
             <button class="btn-secondary-sm" onclick="backupPage.showHistory('${p.Id}')" title="${esc(i18n.t('profile.history'))}"><i data-lucide="history"></i></button>
             <button class="btn-secondary-sm" onclick="backupPage.cloneProfile('${p.Id}')" title="${esc(i18n.t('profile.clone'))}"><i data-lucide="copy"></i></button>
@@ -217,6 +221,20 @@ class BackupPage {
     this._renderWizard();
   }
 
+  /** Enable or disable a profile straight from the list. */
+  async toggleEnabled(id, enabled) {
+    const profile = this.profiles.find(x => x.Id === id);
+    if (!profile) return;
+    const result = await window.api.updateBackupProfile({ Id: id, Enabled: enabled });
+    if (result === null || (result && result.success === false)) {
+      showToast((result && result.message) || i18n.t('profile.cloneFailed'), 'error');
+      return;
+    }
+    profile.Enabled = enabled;
+    showToast(i18n.t(enabled ? 'profile.enabledToast' : 'profile.disabledToast', { name: profile.Name }), 'info');
+    this.render();
+  }
+
   /**
    * Duplicate a profile. The copy is created disabled so a clone made to be
    * tweaked cannot start running on the original's schedule before it is ready.
@@ -311,7 +329,7 @@ class BackupPage {
 
           <div class="wizard-nav">
             <div>
-              ${this.currentStep > 0 ? `<button class="btn-outline" onclick="backupPage.prevStep()"><i data-lucide=\"arrow-left\"></i> Back</button>` : ''}
+              ${this.currentStep > 0 ? `<button class="btn-outline" onclick="backupPage.prevStep()"><i data-lucide=\"arrow-left\"></i> ${esc(i18n.t("wizard.back"))}</button>` : ''}
             </div>
             <div style="display:flex;gap:8px">
               <button class="btn-ghost" onclick="hideModal()">${esc(i18n.t('taskModal.cancel'))}</button>
@@ -424,105 +442,139 @@ class BackupPage {
       `; }
 
       case 1: return `
-        <label class="form-label">Select Databases</label>
-        <p style="font-size:12px;color:var(--text3);margin-bottom:8px">If none selected, ALL databases will be backed up.</p>
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-          <button class="btn-outline btn-sm" onclick="backupPage.loadWizardDbs()"><i data-lucide="refresh-cw"></i> Load Databases</button>
-          <span id="wiz-db-status" style="font-size:12px"></span>
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="database"></i> ${esc(i18n.t('wizard.stepDatabases'))}</div>
+
+          <div class="wiz-db-head">
+            <div class="form-hint" style="margin:0">${esc(i18n.t('wizard.databasesHint'))}</div>
+            <button class="btn-outline btn-sm" onclick="backupPage.loadWizardDbs()">
+              <i data-lucide="refresh-cw"></i> ${esc(i18n.t('wizard.loadDatabases'))}
+            </button>
+          </div>
+          <div id="wiz-db-status" class="form-hint"></div>
+
+          <div id="wiz-db-chips" class="bp-db-list">${
+            (d.Databases || []).length
+              ? (d.Databases).map(db => `
+              <label class="bp-db-check-row">
+                <input type="checkbox" class="bp-db-check" data-db="${esc(db)}" checked onchange="backupPage._syncDbs()">
+                <span class="bp-db-check-name">${esc(db)}</span>
+              </label>`).join('')
+              : `<div class="bp-db-empty">${esc(i18n.t('wizard.noDatabasesLoaded'))}</div>`
+          }</div>
+
+          <div id="wiz-db-all-label" class="wiz-db-summary">${
+            (!d.Databases || d.Databases.length === 0)
+              ? '✓ ' + esc(i18n.t('wizard.allDatabasesNote'))
+              : esc(i18n.t('wizard.selectedCount', { n: d.Databases.length }))
+          }</div>
         </div>
-        <div id="wiz-db-chips" class="bp-db-list">
-          ${(d.Databases || []).map(db => `
-            <label class="bp-db-check-row">
-              <input type="checkbox" class="bp-db-check" data-db="${esc(db)}" ${d.Databases?.includes(db) ? 'checked' : ''} onchange="backupPage._syncDbs()">
-              <span class="bp-db-check-box"></span>
-              <span class="bp-db-check-name">${esc(db)}</span>
-            </label>
-          `).join('')}
-        </div>
-        <p id="wiz-db-all-label" style="font-size:12px;color:var(--primary-light);margin-top:8px">${(!d.Databases || d.Databases.length === 0) ? '\u2713 All databases will be backed up' : i18n.t('wizard.selectedCount', { n: d.Databases.length })}</p>
       `;
 
       case 2: return `
-        <label class="form-label">${esc(i18n.t('wizard.destination'))}</label>
-        <div style="display:flex;gap:6px;margin-bottom:12px">
-          <input type="text" class="form-input" id="wiz-path" data-path-input data-path-kind="directory" value="${esc(d.BackupPath)}" placeholder="C:\\Backups\\MySQL" oninput="backupPage.draft.BackupPath=this.value; backupPage._updateFloatingSummary()" style="flex:1">
-          <button class="btn-outline btn-sm" onclick="backupPage.browseBackupPath()" title="Browse folder"><i data-lucide="folder-open"></i></button>
-        </div>
-
-        <label class="form-label">File Naming</label>
-        <input type="text" class="form-input" id="wiz-naming" value="${esc(d.NamingPattern)}" oninput="backupPage.draft.NamingPattern=this.value" style="margin-bottom:4px">
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-          <span class="bp-db-chip" onclick="backupPage._insertPlaceholder('{database}')">{database}</span>
-          <span class="bp-db-chip" onclick="backupPage._insertPlaceholder('{date}')">{date}</span>
-          <span class="bp-db-chip" onclick="backupPage._insertPlaceholder('{time}')">{time}</span>
-          <span class="bp-db-chip" onclick="backupPage._insertPlaceholder('{timestamp}')">{timestamp}</span>
-        </div>
-
-        <label class="form-label">Compression</label>
-        <div style="display:grid;grid-template-columns:1fr 80px;gap:8px">
-          <div class="form-group">
-            <select class="form-input" id="wiz-compress" onchange="backupPage.draft.Compression=this.value">
-              <option value="none" ${d.Compression==='none'?'selected':''}>None (faster)</option>
-              <option value="zip" ${d.Compression==='zip'?'selected':''}>ZIP</option>
-              <option value="7z" ${d.Compression==='7z'?'selected':''}>7-Zip (smaller)</option>
-            </select>
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="folder"></i> ${esc(i18n.t('wizard.destination'))}</div>
+          <div class="input-row">
+            <input type="text" class="form-input" id="wiz-path" data-path-input data-path-kind="directory" value="${esc(d.BackupPath)}" placeholder="C:\\Backups\\MySQL" oninput="backupPage.draft.BackupPath=this.value; backupPage._updateFloatingSummary()">
+            <button class="btn-outline btn-sm" onclick="backupPage.browseBackupPath()" title="${esc(i18n.t('taskModal.browse'))}"><i data-lucide="folder-open"></i></button>
           </div>
-          <div class="form-group"><label class="form-label">Level ${d.CompressionLevel}</label><input type="range" min="1" max="9" value="${d.CompressionLevel}" oninput="backupPage.draft.CompressionLevel=parseInt(this.value); this.previousElementSibling.textContent='Level '+this.value" style="width:100%"></div>
+
+          <div class="form-group" style="margin-top:14px">
+            <label class="form-label">${esc(i18n.t('wizard.fileNaming'))}</label>
+            <input type="text" class="form-input" id="wiz-naming" value="${esc(d.NamingPattern)}" oninput="backupPage.draft.NamingPattern=this.value">
+            <div class="wiz-chips">
+              ${['{database}', '{date}', '{time}', '{timestamp}'].map(token =>
+                `<span class="bp-db-chip" onclick="backupPage._insertPlaceholder('${token}')">${token}</span>`).join('')}
+            </div>
+          </div>
         </div>
 
-        <label class="form-label">mysqldump Options</label>
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="archive"></i> ${esc(i18n.t('wizard.compression'))}</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">${esc(i18n.t('wizard.compressionFormat'))}</label>
+              <select class="form-input" id="wiz-compress" onchange="backupPage.draft.Compression=this.value">
+                <option value="none" ${d.Compression === 'none' ? 'selected' : ''}>${esc(i18n.t('wizard.compressNone'))}</option>
+                <option value="zip" ${d.Compression === 'zip' ? 'selected' : ''}>ZIP</option>
+                <option value="7z" ${d.Compression === '7z' ? 'selected' : ''}>${esc(i18n.t('wizard.compress7z'))}</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">${esc(i18n.t('wizard.compressionLevel'))} <span id="wiz-level-value">${d.CompressionLevel}</span></label>
+              <input type="range" min="1" max="9" value="${d.CompressionLevel}"
+                     oninput="backupPage.draft.CompressionLevel=parseInt(this.value); document.getElementById('wiz-level-value').textContent=this.value">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="sliders-horizontal"></i> ${esc(i18n.t('wizard.mysqlOptions'))}</div>
         <div class="mysql-opts-grid">
-          <label class="mysql-opt"><input type="checkbox" id="opt-st" ${d.ExtraArgs?.includes('single-transaction') ? 'checked' : ''} onchange="backupPage._syncMysqlOpts()"><span>Single Transaction</span><small>InnoDB consistency without locking</small></label>
-          <label class="mysql-opt"><input type="checkbox" id="opt-routines" ${d.ExtraArgs?.includes('routines') ? 'checked' : ''} onchange="backupPage._syncMysqlOpts()"><span>Routines</span><small>Stored procedures & functions</small></label>
-          <label class="mysql-opt"><input type="checkbox" id="opt-triggers" ${d.ExtraArgs?.includes('triggers') ? 'checked' : ''} onchange="backupPage._syncMysqlOpts()"><span>Triggers</span><small>Backup trigger definitions</small></label>
-          <label class="mysql-opt"><input type="checkbox" id="opt-events" ${d.ExtraArgs?.includes('events') ? 'checked' : ''} onchange="backupPage._syncMysqlOpts()"><span>Events</span><small>Scheduled event definitions</small></label>
-          <label class="mysql-opt"><input type="checkbox" id="opt-locktables" ${d.ExtraArgs?.includes('lock-tables') ? 'checked' : ''} onchange="backupPage._syncMysqlOpts()"><span>Lock Tables</span><small>Read lock during dump (MyISAM)</small></label>
-          <label class="mysql-opt"><input type="checkbox" id="opt-add-drop" ${d.ExtraArgs?.includes('add-drop-table') !== false && d.ExtraArgs?.includes('no-add-drop') === false ? 'checked' : ''} onchange="backupPage._syncMysqlOpts()"><span>Add DROP TABLE</span><small>Include DROP before CREATE</small></label>
-          <label class="mysql-opt"><input type="checkbox" id="opt-create-db" ${d.ExtraArgs?.includes('databases') || d.ExtraArgs?.includes('all-databases') ? 'checked' : ''} onchange="backupPage._syncMysqlOpts()"><span>Create Database</span><small>Include CREATE DATABASE statement</small></label>
-          <label class="mysql-opt"><input type="checkbox" id="opt-compress" ${d.ExtraArgs?.includes('compress') ? 'checked' : ''} onchange="backupPage._syncMysqlOpts()"><span>Compress Protocol</span><small>Compress client-server traffic</small></label>
+          <label class="mysql-opt"><input type="checkbox" id="opt-st" ${d.ExtraArgs?.includes('single-transaction') ? 'checked' : ''} onchange="backupPage._syncMysqlOpts()"><span>Single Transaction</span><small>${esc(i18n.t('wizard.optSingleTransaction'))}</small></label>
+          <label class="mysql-opt"><input type="checkbox" id="opt-routines" ${d.ExtraArgs?.includes('routines') ? 'checked' : ''} onchange="backupPage._syncMysqlOpts()"><span>Routines</span><small>${esc(i18n.t('wizard.optRoutines'))}</small></label>
+          <label class="mysql-opt"><input type="checkbox" id="opt-triggers" ${d.ExtraArgs?.includes('triggers') ? 'checked' : ''} onchange="backupPage._syncMysqlOpts()"><span>Triggers</span><small>${esc(i18n.t('wizard.optTriggers'))}</small></label>
+          <label class="mysql-opt"><input type="checkbox" id="opt-events" ${d.ExtraArgs?.includes('events') ? 'checked' : ''} onchange="backupPage._syncMysqlOpts()"><span>Events</span><small>${esc(i18n.t('wizard.optEvents'))}</small></label>
+          <label class="mysql-opt"><input type="checkbox" id="opt-locktables" ${d.ExtraArgs?.includes('lock-tables') ? 'checked' : ''} onchange="backupPage._syncMysqlOpts()"><span>Lock Tables</span><small>${esc(i18n.t('wizard.optLockTables'))}</small></label>
+          <label class="mysql-opt"><input type="checkbox" id="opt-add-drop" ${d.ExtraArgs?.includes('add-drop-table') !== false && d.ExtraArgs?.includes('no-add-drop') === false ? 'checked' : ''} onchange="backupPage._syncMysqlOpts()"><span>Add DROP TABLE</span><small>${esc(i18n.t('wizard.optAddDrop'))}</small></label>
+          <label class="mysql-opt"><input type="checkbox" id="opt-create-db" ${d.ExtraArgs?.includes('databases') || d.ExtraArgs?.includes('all-databases') ? 'checked' : ''} onchange="backupPage._syncMysqlOpts()"><span>Create Database</span><small>${esc(i18n.t('wizard.optCreateDb'))}</small></label>
+          <label class="mysql-opt"><input type="checkbox" id="opt-compress" ${d.ExtraArgs?.includes('compress') ? 'checked' : ''} onchange="backupPage._syncMysqlOpts()"><span>Compress Protocol</span><small>${esc(i18n.t('wizard.optCompress'))}</small></label>
         </div>
-        <details style="margin-top:8px"><summary style="font-size:11px;color:var(--text3);cursor:pointer">${esc(i18n.t('wizard.advancedArgs'))}</summary>
-          <input type="text" class="form-input" id="wiz-args" value="${esc(d.ExtraArgs)}" oninput="backupPage.draft.ExtraArgs=this.value" style="margin-top:6px;font-size:12px;font-family:monospace" placeholder="--extra-args-here">
-        </details>
+          <details class="wiz-advanced"><summary>${esc(i18n.t('wizard.advancedArgs'))}</summary>
+            <input type="text" class="form-input mono" id="wiz-args" value="${esc(d.ExtraArgs)}" oninput="backupPage.draft.ExtraArgs=this.value" placeholder="--single-transaction --routines">
+          </details>
 
-        <label class="form-label">Local Storage</label>
-        <div class="checkbox-row">
-          <input type="checkbox" id="wiz-keeplocal" ${d.KeepLocal !== false ? 'checked' : ''} onchange="backupPage.draft.KeepLocal=this.checked">
-          <label for="wiz-keeplocal">Keep backup files locally</label>
         </div>
-        <div class="form-group" style="margin-top:6px"><label class="form-label">Auto-delete local backups after (days)</label><input type="number" class="form-input" id="wiz-keepdays" value="${d.KeepDays || 7}" min="1" max="365" oninput="backupPage.draft.KeepDays=parseInt(this.value)||7" style="width:100px"></div>
+
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="hard-drive"></i> ${esc(i18n.t('wizard.localStorage'))}</div>
+          <label class="check-row" for="wiz-keeplocal">
+            <input type="checkbox" id="wiz-keeplocal" ${d.KeepLocal !== false ? 'checked' : ''} onchange="backupPage.draft.KeepLocal=this.checked">
+            <span>${esc(i18n.t('wizard.keepLocal'))}
+              <span class="check-hint">${esc(i18n.t('wizard.keepLocalHint'))}</span>
+            </span>
+          </label>
+          <div class="form-group" style="margin-top:12px;max-width:220px">
+            <label class="form-label">${esc(i18n.t('wizard.keepDays'))}</label>
+            <input type="number" class="form-input" id="wiz-keepdays" value="${d.KeepDays || 7}" min="1" max="365" oninput="backupPage.draft.KeepDays=parseInt(this.value)||7">
+          </div>
+        </div>
       `;
 
       case 3: return `
-        <label class="form-label">Upload Targets</label>
-        <p style="font-size:12px;color:var(--text3);margin-bottom:12px">Send backup files to remote servers after creation. Optional.</p>
-        <div id="wiz-targets">${(d.UploadTargets || []).map((t, i) => this._renderTarget(t, i)).join('')}</div>
-        <div style="display:flex;gap:6px;margin-top:8px">
-          <button class="btn-outline btn-sm" onclick="backupPage.addTarget('ftp')"><i data-lucide="globe"></i> FTP</button>
-          <button class="btn-outline btn-sm" onclick="backupPage.addTarget('sftp')"><i data-lucide="lock"></i> SFTP</button>
-          <button class="btn-outline btn-sm" onclick="backupPage.addTarget('smb')"><i data-lucide="hard-drive"></i> SMB/NAS</button>
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="upload"></i> ${esc(i18n.t('wizard.uploadTargets'))}</div>
+          <div class="form-hint" style="margin:0 0 12px">${esc(i18n.t('wizard.uploadHint'))}</div>
+          <div id="wiz-targets">${(d.UploadTargets || []).map((t, i) => this._renderTarget(t, i)).join('')}</div>
+          <div class="wiz-target-add">
+            <button class="btn-outline btn-sm" onclick="backupPage.addTarget('ftp')"><i data-lucide="globe"></i> FTP</button>
+            <button class="btn-outline btn-sm" onclick="backupPage.addTarget('sftp')"><i data-lucide="lock"></i> SFTP</button>
+            <button class="btn-outline btn-sm" onclick="backupPage.addTarget('smb')"><i data-lucide="hard-drive"></i> SMB/NAS</button>
+          </div>
         </div>
       `;
 
       case 4: return `
-        <label class="form-label">Schedule (Cron Expression)</label>
-        <input type="text" class="form-input" id="wiz-cron" value="${esc(d.CronExpression)}" oninput="backupPage.draft.CronExpression=this.value; backupPage._validateCron(this.value); backupPage._updateFloatingSummary()" placeholder="0 2 * * *" style="margin-bottom:4px;font-family:monospace;font-size:14px;letter-spacing:1px">
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="clock"></i> ${esc(i18n.t('wizard.stepSchedule'))}</div>
+        <label class="form-label">${esc(i18n.t('wizard.cronExpression'))}</label>
+        <input type="text" class="form-input mono" id="wiz-cron" value="${esc(d.CronExpression)}" oninput="backupPage.draft.CronExpression=this.value; backupPage._validateCron(this.value); backupPage._updateFloatingSummary()" placeholder="0 2 * * *" style="margin-bottom:6px;font-size:14px;letter-spacing:1px">
         <div id="cron-validator" style="margin-bottom:8px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.02);border:1px solid var(--border);font-size:11px;min-height:36px">
           ${this._renderCronBreakdown(d.CronExpression)}
         </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">
-          <span class="bp-db-chip" onclick="backupPage._setCron('0 * * * *')">Every hour</span>
-          <span class="bp-db-chip" onclick="backupPage._setCron('0 2 * * *')">Daily 2 AM</span>
-          <span class="bp-db-chip" onclick="backupPage._setCron('0 2 * * 1-5')">Weekdays</span>
-          <span class="bp-db-chip" onclick="backupPage._setCron('0 2 * * 0')">Sundays</span>
-          <span class="bp-db-chip" onclick="backupPage._setCron('0 2 1 * *')">Monthly</span>
-          <span class="bp-db-chip" onclick="backupPage._setCron('*/15 * * * *')">Every 15 min</span>
-          <span class="bp-db-chip" onclick="backupPage._setCron('0 0 1 * *')">1st of month</span>
+        <div class="wiz-chips" style="margin-bottom:16px">
+          <span class="bp-db-chip" onclick="backupPage._setCron('0 * * * *')">${esc(i18n.t('cron.everyHour'))}</span>
+          <span class="bp-db-chip" onclick="backupPage._setCron('0 2 * * *')">${esc(i18n.t('cron.daily2'))}</span>
+          <span class="bp-db-chip" onclick="backupPage._setCron('0 2 * * 1-5')">${esc(i18n.t('cron.weekdays'))}</span>
+          <span class="bp-db-chip" onclick="backupPage._setCron('0 2 * * 0')">${esc(i18n.t('cron.weeklySunday'))}</span>
+          <span class="bp-db-chip" onclick="backupPage._setCron('0 2 1 * *')">${esc(i18n.t('cron.monthly1st'))}</span>
+          <span class="bp-db-chip" onclick="backupPage._setCron('*/15 * * * *')">${esc(i18n.t('cron.every15'))}</span>
         </div>
 
-        <div class="checkbox-row">
+        <label class="check-row" for="wiz-enabled">
           <input type="checkbox" id="wiz-enabled" ${d.Enabled !== false ? 'checked' : ''} onchange="backupPage.draft.Enabled=this.checked">
-          <label for="wiz-enabled">Enable this backup profile</label>
+          <span>${esc(i18n.t('wizard.enableProfile'))}</span>
+        </label>
         </div>
       `;
     }
