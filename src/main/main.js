@@ -15,6 +15,7 @@ const BackupManager = require('./backupManager');
 const KyrionService = require('./kyrionService');
 const paths = require('./paths');
 const { SchedulerCore, ROLE_GUI, readOwner } = require('./schedulerCore');
+const RunRegistry = require('./runRegistry');
 
 // ─── Single instance ───
 // Only one GUI process may exist. A second launch (double-clicked icon, tray
@@ -36,6 +37,7 @@ let tray = null;
 let cronParser, logger, config, taskManager, serviceManager, nssmInstaller;
 let kyrionService;
 let scheduler;
+let runs;
 let wrapperGenerator;
 let apiServer;
 let backupManager;
@@ -245,14 +247,16 @@ function initComponents() {
   cronParser = new CronParser();
   logger = new Logger(logsDir);
   config = new ConfigManager(configDir, 'default');
-  taskManager = new TaskManager(config, logger, cronParser);
+  // Tracks in-flight runs so the UI can show progress and live output.
+  runs = new RunRegistry();
+  taskManager = new TaskManager(config, logger, cronParser, runs);
   serviceManager = new ServiceManager(logger, config);
   // Was declared and used by the nssm-* IPC handlers but never constructed,
   // so every one of them threw "Cannot read properties of undefined".
   nssmInstaller = new NssmInstaller(logger);
   kyrionService = new KyrionService(logger, serviceManager);
   wrapperGenerator = new WrapperGenerator(config, logger);
-  backupManager = new BackupManager(config, logger);
+  backupManager = new BackupManager(config, logger, runs);
 
   if (migration.migrated) {
     logger.log('INFO', `Migrated ${migration.copied} file(s) from ${migration.sources.join(', ')} to ${paths.dataDir()}`);
@@ -726,6 +730,12 @@ function registerIPC() {
 
   // ─── Backup Profiles ───
   ipcMain.handle('get-db-engines', () => require('./db').list());
+
+  // ─── Live run monitoring ───
+  ipcMain.handle('get-active-runs', () => (runs ? runs.active() : []));
+  ipcMain.handle('get-recent-runs', () => (runs ? runs.recent() : []));
+  ipcMain.handle('get-run-detail', (e, runId, sinceSeq) => (runs ? runs.detail(runId, sinceSeq || 0) : null));
+  ipcMain.handle('get-run-for-target', (e, targetId) => (runs ? runs.activeFor(targetId) : null));
 
   // ─── Schedule conflicts ───
   // Two heavy jobs in the same minute is a real operational problem; the UI
@@ -1248,6 +1258,16 @@ app.whenReady().then(() => {
   try {
     initComponents();
     registerIPC();
+
+    // Push run changes to the window rather than making it poll.
+    const notifyRuns = () => {
+      if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+        mainWindow.webContents.send('runs-changed', runs.active());
+      }
+    };
+    runs.on('changed', notifyRuns);
+    runs.on('progress', notifyRuns);
+
     createWindow();
     createTray();
     startScheduler();

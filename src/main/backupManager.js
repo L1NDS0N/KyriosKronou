@@ -7,9 +7,11 @@ const crypto = require('crypto');
 const engines = require('./db');
 
 class BackupManager {
-  constructor(config, logger) {
+  constructor(config, logger, runRegistry) {
     this.config = config;
     this.logger = logger;
+    // Optional: reports live progress for the UI.
+    this.runs = runRegistry || null;
     this.profilesFile = path.join(config.configDir, 'backup-profiles.json');
     this.historyFile = path.join(config.configDir, 'backup-history.json');
     this.profiles = this.loadProfiles();
@@ -231,12 +233,32 @@ class BackupManager {
 
     const databases = profile.Databases.length > 0 ? profile.Databases : ['--all-databases'];
 
-    for (const db of databases) {
+    // One step per database, plus upload when there are targets - so the
+    // progress bar reflects the actual shape of the work.
+    const runs = this.runs;
+    const stepLabels = databases.map(db => (db === '--all-databases' ? 'Todos os bancos' : db));
+    if (profile.UploadTargets && profile.UploadTargets.length) stepLabels.push('Enviando');
+    const runId = runs ? runs.start({
+      kind: 'backup', targetId: profileId, name: profile.Name, steps: stepLabels,
+    }) : null;
+
+    for (let dbIndex = 0; dbIndex < databases.length; dbIndex++) {
+      const db = databases[dbIndex];
+      if (runs && runId) runs.setStep(runId, dbIndex, db);
       try {
         const result = await this.backupDatabase(profile, db);
         results.push(result);
+        if (runs && runId) {
+          if (result.success) {
+            runs.appendOutput(runId, `${db}: ${result.sizeHuman || 'concluído'}`, 'stdout');
+          } else {
+            runs.appendOutput(runId, `${db}: ${result.message || 'falhou'}`, 'stderr');
+            runs.failStep(runId, dbIndex, result.message);
+          }
+        }
 
         if (result.success && profile.UploadTargets.length > 0) {
+          if (runs && runId) runs.setStep(runId, databases.length, 'upload');
           for (const target of profile.UploadTargets) {
             const uploadResult = await this.uploadFile(result.filePath, target, profile);
             result.uploads = result.uploads || [];
@@ -250,6 +272,10 @@ class BackupManager {
         }
       } catch (e) {
         results.push({ success: false, database: db, message: e.message });
+        if (runs && runId) {
+          runs.appendOutput(runId, `${db}: ${e.message}`, 'stderr');
+          runs.failStep(runId, dbIndex, e.message);
+        }
       }
     }
 
@@ -317,6 +343,13 @@ class BackupManager {
       targetType: 'backup', target: profileId,
       after: { profile: profile.Name, databases: databases.length, success, duration }
     });
+
+    if (runs && runId) {
+      runs.finish(runId, {
+        success,
+        message: success ? `${databases.length} banco(s) em ${duration}` : 'Um ou mais bancos falharam',
+      });
+    }
 
     return { success, duration, results };
   }

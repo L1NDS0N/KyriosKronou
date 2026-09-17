@@ -1427,3 +1427,133 @@ input[type="file"]::file-selector-button:hover { background: var(--glass3); colo
   font-size: 11.5px; color: var(--green); opacity: .85;
 }
 .cron-conflict-ok i, .cron-conflict-ok svg { width: 13px; height: 13px; }
+
+/* ═══ FIXED STATUS BAR ═══
+   Always on screen: what is running now, plus the dashboard numbers, without
+   having to navigate anywhere. */
+#status-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 90;
+  display: flex; align-items: center; gap: 4px;
+  height: 30px; padding: 0 12px;
+  background: linear-gradient(rgba(8,8,13,.94), rgba(5,5,8,.98));
+  backdrop-filter: blur(20px);
+  border-top: 1px solid var(--glass-border);
+  font-size: 11.5px; color: var(--text3);
+}
+/* The app scrolls above the bar rather than behind it. */
+#app { padding-bottom: 30px; }
+
+.sb-item {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 9px; border-radius: 6px;
+  background: none; border: none; color: inherit;
+  font-family: var(--font); font-size: 11.5px; white-space: nowrap;
+}
+.sb-item i, .sb-item svg { width: 12px; height: 12px; opacity: .6; }
+.sb-item.bad { color: var(--red); }
+.sb-item.bad i, .sb-item.bad svg { opacity: .9; }
+.sb-sep { width: 1px; height: 14px; background: var(--glass-border); margin: 0 4px; }
+.sb-spacer { flex: 1; }
+
+.sb-runs { cursor: default; transition: var(--transition); }
+.sb-runs.has-runs { cursor: pointer; color: var(--text2); }
+.sb-runs.has-runs:hover { background: var(--glass2); color: var(--text); }
+.sb-runs:disabled { cursor: default; }
+.sb-runs-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); opacity: .4; flex-shrink: 0; }
+.sb-runs-dot.active { background: var(--amber); opacity: 1; animation: sbPulse 1.4s ease-in-out infinite; }
+@keyframes sbPulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.82); } }
+
+.sb-sched-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
+.sb-sched-dot.ok { background: var(--green); }
+.sb-sched-dot.warn { background: var(--amber); }
+.sb-sched-dot.bad { background: var(--red); }
+
+/* ═══ RUNNING BADGE ═══ */
+.badge-running {
+  background: var(--amber-dim); color: var(--amber);
+  border: 1px solid rgba(138,122,90,.16); cursor: pointer;
+}
+.badge-running::before { display: none; }
+.badge-running:hover { background: rgba(138,122,90,.18); }
+.badge-running-spin {
+  width: 8px; height: 8px; border-radius: 50%;
+  border: 1.5px solid rgba(138,122,90,.3); border-top-color: var(--amber);
+  animation: spin .8s linear infinite; flex-shrink: 0;
+}
+
+/* ═══ RUN PICKER ═══ */
+.run-picker { display: flex; flex-direction: column; gap: 6px; padding: 14px 26px 4px; }
+.run-pick {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 11px 13px; border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xs); background: var(--glass);
+  color: var(--text2); font-family: var(--font); font-size: 12.5px;
+  cursor: pointer; transition: var(--transition); text-align: left;
+}
+.run-pick:hover { background: var(--glass2); border-color: var(--glass-border2); color: var(--text); }
+.run-pick-kind {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: .5px;
+  padding: 2px 7px; border-radius: 10px; flex-shrink: 0;
+  background: var(--glass2); color: var(--text3);
+}
+.run-pick-kind.backup { background: var(--green-dim); color: var(--green); }
+.run-pick-name { font-weight: 600; }
+.run-pick-step { color: var(--text3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.run-pick-pct { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--amber); flex-shrink: 0; }
+
+/* ═══ RUN VIEWER ═══ */
+.run-view { padding: 16px 26px 0; }
+.run-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
+.run-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.run-meta { font-size: 11.5px; color: var(--text3); margin-top: 3px; }
+
+.run-progress { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.run-progress-bar { flex: 1; height: 6px; border-radius: 4px; background: var(--glass2); overflow: hidden; }
+.run-progress-fill {
+  height: 100%; border-radius: 4px; background: var(--amber);
+  transition: width .45s cubic-bezier(.4,0,.2,1);
+}
+.run-progress-fill.done { background: var(--green); }
+.run-progress-fill.failed { background: var(--red); }
+.run-progress-pct { font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--text2); min-width: 42px; text-align: right; }
+
+.run-steps { display: flex; flex-direction: column; gap: 2px; margin-bottom: 18px; }
+.run-step {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px; border-radius: 6px; font-size: 12px; color: var(--text3);
+}
+.run-step-mark {
+  width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+  border: 1.5px solid var(--glass-border2); background: transparent;
+}
+.run-step.running { background: var(--glass); color: var(--text2); }
+.run-step.running .run-step-mark { border-color: var(--amber); background: var(--amber); animation: sbPulse 1.4s ease-in-out infinite; }
+.run-step.done .run-step-mark { border-color: var(--green); background: var(--green); }
+.run-step.done .run-step-label { color: var(--text3); }
+.run-step.failed .run-step-mark { border-color: var(--red); background: var(--red); }
+.run-step.failed { color: var(--red); }
+.run-step.skipped { opacity: .4; }
+.run-step-label { font-weight: 500; }
+.run-step-detail { color: var(--text3); font-size: 11px; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-step-time { margin-left: auto; font-family: var(--mono); font-size: 10.5px; opacity: .6; flex-shrink: 0; }
+
+.run-log-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 10.5px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .7px; color: var(--text3); margin-bottom: 7px;
+}
+.run-follow { display: inline-flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; font-weight: 500; cursor: pointer; }
+.run-log {
+  height: 220px; overflow-y: auto; padding: 10px 12px;
+  background: rgba(0,0,0,.34); border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xs);
+  font-family: var(--mono); font-size: 11px; line-height: 1.65;
+}
+.run-log-line { color: var(--text2); white-space: pre-wrap; word-break: break-word; }
+.run-log-line.err { color: var(--red); }
+.run-log-empty { color: var(--text3); opacity: .6; font-style: italic; }
+
+@media (max-width: 680px) {
+  /* Keep the run count and scheduler health; the rest is a nicety. */
+  #status-bar .sb-item:not(.sb-runs):not(.sb-sched), #status-bar .sb-sep { display: none; }
+}

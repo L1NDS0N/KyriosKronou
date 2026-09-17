@@ -1,13 +1,15 @@
 // TaskManager.js - Task CRUD, Execution, Import/Export
 const fs = require('fs');
 const path = require('path');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 
 class TaskManager {
-  constructor(config, logger, cronParser) {
+  constructor(config, logger, cronParser, runRegistry) {
     this.config = config;
     this.logger = logger;
     this.cronParser = cronParser;
+    // Optional: reports live progress and output for the UI.
+    this.runs = runRegistry || null;
     this.tasks = [];
     this.history = [];
     this.tasksFile = path.join(config.configDir, 'tasks.json');
@@ -101,6 +103,22 @@ class TaskManager {
       const scriptPath = task.ScriptPath;
       const scriptType = (task.ScriptType || '').toLowerCase();
 
+      // Track the run so the UI can show a badge, a progress bar and live
+      // output while it happens. Optional: the scheduler works without it.
+      const runs = this.runs;
+      const runId = runs ? runs.start({
+        kind: 'task',
+        targetId: task.Id,
+        name: task.Name,
+        steps: ['Verificando script', 'Executando', 'Registrando resultado'],
+      }) : null;
+
+      const finishRun = (entry) => {
+        if (!runs || !runId) return;
+        runs.setStep(runId, 2);
+        runs.finish(runId, { success: entry.Status === 'Success', message: entry.Message });
+      };
+
       if (!fs.existsSync(scriptPath)) {
         const entry = {
           Id: require('crypto').randomUUID(),
@@ -115,6 +133,11 @@ class TaskManager {
         this.history.unshift(entry);
         this.saveHistory();
         this.logger.log('ERROR', `Task execution failed: ${task.Name} - ${entry.Message}`);
+        if (runs && runId) {
+          runs.appendOutput(runId, entry.Message, 'stderr');
+          runs.failStep(runId, 0, entry.Message);
+          runs.finish(runId, { success: false, message: entry.Message });
+        }
         resolve(entry);
         return;
       }
@@ -124,63 +147,115 @@ class TaskManager {
         options.cwd = task.WorkingDirectory;
       }
       options.windowsHide = true;
-      options.timeout = 300000; // 5 min timeout
 
-      // Build the correct command based on script type
+      // Build the correct command based on script type.
       const ext = path.extname(scriptPath).toLowerCase();
       let cmd, cmdArgs;
 
-      // execFile quotes each argument itself. Adding our own quotes here made
-      // cmd.exe receive a literally-escaped \"C:\path\" and refuse to run it -
-      // which meant .bat/.cmd tasks never executed at all. Pass bare values and
-      // let execFile do the quoting.
+      // Arguments are passed as an array, never concatenated into a string:
+      // adding our own quotes made cmd.exe receive a literally-escaped
+      // \"C:\path\" and refuse to run it, which meant .bat/.cmd tasks never
+      // executed at all.
       const userArgs = task.Arguments ? task.Arguments.split(/\s+/).filter(Boolean) : [];
 
       if (ext === '.ps1' || scriptType === 'ps1') {
-        // PowerShell: -File must be followed by the path alone, then arguments.
         cmd = 'powershell.exe';
         cmdArgs = ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-NonInteractive', '-File', scriptPath, ...userArgs];
         this.logger.log('INFO', `Executing PowerShell: ${scriptPath}`);
       } else if (ext === '.bat' || ext === '.cmd' || scriptType === 'bat') {
-        // Batch: cmd.exe /c <script> [args]
         cmd = 'cmd.exe';
         cmdArgs = ['/c', scriptPath, ...userArgs];
         this.logger.log('INFO', `Executing Batch: ${scriptPath}`);
       } else {
-        // Executable or other: run directly
         cmd = scriptPath;
         cmdArgs = userArgs;
         this.logger.log('INFO', `Executing: ${scriptPath}`);
       }
 
-      execFile(cmd, cmdArgs, options, (error, stdout, stderr) => {
-        const duration = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
-        const logMsg = (stdout || '').trim().substring(0, 500);
-        const errMsg = (stderr || '').trim().substring(0, 500);
-        const entry = {
-          Id: require('crypto').randomUUID(),
-          TaskId: task.Id,
-          TaskName: task.Name,
-          CronExpression: task.CronExpression,
-          Timestamp: new Date().toISOString(),
-          Status: error ? 'Error' : 'Success',
-          Duration: duration,
-          Message: error ? (error.message || errMsg || 'Unknown error') : (logMsg || 'Completed'),
-          Stdout: logMsg,
-          Stderr: errMsg
-        };
+      if (runs && runId) runs.setStep(runId, 1, scriptPath);
+
+      // spawn, not execFile: streaming stdout/stderr is what makes watching a
+      // run live possible. execFile only hands the output over once the process
+      // has already exited.
+      let child;
+      try {
+        child = spawn(cmd, cmdArgs, options);
+      } catch (spawnErr) {
+        const entry = this._taskHistoryEntry(task, startTime, spawnErr, '', spawnErr.message);
         this.history.unshift(entry);
         this.saveHistory();
-        if (error) {
-          this.logger.log('ERROR', `Task ${task.Name} FAILED (${duration}): ${error.message}`);
-          if (errMsg) this.logger.log('ERROR', `  stderr: ${errMsg}`);
-          if (logMsg) this.logger.log('ERROR', `  stdout: ${logMsg}`);
-        } else {
-          this.logger.log('INFO', `Task ${task.Name} completed (${duration}): ${logMsg || 'OK'}`);
-        }
+        this.logger.log('ERROR', `Task ${task.Name} could not start: ${spawnErr.message}`);
+        finishRun(entry);
         resolve(entry);
+        return;
+      }
+
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+
+      // A runaway script must not hold a slot forever.
+      const timer = setTimeout(() => {
+        if (settled) return;
+        try { child.kill(); } catch (e) {}
+        if (runs && runId) runs.appendOutput(runId, 'Tempo limite de 5 minutos atingido', 'stderr');
+      }, 300000);
+
+      child.stdout && child.stdout.on('data', (chunk) => {
+        const text = chunk.toString();
+        stdout += text;
+        if (runs && runId) runs.appendOutput(runId, text, 'stdout');
+      });
+
+      child.stderr && child.stderr.on('data', (chunk) => {
+        const text = chunk.toString();
+        stderr += text;
+        if (runs && runId) runs.appendOutput(runId, text, 'stderr');
+      });
+
+      const settle = (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+
+        const entry = this._taskHistoryEntry(task, startTime, error, stdout, stderr);
+        this.history.unshift(entry);
+        this.saveHistory();
+
+        if (entry.Status === 'Error') {
+          this.logger.log('ERROR', `Task ${task.Name} FAILED (${entry.Duration}): ${entry.Message}`);
+        } else {
+          this.logger.log('INFO', `Task ${task.Name} completed in ${entry.Duration}`);
+        }
+
+        finishRun(entry);
+        resolve(entry);
+      };
+
+      child.on('error', (err) => settle(err));
+      child.on('close', (code) => {
+        settle(code === 0 ? null : new Error(`Exit code ${code}`));
       });
     });
+  }
+
+  /** Build the history entry for a finished task run. */
+  _taskHistoryEntry(task, startTime, error, stdout, stderr) {
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+    const logMsg = (stdout || '').trim().substring(0, 500);
+    const errMsg = (stderr || '').trim().substring(0, 500);
+    return {
+      Id: require('crypto').randomUUID(),
+      TaskId: task.Id,
+      TaskName: task.Name,
+      CronExpression: task.CronExpression,
+      Timestamp: new Date().toISOString(),
+      Status: error ? 'Error' : 'Success',
+      Duration: duration,
+      Message: error ? (error.message || errMsg || 'Unknown error') : (logMsg || 'Completed'),
+      Stdout: logMsg,
+      Stderr: errMsg,
+    };
   }
 
   getDueTasks() {

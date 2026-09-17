@@ -477,6 +477,38 @@
     </main>
   </div>
 
+  <!-- ═══ STATUS BAR ═══
+       Fixed to the bottom and always present: how many jobs are running right
+       now, plus the dashboard numbers, without having to navigate anywhere. -->
+  <footer id="status-bar">
+    <button class="sb-item sb-runs" id="sb-runs" type="button">
+      <span class="sb-runs-dot" id="sb-runs-dot"></span>
+      <span id="sb-runs-label">—</span>
+    </button>
+
+    <div class="sb-sep"></div>
+
+    <div class="sb-item" id="sb-tasks" title="">
+      <i data-lucide="clock"></i><span id="sb-tasks-value">—</span>
+    </div>
+    <div class="sb-item" id="sb-backups" title="">
+      <i data-lucide="database"></i><span id="sb-backups-value">—</span>
+    </div>
+    <div class="sb-item" id="sb-next" title="">
+      <i data-lucide="calendar-clock"></i><span id="sb-next-value">—</span>
+    </div>
+    <div class="sb-item" id="sb-fails" title="">
+      <i data-lucide="alert-triangle"></i><span id="sb-fails-value">—</span>
+    </div>
+
+    <div class="sb-spacer"></div>
+
+    <div class="sb-item sb-sched" id="sb-scheduler">
+      <span class="sb-sched-dot" id="sb-sched-dot"></span>
+      <span id="sb-sched-label">—</span>
+    </div>
+  </footer>
+
   <!-- Modal -->
   <div id="modal-overlay" class="hidden"><div id="modal-content"><div id="modal-body"></div></div></div>
 
@@ -492,6 +524,7 @@
   <script src="closebrackets.min.js"></script>
   <script src="active-line.min.js"></script>
   <script src="i18n.js"></script>
+  <script src="runMonitor.js"></script>
   <script src="pathInput.js"></script>
   <script src="smartCron.js"></script>
   <script src="quickCreate.js"></script>

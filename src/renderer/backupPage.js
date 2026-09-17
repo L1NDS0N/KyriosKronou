@@ -80,6 +80,7 @@ class BackupPage {
         <div class="backup-profile-header">
           <div class="backup-profile-info">
             <h3 class="backup-profile-name">${esc(p.Name)}</h3>
+            ${window.RunMonitor ? RunMonitor.runningBadge(p.Id) : ''}
             <span class="badge badge-info">${esc(engineLabel)}</span>
             <span class="badge ${p.Enabled ? 'badge-active' : 'badge-disabled'}">${esc(i18n.t(p.Enabled ? 'profile.active' : 'profile.disabled'))}</span>
             <span class="badge badge-info">${esc(p.Databases?.length ? p.Databases.join(', ') : i18n.t('wizard.allDatabases'))}</span>

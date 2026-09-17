@@ -384,6 +384,14 @@ async function refreshTasks() {
   });
 }
 
+// A run starting or ending changes the badges on whatever list is open.
+document.addEventListener('kyrios-runs-changed', () => {
+  const active = document.querySelector('.nav-btn.active');
+  const page = active && active.dataset.page;
+  if (page === 'tasks' && typeof renderTasks === 'function') renderTasks();
+  if (page === 'backup' && window.backupPage) backupPage.render();
+});
+
 function renderTasks() {
   const search = document.getElementById('search-tasks').value.toLowerCase();
   const filtered = search ? allTasks.filter(t => t.Name.toLowerCase().includes(search) || (t.Description || '').toLowerCase().includes(search)) : allTasks;
@@ -398,6 +406,7 @@ function renderTasks() {
     <div class="task-card ${t.Enabled ? '' : 'task-disabled'}" style="cursor:pointer">
       <div class="task-info" onclick="event.stopPropagation(); showTaskHistory('${t.Id}')">
         <div class="task-name">${escHtml(t.Name)}
+          ${window.RunMonitor ? RunMonitor.runningBadge(t.Id) : ''}
           ${t.ScriptType ? `<span class="badge badge-info" style="font-size:9px;padding:1px 5px;">${t.ScriptType.toUpperCase()} inline</span>` : ''}
         </div>
         <div class="task-meta"><i data-lucide="clock"></i>${escHtml(t.CronExpression)}<span style="color:var(--text3)">|</span><i data-lucide="file-code"></i>${escHtml(t.ScriptPath || 'inline')}</div>
