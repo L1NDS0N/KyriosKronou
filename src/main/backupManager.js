@@ -1,8 +1,12 @@
 // backupManager.js - MySQL Backup Manager
-const { execSync, exec } = require('child_process');
+const { execSync, exec, execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
+
+// Prefix for the temporary MySQL defaults files that carry credentials.
+const CRED_DIR_PREFIX = 'kyrios-mycnf-';
 
 class BackupManager {
   constructor(config, logger) {
@@ -13,6 +17,7 @@ class BackupManager {
     this.profiles = this.loadProfiles();
     this.history = this.loadHistory();
     this.mysqldumpPath = this.findMysqldump();
+    this._sweepStaleCredentialFiles();
   }
 
   // ─── Profile Management ───
@@ -423,6 +428,65 @@ class BackupManager {
     return { success, duration, results };
   }
 
+  /**
+   * Write a short-lived MySQL defaults file holding the connection details.
+   * Written as UTF-8 because mysqldump reads the file as raw bytes - that is
+   * what makes a non-ASCII password survive intact.
+   */
+  _writeCredentialsFile(profile) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), CRED_DIR_PREFIX));
+    const file = path.join(dir, 'my.cnf');
+    // Inside a double-quoted option-file value, MySQL treats "\" as an escape,
+    // so both it and the quote character must be doubled/escaped.
+    const esc = (v) => String(v == null ? '' : v).split('\\').join('\\\\').split('"').join('\\"');
+    const body = [
+      '[client]',
+      `host="${esc(profile.Host)}"`,
+      `port=${parseInt(profile.Port, 10) || 3306}`,
+      `user="${esc(profile.User)}"`,
+      `password="${esc(profile.Password)}"`,
+      '',
+    ].join(String.fromCharCode(10));
+
+    fs.writeFileSync(file, Buffer.from(body, 'utf8'), { mode: 0o600 });
+    return file;
+  }
+
+  /** Delete the credentials file and its directory. */
+  _removeCredentialsFile(file) {
+    if (!file) return;
+    try { fs.rmSync(path.dirname(file), { recursive: true, force: true }); } catch (e) {
+      // Older Node, or the directory is busy - fall back to a direct unlink.
+      try { fs.unlinkSync(file); } catch (e2) {}
+      try { fs.rmdirSync(path.dirname(file)); } catch (e2) {}
+    }
+  }
+
+  /**
+   * Remove credential files stranded by a previous run.
+   * A backup killed mid-dump (service stopped, machine rebooted) leaves its
+   * defaults file behind, and that file holds a database password - so sweep
+   * them on startup rather than letting them pile up in TEMP.
+   */
+  _sweepStaleCredentialFiles() {
+    let entries;
+    try { entries = fs.readdirSync(os.tmpdir()); } catch (e) { return 0; }
+
+    let removed = 0;
+    for (const entry of entries) {
+      if (!entry.startsWith(CRED_DIR_PREFIX)) continue;
+      const dir = path.join(os.tmpdir(), entry);
+      try {
+        // Only touch directories that look like ours: a lone my.cnf inside.
+        const contents = fs.readdirSync(dir);
+        if (contents.length && !contents.every(f => f === 'my.cnf')) continue;
+        fs.rmSync(dir, { recursive: true, force: true });
+        removed++;
+      } catch (e) { /* in use by a running backup, or not ours - leave it */ }
+    }
+    return removed;
+  }
+
   async backupDatabase(profile, database) {
     return new Promise((resolve) => {
       const now = new Date();
@@ -444,29 +508,37 @@ class BackupManager {
       const dumpPath = path.join(profile.BackupPath, filename + dumpExt);
       const finalPath = path.join(profile.BackupPath, filename + finalExt);
 
-      // Build mysqldump command
-      const args = [
-        `"${this.mysqldumpPath}"`,
-        `--host="${profile.Host}"`,
-        `--port=${profile.Port}`,
-        `--user="${profile.User}"`,
-        `--password="${profile.Password}"`,
-      ];
+      // Credentials go in a defaults file, never on the command line.
+      //
+      // On Windows mysqldump converts a --password argument (and MYSQL_PWD)
+      // through the process ANSI code page, which destroys the UTF-8 bytes of
+      // any non-ASCII password and yields "1045: Access denied" even though
+      // the password is correct. Verified against MySQL 9.2: command line and
+      // env var both fail for an accented password, a UTF-8 defaults file
+      // works. The defaults file also keeps the password out of the process
+      // list and silences mysqldump's insecure-password warning.
+      const credFile = this._writeCredentialsFile(profile);
 
-      if (profile.ExtraArgs) args.push(profile.ExtraArgs);
+      // --defaults-file must come first, before every other option.
+      const args = [`--defaults-file=${credFile}`];
+
+      if (profile.ExtraArgs) {
+        args.push(...String(profile.ExtraArgs).split(/\s+/).filter(Boolean));
+      }
 
       if (database === '--all-databases') {
         args.push('--all-databases');
       } else {
-        args.push(`"${database}"`);
+        args.push(database);
       }
 
-      args.push(`--result-file="${dumpPath}"`);
+      args.push(`--result-file=${dumpPath}`);
 
-      const cmd = args.join(' ');
       this.logger.log('INFO', `Backing up database: ${database}`);
 
-      exec(cmd, { timeout: 600000, maxBuffer: 50 * 1024 * 1024, windowsHide: true }, async (error, stdout, stderr) => {
+      // execFile, not exec: no shell means no quoting or escaping to get wrong.
+      execFile(this.mysqldumpPath, args, { timeout: 600000, maxBuffer: 50 * 1024 * 1024, windowsHide: true }, async (error, stdout, stderr) => {
+        this._removeCredentialsFile(credFile);
         if (error) {
           const logOutput = [stdout, stderr, error.message].filter(Boolean).join('\n').trim();
           this.logger.log('ERROR', `Backup failed for ${database}: ${logOutput.substring(0, 500)}`);
@@ -1008,12 +1080,22 @@ class BackupManager {
       '        $ext = ".sql"',
       '        $dumpPath = Join-Path $BackupPath ($filename + $ext)',
       '',
-      '        # Build mysqldump args',
+      '        # Credentials go in a UTF-8 defaults file, never on the command',
+      '        # line: mysqldump converts a --password argument through the ANSI',
+      '        # code page on Windows, which corrupts any non-ASCII password and',
+      '        # returns "1045 Access denied" for a perfectly valid one.',
+      '        $credFile = Join-Path $env:TEMP ("kyrios-cred-" + [guid]::NewGuid().ToString("N") + ".cnf")',
+      '        $credLines = @()',
+      '        $credLines += "[client]"',
+      '        $credLines += "host=" + $Host_',
+      '        $credLines += "port=" + $Port',
+      '        $credLines += "user=" + $User',
+      '        $credLines += "password=" + $Password',
+      '        [System.IO.File]::WriteAllLines($credFile, $credLines, (New-Object System.Text.UTF8Encoding $false))',
+      '',
+      '        # Build mysqldump args (--defaults-file must come first)',
       '        $mArgs = @()',
-      '        $mArgs += "--host=\"" + $Host_ + "\""',
-      '        $mArgs += "--port=" + $Port',
-      '        $mArgs += "--user=\"" + $User + "\""',
-      '        $mArgs += "--password=\"" + $Password + "\""',
+      '        $mArgs += "--defaults-file=\"" + $credFile + "\""',
       '        foreach ($ea in $ExtraArgs) { if ($ea) { $mArgs += $ea } }',
       '        $mArgs += "--result-file=\"" + $dumpPath + "\""',
       '        if ($db -eq "--all-databases") {',
@@ -1042,6 +1124,9 @@ class BackupManager {
       '            $stdout = $stdoutTask.Result',
       '            $stderr = $stderrTask.Result',
       '            $dbDuration = ((Get-Date) - $dbStart).TotalSeconds',
+      '',
+      '            # The credentials file has served its purpose - remove it.',
+      '            Remove-Item $credFile -Force -ErrorAction SilentlyContinue',
       '',
       '            if ($proc.ExitCode -eq 0 -and (Test-Path $dumpPath)) {',
       '                $fileSize = (Get-Item $dumpPath).Length',
