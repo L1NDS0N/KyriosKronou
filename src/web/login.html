@@ -5,6 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Κύριος Χρόνος</title>
 <link rel="stylesheet" href="/style.css">
+<style>
+  .device-code {
+    font-family: var(--mono); font-size: 27px; font-weight: 700; letter-spacing: 5px;
+    color: var(--text); background: var(--glass2); border: 1px solid var(--glass-border2);
+    border-radius: var(--radius-xs); padding: 15px 10px; margin: 6px 0 14px; user-select: all;
+  }
+  .device-step { text-align: left; font-size: 12.5px; color: var(--text3); line-height: 1.75; margin-bottom: 14px; }
+  .device-step b { color: var(--text2); font-weight: 600; }
+  .device-wait { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text3); }
+  .device-wait::before {
+    content: ''; width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid var(--glass-border2); border-top-color: var(--text2);
+    animation: spin .8s linear infinite;
+  }
+  .link-btn { color: var(--primary-light); text-decoration: underline; cursor: pointer; }
+</style>
 </head>
 <body>
 <div class="bg-effects"><div class="moon"></div><div class="dot-field"></div></div>
@@ -17,10 +33,22 @@
 
     <div id="alert-host"></div>
 
-    <a id="signin" class="btn-github" href="/auth/github">
-      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-      Entrar com GitHub
-    </a>
+    <div id="step-start">
+      <button id="signin" class="btn-github">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        Entrar com GitHub
+      </button>
+    </div>
+
+    <div id="step-device" style="display:none">
+      <div class="device-step">
+        <b>1.</b> Abra <span class="link-btn" id="device-url-open">github.com/login/device</span><br>
+        <b>2.</b> Digite o código abaixo e autorize
+      </div>
+      <div class="device-code" id="device-code">····-····</div>
+      <div class="device-wait" id="device-wait">Aguardando a autorização no GitHub…</div>
+      <div style="margin-top:16px"><button class="btn-ghost" id="device-cancel">Cancelar</button></div>
+    </div>
 
     <div class="login-note">
       O acesso é restrito às contas autorizadas.<br>
@@ -30,10 +58,19 @@
 </div>
 
 <script>
-  // The server passes state through the query string so this page stays static.
+(function () {
   const params = new URLSearchParams(location.search);
   const host = document.getElementById('alert-host');
-  const signin = document.getElementById('signin');
+  const stepStart = document.getElementById('step-start');
+  const stepDevice = document.getElementById('step-device');
+
+  function alertBox(kind, text) {
+    host.innerHTML = '';
+    const el = document.createElement('div');
+    el.className = 'alert alert-' + kind;
+    el.textContent = text;
+    host.appendChild(el);
+  }
 
   const MESSAGES = {
     denied: ['error', 'Sua conta do GitHub não está autorizada a acessar esta instalação. Peça a um administrador para adicionar o seu login nas Configurações do aplicativo desktop.'],
@@ -45,16 +82,12 @@
 
   const problem = params.get('problem');
   if (problem) {
-    host.innerHTML = '<div class="alert alert-warn"></div>';
-    host.firstChild.textContent = problem;
-    signin.style.display = 'none';
+    alertBox('warn', problem);
+    stepStart.style.display = 'none';
   } else {
     const key = params.get('error') || params.get('notice');
     const entry = MESSAGES[key];
-    if (entry) {
-      host.innerHTML = '<div class="alert alert-' + entry[0] + '"></div>';
-      host.firstChild.textContent = entry[1];
-    }
+    if (entry) alertBox(entry[0], entry[1]);
     const login = params.get('login');
     if (key === 'denied' && login) {
       const who = document.createElement('div');
@@ -63,6 +96,75 @@
       host.appendChild(who);
     }
   }
+
+  let polling = null;
+
+  async function startDeviceFlow() {
+    stepStart.style.display = 'none';
+    stepDevice.style.display = '';
+    host.innerHTML = '';
+
+    let info;
+    try {
+      const res = await fetch('/auth/device/start', { method: 'POST' });
+      info = await res.json();
+      if (!res.ok) throw new Error(info.error || 'Falha ao iniciar');
+    } catch (err) {
+      stepDevice.style.display = 'none';
+      stepStart.style.display = '';
+      alertBox('error', err.message);
+      return;
+    }
+
+    document.getElementById('device-code').textContent = info.userCode;
+    document.getElementById('device-url-open').onclick = () => window.open(info.verificationUri, '_blank', 'noopener');
+    // Open it straight away; the operator still sees the link if it is blocked.
+    window.open(info.verificationUri, '_blank', 'noopener');
+
+    let interval = (info.interval || 5) * 1000;
+    const deadline = Date.now() + (info.expiresIn || 900) * 1000;
+
+    const tick = async () => {
+      if (Date.now() > deadline) return stop('O código expirou. Tente novamente.');
+      try {
+        const res = await fetch('/auth/device/poll', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ handle: info.handle }),
+        });
+        const data = await res.json();
+
+        if (data.status === 'ok') { location.href = '/'; return; }
+        if (data.status === 'denied') return stop('A conta "' + data.login + '" não está autorizada nesta instalação.');
+        if (data.status === 'error') return stop(data.message);
+        if (data.status === 'slow_down') interval = (data.interval || 10) * 1000;
+      } catch (err) {
+        // A blip in the network should not end the attempt; keep polling.
+      }
+      polling = setTimeout(tick, interval);
+    };
+    polling = setTimeout(tick, interval);
+  }
+
+  function stop(message) {
+    if (polling) clearTimeout(polling);
+    polling = null;
+    stepDevice.style.display = 'none';
+    stepStart.style.display = '';
+    if (message) alertBox('error', message);
+  }
+
+  document.getElementById('device-cancel').addEventListener('click', () => stop(null));
+
+  document.getElementById('signin').addEventListener('click', async () => {
+    // Ask the server which flow applies: device by default, or the classic
+    // redirect when an administrator supplied their own client secret.
+    let mode = { flow: 'device' };
+    try { mode = await (await fetch('/auth/mode')).json(); } catch (e) {}
+    if (mode.flow === 'redirect') location.href = '/auth/github';
+    else startDeviceFlow();
+  });
+})();
 </script>
 </body>
 </html>

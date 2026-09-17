@@ -37,6 +37,9 @@ class ApiServer {
       intervalMs: config.getSetting('MetricsIntervalMs', SystemMetrics.DEFAULT_INTERVAL_MS),
     });
     this.sseClients = new Set();
+    // In-flight device-flow attempts: handle -> { deviceCode }. The device code
+    // stays server-side; the browser only ever holds an opaque handle.
+    this.deviceFlows = new Map();
 
     this.webRoot = this._resolveWebRoot();
     this.setupMiddleware();
@@ -152,6 +155,71 @@ class ApiServer {
         return res.redirect('/login?problem=' + encodeURIComponent(problem));
       }
       this._sendAsset(res, 'login.html', 'html');
+    });
+
+    // ─── Device flow (default: no client secret involved) ───
+    this.app.post('/auth/device/start', async (req, res) => {
+      if (this.auth.flow !== 'device') return res.status(400).json({ error: 'Device flow is not in use' });
+      try {
+        const info = await this.auth.startDeviceFlow();
+        // The device code is the credential; only the user code reaches the page.
+        const handle = require('crypto').randomBytes(16).toString('hex');
+        this.deviceFlows.set(handle, { deviceCode: info.deviceCode, createdAt: Date.now(), interval: info.interval });
+        res.json({
+          handle,
+          userCode: info.userCode,
+          verificationUri: info.verificationUri,
+          interval: info.interval,
+          expiresIn: info.expiresIn,
+        });
+      } catch (err) {
+        this.logger.log('WARN', `Device flow could not start: ${err.message}`);
+        res.status(502).json({ error: err.message });
+      }
+    });
+
+    this.app.post('/auth/device/poll', async (req, res) => {
+      const entry = this.deviceFlows.get(req.body && req.body.handle);
+      if (!entry) return res.status(400).json({ status: 'error', message: 'This sign-in attempt is no longer valid. Start again.' });
+
+      try {
+        const result = await this.auth.pollDeviceFlow(entry.deviceCode);
+        if (result.status !== 'token') {
+          if (result.status === 'error') this.deviceFlows.delete(req.body.handle);
+          return res.json(result);
+        }
+
+        this.deviceFlows.delete(req.body.handle);
+        const user = await this.auth.fetchGithubUser(result.token);
+        const ip = req.ip || 'unknown';
+
+        if (!this.auth.isAllowed(user.login)) {
+          this.logger.audit('WEB_LOGIN_DENIED', {
+            targetType: 'web', target: user.login,
+            after: { login: user.login, id: user.id },
+            actor: `${user.login} (github:${user.id})`, ip, via: 'web-device',
+          });
+          this.logger.log('WARN', `Web sign-in refused for GitHub user "${user.login}" from ${ip} (not on the allowed list)`);
+          return res.json({ status: 'denied', login: user.login });
+        }
+
+        const sid = this.auth.createSession(user, ip);
+        this.auth.setSessionCookie(res, sid);
+        this.logger.audit('WEB_LOGIN', {
+          targetType: 'web', target: user.login,
+          after: { login: user.login, id: user.id },
+          actor: `${user.login} (github:${user.id})`, ip, via: 'web-device',
+        });
+        this.logger.log('INFO', `Web sign-in: ${user.login} from ${ip} (device flow)`);
+        res.json({ status: 'ok', login: user.login });
+      } catch (err) {
+        this.logger.error('Device flow sign-in failed', err);
+        res.status(502).json({ status: 'error', message: err.message });
+      }
+    });
+
+    this.app.get('/auth/mode', (req, res) => {
+      res.json({ flow: this.auth.flow, problem: this.auth.configurationProblem() });
     });
 
     this.app.get('/auth/github', (req, res) => {

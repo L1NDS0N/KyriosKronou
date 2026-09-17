@@ -13,7 +13,19 @@
 const crypto = require('crypto');
 const https = require('https');
 
+// Built-in OAuth client. A client ID is NOT a secret - GitHub publishes it in
+// every authorize URL - so shipping it inside the app is fine and means an
+// install needs no configuration at all.
+//
+// The client SECRET is deliberately absent. An .asar is a plain archive, not an
+// encrypted one: any secret compiled into the app can be read out of the
+// shipped binary with a text editor, so a "secret" distributed to every
+// customer is not a secret. Instead the app uses GitHub's device flow, which
+// exists precisely for clients that cannot keep one.
+const BUILTIN_CLIENT_ID = 'Ov23limjCfEniWd6J6CR';
+
 const SESSION_COOKIE = 'kyrios_sid';
+const DEVICE_POLL_TIMEOUT_MS = 15 * 60 * 1000;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12h
 const STATE_TTL_MS = 10 * 60 * 1000;        // OAuth round trip
 
@@ -39,7 +51,9 @@ class WebAuth {
 
   // ─── Configuration ───
 
-  get clientId() { return (this.config.getSetting('GithubClientId', '') || '').trim(); }
+  get clientId() {
+    return (this.config.getSetting('GithubClientId', '') || '').trim() || BUILTIN_CLIENT_ID;
+  }
   get clientSecret() { return (this.config.getSetting('GithubClientSecret', '') || '').trim(); }
 
   /** Logins allowed in, lower-cased. Empty means nobody. */
@@ -51,9 +65,21 @@ class WebAuth {
     return list.map(u => String(u || '').trim().toLowerCase()).filter(Boolean);
   }
 
+  /**
+   * How sign-in will be performed.
+   *  - 'device'   : no client secret needed. The browser shows a code the user
+   *                 types at github.com/login/device. This is the default and
+   *                 works out of the box on a fresh install.
+   *  - 'redirect' : the classic authorization-code flow, used only when an
+   *                 administrator has supplied their own client secret.
+   */
+  get flow() {
+    return this.clientSecret ? 'redirect' : 'device';
+  }
+
   /** True once GitHub sign-in can actually be performed. */
   isConfigured() {
-    return !!(this.clientId && this.clientSecret);
+    return !!this.clientId;
   }
 
   /**
@@ -61,8 +87,8 @@ class WebAuth {
    * Surfaced on the login page so an operator is never left guessing.
    */
   configurationProblem() {
-    if (!this.clientId || !this.clientSecret) {
-      return 'GitHub sign-in is not configured yet. In the desktop app open Settings > Web Interface and enter the Client ID and Client Secret of a GitHub OAuth App.';
+    if (!this.clientId) {
+      return 'GitHub sign-in is not configured. In the desktop app open Settings > Web Access and enter a GitHub OAuth App Client ID.';
     }
     if (this.allowedUsers.length === 0) {
       return 'No GitHub account is allowed in yet. In the desktop app open Settings > Web Interface and add the logins that may sign in.';
@@ -125,6 +151,79 @@ class WebAuth {
     if (res.error) throw new Error(res.error_description || res.error);
     if (!res.access_token) throw new Error('GitHub did not return an access token');
     return res.access_token;
+  }
+
+  // ─── Device flow ───
+  //
+  // GitHub hands back a short code; the operator types it at
+  // github.com/login/device and approves there. No client secret is involved,
+  // which is why this is the default for a shipped app.
+
+  async startDeviceFlow() {
+    const body = JSON.stringify({ client_id: this.clientId, scope: 'read:user' });
+    const res = await httpsJson({
+      hostname: 'github.com',
+      path: '/login/device/code',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'User-Agent': 'KyriosChronos',
+      },
+    }, body);
+
+    if (res.error) {
+      // The most common cause by far, and the message GitHub returns is opaque.
+      if (res.error === 'device_flow_disabled') {
+        throw new Error('Device flow is turned off on the GitHub OAuth App. Enable "Device flow" in its settings at github.com/settings/developers.');
+      }
+      throw new Error(res.error_description || res.error);
+    }
+    if (!res.device_code) throw new Error('GitHub did not start the device flow');
+
+    return {
+      deviceCode: res.device_code,
+      userCode: res.user_code,
+      verificationUri: res.verification_uri || 'https://github.com/login/device',
+      interval: Math.max(5, parseInt(res.interval, 10) || 5),
+      expiresIn: parseInt(res.expires_in, 10) || 900,
+    };
+  }
+
+  /**
+   * Ask GitHub whether the code has been approved yet.
+   * Returns { status: 'pending' | 'slow_down' | 'token', token?, message? } so
+   * the caller can poll without treating "not yet" as a failure.
+   */
+  async pollDeviceFlow(deviceCode) {
+    const body = JSON.stringify({
+      client_id: this.clientId,
+      device_code: deviceCode,
+      grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+    });
+
+    const res = await httpsJson({
+      hostname: 'github.com',
+      path: '/login/oauth/access_token',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'User-Agent': 'KyriosChronos',
+      },
+    }, body);
+
+    if (res.access_token) return { status: 'token', token: res.access_token };
+
+    switch (res.error) {
+      case 'authorization_pending': return { status: 'pending' };
+      case 'slow_down': return { status: 'slow_down', interval: parseInt(res.interval, 10) || 10 };
+      case 'expired_token': return { status: 'error', message: 'The code expired. Start again.' };
+      case 'access_denied': return { status: 'error', message: 'Authorisation was refused on GitHub.' };
+      default: return { status: 'error', message: res.error_description || res.error || 'Unknown response from GitHub' };
+    }
   }
 
   async fetchGithubUser(token) {

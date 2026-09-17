@@ -116,7 +116,8 @@ describe('Backup credentials: non-ASCII passwords', () => {
 
 describe('Backup credentials: the password never reaches a command line', () => {
   it('no code path builds a --password argument for mysqldump', () => {
-    const src = fs.readFileSync(SOURCE, 'utf8');
+    const src = fs.readFileSync(SOURCE, 'utf8')
+      + fs.readFileSync(path.join(__dirname, '..', 'src', 'main', 'db', 'mysql.js'), 'utf8');
     const offending = src.split('\n').filter((line) => {
       if (!line.includes('--password')) return false;
       const t = line.trim();
@@ -127,8 +128,10 @@ describe('Backup credentials: the password never reaches a command line', () => 
   });
 
   it('the dump runs through execFile, so no shell can mangle the arguments', () => {
-    const src = fs.readFileSync(SOURCE, 'utf8');
-    expect(src).to.include('execFile(this.mysqldumpPath');
+    // The dump moved into the MySQL engine when multi-database support landed.
+    const engineSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'main', 'db', 'mysql.js'), 'utf8');
+    expect(engineSrc).to.include('execFile(tool, args');
+    expect(engineSrc).to.not.include("exec(cmd");
   });
 
   it('the generated NSSM wrapper also uses a UTF-8 defaults file', () => {

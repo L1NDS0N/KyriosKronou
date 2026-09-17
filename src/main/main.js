@@ -27,6 +27,9 @@ if (!gotSingleInstanceLock) {
 }
 
 const SERVICE_NAME = KyrionService.SERVICE_NAME;
+// Passed by the Windows startup entry when "start minimized" is on.
+const MINIMIZED_FLAG = '--minimized';
+const startedMinimized = process.argv.includes(MINIMIZED_FLAG);
 
 let mainWindow;
 let tray = null;
@@ -76,6 +79,21 @@ function sendServiceNotification(action, serviceName, success, message) {
   sendNotification(title, `${serviceName}\n${message || (success ? 'Operation completed' : 'Operation failed')}`, success ? 'success' : 'error');
 }
 
+/**
+ * Register (or clear) the Windows startup entry.
+ * Windows has no "start minimized" flag of its own, so the preference is
+ * carried as a launch argument that createWindow() reads back.
+ */
+function applyLoginItem() {
+  const openAtLogin = config.getSetting('StartWithWindows', false);
+  const minimized = config.getSetting('StartMinimized', false);
+  app.setLoginItemSettings({
+    openAtLogin,
+    path: app.getPath('exe'),
+    args: minimized ? [MINIMIZED_FLAG] : [],
+  });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -94,7 +112,12 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
-  mainWindow.once('ready-to-show', () => { mainWindow.show(); });
+  mainWindow.once('ready-to-show', () => {
+    // Launched by the Windows startup entry with --minimized: go straight to
+    // the tray instead of flashing a window the user did not ask for.
+    if (startedMinimized) return;
+    mainWindow.show();
+  });
 
   // Close → minimize to tray if setting enabled
   mainWindow.on('close', (e) => {
@@ -162,11 +185,11 @@ function createTray() {
     {
       label: 'Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin,
       click: (menuItem) => {
-        app.setLoginItemSettings({ openAtLogin: menuItem.checked, path: app.getPath('exe') });
         if (config) {
           const old = config.getSetting('StartWithWindows', false);
           config.setSetting('StartWithWindows', menuItem.checked);
           config.save();
+          applyLoginItem();
           logger.auditSettingsChanged('StartWithWindows', old, menuItem.checked);
         }
       }
@@ -702,6 +725,7 @@ function registerIPC() {
   });
 
   // ─── Backup Profiles ───
+  ipcMain.handle('get-db-engines', () => require('./db').list());
   ipcMain.handle('get-backup-profiles', () => backupManager.getAllProfiles());
   ipcMain.handle('create-backup-profile', (e, data) => backupManager.createProfile(data));
   ipcMain.handle('update-backup-profile', (e, data) => backupManager.updateProfile(data));
@@ -947,7 +971,8 @@ function registerIPC() {
   // ─── System Tray ───
   ipcMain.handle('get-tray-settings', () => ({
     closeToTray: config.getSetting('CloseToTray', true),
-    startWithWindows: config.getSetting('StartWithWindows', false)
+    startWithWindows: config.getSetting('StartWithWindows', false),
+    startMinimized: config.getSetting('StartMinimized', false)
   }));
 
   ipcMain.handle('set-close-to-tray', (e, enabled) => {
@@ -961,8 +986,16 @@ function registerIPC() {
     const old = config.getSetting('StartWithWindows', false);
     config.setSetting('StartWithWindows', enabled);
     config.save();
-    app.setLoginItemSettings({ openAtLogin: enabled, path: app.getPath('exe') });
+    applyLoginItem();
     logger.auditSettingsChanged('StartWithWindows', old, enabled);
+  });
+
+  ipcMain.handle('set-start-minimized', (e, enabled) => {
+    const old = config.getSetting('StartMinimized', false);
+    config.setSetting('StartMinimized', enabled);
+    config.save();
+    applyLoginItem();
+    logger.auditSettingsChanged('StartMinimized', old, enabled);
   });
 
   // ─── Window Controls ───
@@ -1194,11 +1227,7 @@ app.whenReady().then(() => {
     // to bind the same port - see syncWebInterface().
     syncWebInterface();
 
-    const startWithWin = config.getSetting('StartWithWindows', false);
-    const currentLogin = app.getLoginItemSettings().openAtLogin;
-    if (startWithWin !== currentLogin) {
-      app.setLoginItemSettings({ openAtLogin: startWithWin, path: app.getPath('exe') });
-    }
+    applyLoginItem();
   } catch (err) {
     console.error('Startup error:', err);
     if (logger) logger.error('Startup failed', err);

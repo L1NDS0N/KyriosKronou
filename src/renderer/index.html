@@ -85,10 +85,6 @@
           <h1 id="page-title" data-i18n="dashboard.title">Dashboard</h1>
         </div>
         <div id="topbar-right">
-          <div class="pill" id="service-status">
-            <span class="pill-dot" id="status-dot"></span>
-            <span id="status-text">Checking...</span>
-          </div>
           <button class="icon-btn" id="btn-refresh" title="Refresh (F5)"><i data-lucide="refresh-cw"></i></button>
         </div>
       </header>
@@ -97,50 +93,69 @@
 
         <!-- ═══ DASHBOARD ═══ -->
         <section id="page-dashboard" class="page active">
+          <!-- The one thing an operator needs at a glance: is anything actually
+               going to run? Status and its actions live together, instead of
+               loose buttons floating under a badge. -->
+          <div class="glass-card sched-card" id="sched-card">
+            <div class="sched-main">
+              <div class="sched-indicator" id="sched-indicator"></div>
+              <div class="sched-text">
+                <div class="sched-title" id="sched-title">Verificando o agendador…</div>
+                <div class="sched-detail" id="sched-detail">&nbsp;</div>
+              </div>
+            </div>
+            <div class="sched-actions" id="sched-actions"></div>
+          </div>
+
           <div class="stats-grid">
             <div class="stat-card stat-blue">
-              <div class="stat-icon"><i data-lucide="layers"></i></div>
+              <div class="stat-icon"><i data-lucide="clock"></i></div>
               <div class="stat-info">
-                <div class="stat-label" data-i18n="dashboard.totalTasks">Total Tasks</div>
-                <div class="stat-value" id="stat-total">0</div>
+                <div class="stat-label">Tarefas ativas</div>
+                <div class="stat-value" id="stat-active">0</div>
+                <div class="stat-sub" id="stat-active-sub">&nbsp;</div>
               </div>
               <div class="stat-glow"></div>
             </div>
             <div class="stat-card stat-green">
-              <div class="stat-icon"><i data-lucide="play-circle"></i></div>
+              <div class="stat-icon"><i data-lucide="database"></i></div>
               <div class="stat-info">
-                <div class="stat-label" data-i18n="dashboard.active">Active</div>
-                <div class="stat-value" id="stat-active">0</div>
+                <div class="stat-label">Perfis de backup</div>
+                <div class="stat-value" id="stat-backups">0</div>
+                <div class="stat-sub" id="stat-backups-sub">&nbsp;</div>
               </div>
               <div class="stat-glow"></div>
             </div>
             <div class="stat-card stat-amber">
-              <div class="stat-icon"><i data-lucide="cpu"></i></div>
+              <div class="stat-icon"><i data-lucide="calendar-clock"></i></div>
               <div class="stat-info">
-                <div class="stat-label" data-i18n="dashboard.services">Services</div>
-                <div class="stat-value" id="stat-services">0</div>
+                <div class="stat-label">Próxima execução</div>
+                <div class="stat-value stat-value-sm" id="stat-next">—</div>
+                <div class="stat-sub" id="stat-next-sub">&nbsp;</div>
               </div>
               <div class="stat-glow"></div>
             </div>
             <div class="stat-card stat-red">
               <div class="stat-icon"><i data-lucide="alert-triangle"></i></div>
               <div class="stat-info">
-                <div class="stat-label" data-i18n="dashboard.errorsToday">Errors Today</div>
+                <div class="stat-label">Falhas (24h)</div>
                 <div class="stat-value" id="stat-errors">0</div>
+                <div class="stat-sub" id="stat-errors-sub">&nbsp;</div>
               </div>
               <div class="stat-glow"></div>
             </div>
           </div>
+
           <div class="glass-card">
             <div class="glass-card-header">
-              <h3><i data-lucide="activity"></i> Recent Activity</h3>
+              <h3><i data-lucide="activity"></i> Atividade recente</h3>
             </div>
             <div class="table-wrap">
               <table class="data-table" id="recent-table">
-                <thead><tr><th>Time</th><th>Task</th><th>Status</th><th>Duration</th></tr></thead>
+                <thead><tr><th>Quando</th><th>O quê</th><th>Status</th><th>Duração</th></tr></thead>
                 <tbody id="recent-body"></tbody>
               </table>
-              <div class="empty-state" id="recent-empty"><i data-lucide="inbox" class="empty-icon"></i><p>No recent activity</p></div>
+              <div class="empty-state" id="recent-empty"><i data-lucide="inbox" class="empty-icon"></i><p>Nada executado ainda</p></div>
             </div>
           </div>
         </section>
@@ -199,7 +214,10 @@
             <button class="btn-outline btn-sm" id="btn-kyrion-svc-toggle" style="font-size:11px"></button>
           </div>
           <div class="page-toolbar">
-            <div class="toolbar-left"><span class="toolbar-info"><i data-lucide="server"></i> NSSM Service Management</span></div>
+            <div class="toolbar-left">
+              <span class="toolbar-info"><i data-lucide="server"></i> Serviços do Windows</span>
+              <span class="badge badge-info svc-refreshing" id="services-refreshing" style="display:none">atualizando…</span>
+            </div>
             <div class="toolbar-right">
               <label class="filter-toggle" id="filter-managed-label" title="Show only managed services">
                 <input type="checkbox" id="filter-managed-only" checked>
@@ -299,10 +317,17 @@
                 </div>
                 <div class="toggle-row">
                   <div class="toggle-info">
-                    <div class="toggle-label">Start with Windows</div>
-                    <div class="toggle-desc">Automatically launch Kyrios Chronos when Windows starts</div>
+                    <div class="toggle-label">Iniciar com o Windows</div>
+                    <div class="toggle-desc">Abre o Kyrios Chronos automaticamente quando o Windows inicia</div>
                   </div>
                   <label class="toggle-switch"><input type="checkbox" id="cfg-start-windows"><span class="toggle-slider"></span></label>
+                </div>
+                <div class="toggle-row toggle-row-nested" id="row-start-minimized">
+                  <div class="toggle-info">
+                    <div class="toggle-label">Iniciar minimizado</div>
+                    <div class="toggle-desc">Abre direto na bandeja, sem mostrar a janela</div>
+                  </div>
+                  <label class="toggle-switch"><input type="checkbox" id="cfg-start-minimized"><span class="toggle-slider"></span></label>
                 </div>
               </div>
             </div>
@@ -346,7 +371,7 @@
             </div>
 
             <div class="glass-card settings-card" style="grid-column:1/-1">
-              <div class="glass-card-header"><h3><i data-lucide="github"></i> Web Access &mdash; GitHub Sign-in</h3></div>
+              <div class="glass-card-header"><h3><i data-lucide="key-round"></i> Web Access &mdash; GitHub Sign-in</h3></div>
               <div class="settings-body">
                 <p style="color:var(--text3);font-size:13px;margin-bottom:14px">
                   The web interface requires a GitHub account, so every change it makes is recorded against a real person.

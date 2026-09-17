@@ -22,6 +22,16 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
   });
 });
 
+/**
+ * Navigate programmatically (used by the dashboard's shortcuts).
+ * Clicks the real nav button so the highlight, title and refresh all stay in
+ * one place instead of being reimplemented here.
+ */
+function switchPage(page) {
+  const btn = document.querySelector(`.nav-btn[data-page="${page}"]`);
+  if (btn) btn.click();
+}
+
 // ============================================================
 // Window Controls
 // ============================================================
@@ -99,36 +109,190 @@ async function refreshDashboard() {
     allTasks = await window.api.getTasks();
     allHistory = await window.api.getHistory();
 
-    const total = allTasks.length;
-    const active = allTasks.filter(t => t.Enabled).length;
-    const errors = allHistory.filter(h => h.Status === 'Error' && new Date(h.Timestamp) > new Date(Date.now() - 86400000)).length;
+    let profiles = [];
+    try { profiles = (await window.api.getBackupProfiles()) || []; } catch (e) {}
 
-    animateCounter('stat-total', total);
+    let backupHistory = [];
+    try {
+      const bh = await window.api.getBackupHistory(null);
+      backupHistory = bh.history || [];
+    } catch (e) {}
+
+    await renderSchedulerCard();
+
+    // ─── Tasks ───
+    const active = allTasks.filter(t => t.Enabled !== false).length;
     animateCounter('stat-active', active);
-    animateCounter('stat-errors', errors);
+    const disabled = allTasks.length - active;
+    document.getElementById('stat-active-sub').textContent =
+      allTasks.length + ' no total' + (disabled > 0 ? ' · ' + disabled + ' desativada(s)' : '');
 
-    const count = await window.api.getServiceCount();
-    animateCounter('stat-services', count);
+    // ─── Backups ───
+    const activeBackups = profiles.filter(p => p.Enabled).length;
+    animateCounter('stat-backups', profiles.length);
+    const lastBackup = profiles
+      .filter(p => p.LastRun)
+      .sort((a, b) => new Date(b.LastRun) - new Date(a.LastRun))[0];
+    document.getElementById('stat-backups-sub').textContent = lastBackup
+      ? activeBackups + ' ativo(s) · último: ' + (lastBackup.LastStatus === 'Success' ? 'ok' : 'falhou')
+      : activeBackups + ' ativo(s) · nunca executado';
 
-    const recent = allHistory.slice(0, 10);
+    // ─── Next run: the question an operator actually asks ───
+    const next = await nextScheduled(allTasks, profiles);
+    document.getElementById('stat-next').textContent = next ? next.when : '—';
+    document.getElementById('stat-next-sub').textContent = next ? next.name : 'nada agendado';
+
+    // ─── Failures in the last 24h, across tasks and backups ───
+    const since = Date.now() - 86400000;
+    const taskErrors = allHistory.filter(h => h.Status === 'Error' && new Date(h.Timestamp).getTime() > since).length;
+    const backupErrors = backupHistory.filter(h => h.Status !== 'Success' && new Date(h.Timestamp).getTime() > since).length;
+    animateCounter('stat-errors', taskErrors + backupErrors);
+    document.getElementById('stat-errors-sub').textContent =
+      (taskErrors + backupErrors) === 0 ? 'tudo certo' : taskErrors + ' tarefa(s) · ' + backupErrors + ' backup(s)';
+
+    // ─── Recent activity: tasks and backups on one timeline ───
+    const rows = [];
+    for (const h of allHistory.slice(0, 10)) {
+      rows.push({ ts: h.Timestamp, what: h.TaskName, kind: 'tarefa', ok: h.Status === 'Success', status: h.Status, duration: h.Duration });
+    }
+    for (const h of backupHistory.slice(0, 10)) {
+      rows.push({ ts: h.Timestamp, what: h.ProfileName, kind: 'backup', ok: h.Status === 'Success', status: h.Status, duration: h.Duration });
+    }
+    rows.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+
     const tbody = document.getElementById('recent-body');
     const empty = document.getElementById('recent-empty');
-    if (recent.length === 0) { tbody.innerHTML = ''; empty.style.display = 'block'; }
-    else {
+    if (!rows.length) {
+      tbody.innerHTML = '';
+      empty.style.display = 'block';
+    } else {
       empty.style.display = 'none';
-      tbody.innerHTML = recent.map(h => `<tr>
-        <td>${formatTime(h.Timestamp)}</td><td>${h.TaskName}</td>
-        <td><span class="badge badge-${h.Status === 'Success' ? 'success' : 'error'}">${h.Status}</span></td>
-        <td>${h.Duration || '-'}</td>
-      </tr>`).join('');
+      tbody.innerHTML = rows.slice(0, 10).map(r =>
+        '<tr>' +
+        '<td>' + formatTime(r.ts) + '</td>' +
+        '<td>' + escHtml(r.what || '-') + ' <span class="badge badge-info" style="font-size:9px">' + r.kind + '</span></td>' +
+        '<td><span class="badge badge-' + (r.ok ? 'success' : 'error') + '">' + escHtml(r.status) + '</span></td>' +
+        '<td>' + escHtml(r.duration || '-') + '</td>' +
+        '</tr>').join('');
     }
 
-    const dot = document.getElementById('status-dot');
-    const statusText = document.getElementById('status-text');
-    if (count > 0) { dot.style.background = 'var(--green)'; statusText.textContent = `${count} service(s)`; }
-    else { dot.style.background = 'var(--text3)'; statusText.textContent = 'No services'; }
     lucide.createIcons();
   } finally { setLoading('page-dashboard', false); }
+}
+
+/** Earliest upcoming run across tasks and backup profiles. */
+async function nextScheduled(tasks, profiles) {
+  const candidates = [];
+
+  const add = async (name, cron) => {
+    if (!cron) return;
+    try {
+      const next = await window.api.getNextRun(cron);
+      if (next) candidates.push({ at: new Date(next), name: name });
+    } catch (e) {}
+  };
+
+  for (const t of tasks) { if (t.Enabled !== false) await add(t.Name, t.CronExpression); }
+  for (const p of profiles) { if (p.Enabled) await add(p.Name, p.CronExpression); }
+  if (!candidates.length) return null;
+
+  candidates.sort((a, b) => a.at - b.at);
+  const soonest = candidates[0];
+  const mins = Math.max(0, Math.round((soonest.at - Date.now()) / 60000));
+
+  let when;
+  if (mins < 1) when = 'agora';
+  else if (mins < 60) when = 'em ' + mins + ' min';
+  else if (mins < 1440) when = 'em ' + Math.round(mins / 60) + ' h';
+  else when = soonest.at.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+  return { when: when, name: soonest.name };
+}
+
+/**
+ * The scheduler card.
+ *
+ * "Installed" is not the useful signal - a service can sit there reporting
+ * Running with a dead scheduler, which was the original bug - so this reports
+ * the heartbeat, and offers only the action that makes sense next instead of a
+ * row of buttons that are mostly irrelevant.
+ */
+async function renderSchedulerCard() {
+  const indicator = document.getElementById('sched-indicator');
+  const title = document.getElementById('sched-title');
+  const detail = document.getElementById('sched-detail');
+  const actions = document.getElementById('sched-actions');
+  if (!indicator) return;
+
+  let status = {};
+  try { status = await window.api.getKyrionServiceStatus(); } catch (e) { status = {}; }
+
+  const btn = (id, label, cls) =>
+    '<button class="' + (cls || 'btn-outline') + ' btn-sm" id="' + id + '">' + label + '</button>';
+
+  const wire = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
+
+  if (!status.nssmAvailable) {
+    indicator.className = 'sched-indicator warn';
+    title.textContent = 'Executando pelo aplicativo';
+    detail.textContent = 'As tarefas só rodam com esta janela aberta. Instale o NSSM para executar como serviço do Windows e continuar após o logoff.';
+    actions.innerHTML = btn('btn-dash-nssm', 'Configurar NSSM');
+    wire('btn-dash-nssm', () => switchPage('settings'));
+    return;
+  }
+
+  if (!status.installed) {
+    indicator.className = 'sched-indicator warn';
+    title.textContent = 'Executando pelo aplicativo';
+    detail.textContent = 'As tarefas só rodam com esta janela aberta. Instale como serviço para que continuem após o logoff do servidor.';
+    actions.innerHTML = btn('btn-dash-install', 'Instalar como serviço', 'btn-glow');
+    wire('btn-dash-install', async () => {
+      showToast('Instalando o serviço…', 'info');
+      const r = await window.api.installKyrionService();
+      showToast(r.message, r.success ? 'success' : 'error');
+      refreshDashboard();
+    });
+    return;
+  }
+
+  if (status.running && status.schedulerAlive) {
+    indicator.className = 'sched-indicator ok';
+    title.textContent = 'Serviço ativo';
+    detail.textContent = 'O serviço do Windows está executando as tarefas em segundo plano, independente desta janela.';
+    actions.innerHTML = btn('btn-dash-restart', 'Reiniciar') + btn('btn-dash-remove', 'Remover serviço', 'btn-danger');
+  } else if (status.running) {
+    indicator.className = 'sched-indicator bad';
+    title.textContent = 'Serviço iniciado, mas sem resposta';
+    detail.textContent = status.heartbeatStale
+      ? 'O Windows diz que o serviço está rodando, mas o agendador parou de responder. Reinicie e confira os logs.'
+      : 'O serviço iniciou mas o agendador ainda não sinalizou. Se persistir, reinicie e confira os logs.';
+    actions.innerHTML = btn('btn-dash-restart', 'Reiniciar', 'btn-glow') + btn('btn-dash-logs', 'Ver logs');
+  } else {
+    indicator.className = 'sched-indicator bad';
+    title.textContent = 'Serviço parado' + (status.status ? ' (' + status.status + ')' : '');
+    detail.textContent = 'Nenhuma tarefa será executada em segundo plano enquanto ele estiver parado.';
+    actions.innerHTML = btn('btn-dash-start', 'Iniciar serviço', 'btn-glow') + btn('btn-dash-remove', 'Remover serviço', 'btn-danger');
+  }
+
+  wire('btn-dash-restart', async () => {
+    showToast('Reiniciando o serviço…', 'info');
+    const r = await window.api.restartKyrionService();
+    showToast(r.message || (r.success ? 'Reiniciado' : 'Falhou'), r.success ? 'success' : 'error');
+    refreshDashboard();
+  });
+  wire('btn-dash-start', async () => {
+    showToast('Iniciando o serviço…', 'info');
+    const r = await window.api.startKyrionService();
+    showToast(r.message || (r.success ? 'Iniciado' : 'Falhou'), r.success ? 'success' : 'error');
+    refreshDashboard();
+  });
+  wire('btn-dash-remove', async () => {
+    if (!confirm('Remover o serviço do Windows? As tarefas passarão a rodar apenas com o aplicativo aberto.')) return;
+    const r = await window.api.uninstallKyrionService();
+    showToast(r.message, r.success ? 'success' : 'error');
+    refreshDashboard();
+  });
+  wire('btn-dash-logs', () => switchPage('logs'));
 }
 
 // Smooth counter animation
@@ -694,74 +858,187 @@ async function runTask(id) {
 // ============================================================
 // Services
 // ============================================================
-async function refreshServices() {
-  setLoading('page-services', true);
-  // Querying the service control manager takes a moment. Say so, instead of
-  // dimming the page and leaving it looking frozen.
-  const tbodyEl = document.getElementById('services-body');
-  const emptyEl = document.getElementById('services-empty');
-  const bannerEl = document.getElementById('kyrion-svc-banner-status');
-  if (emptyEl) emptyEl.style.display = 'none';
-  if (tbodyEl) {
-    tbodyEl.innerHTML = `<tr><td colspan="5" class="tbl-loading">
-      <i data-lucide="loader-circle"></i>${i18n.t('services.loading')}
-    </td></tr>`;
+// ─── Services list, stale-while-revalidate ───
+//
+// Querying the service control manager takes seconds (several NSSM calls per
+// service), and blocking the screen on every visit made it feel frozen. The
+// last result is kept and painted immediately, then refreshed in the
+// background and swapped in - the list is usable while the real data arrives.
+let servicesCache = null;
+let servicesFetching = false;
+
+function renderServicesTable(services) {
+  const tbody = document.getElementById('services-body');
+  const empty = document.getElementById('services-empty');
+  if (!tbody) return;
+
+  const filterManaged = document.getElementById('filter-managed-only').checked;
+  const list = filterManaged
+    ? services.filter(s => s.Name && (s.Name.startsWith('Kyrion_') || s.Name.startsWith('KyrionBackup_')))
+    : services;
+
+  if (!list.length) {
+    tbody.innerHTML = '';
+    if (empty) empty.style.display = 'block';
+    lucide.createIcons();
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  tbody.innerHTML = list.map(s => {
+    const isRunning = s.Status === 'Running';
+    const isManaged = s.Name && s.Name.startsWith('Kyrion_');
+    const cls = ['svc-row', isManaged ? 'kyrion-managed' : ''].filter(Boolean).join(' ');
+    return `<tr class="${cls}" onclick="editServiceScript('${escAttr(s.Name)}')" title="Clique para editar">
+      <td>${escHtml(s.Name)}${isManaged ? ' <span class="badge badge-info" style="font-size:9px;">gerenciado</span>' : ''}</td>
+      <td><span class="badge badge-${isRunning ? 'success' : 'error'}">${escHtml(s.Status)}</span></td>
+      <td>${escHtml(s.Application || '-')}</td>
+      <td>${escHtml(s.StartupType)}</td>
+      <td onclick="event.stopPropagation()">
+        ${!isRunning ? `<button class="btn-secondary-sm" onclick="svcAction('start','${escAttr(s.Name)}')" title="Iniciar"><i data-lucide="play"></i></button>` : ''}
+        ${isRunning ? `<button class="btn-secondary-sm" onclick="svcAction('stop','${escAttr(s.Name)}')" title="Parar"><i data-lucide="square"></i></button>` : ''}
+        <button class="btn-secondary-sm" onclick="svcAction('restart','${escAttr(s.Name)}')" title="Reiniciar"><i data-lucide="rotate-cw"></i></button>
+        <button class="btn-secondary-sm" onclick="cloneService('${escAttr(s.Name)}')" title="Duplicar serviço"><i data-lucide="copy"></i></button>
+        <button class="btn-danger" onclick="svcAction('uninstall','${escAttr(s.Name)}')" title="Remover serviço"><i data-lucide="trash-2"></i></button>
+      </td>
+    </tr>`;
+  }).join('');
+  lucide.createIcons();
+}
+
+/** Escape a value being embedded in a single-quoted inline handler. */
+function escAttr(s) {
+  return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+function setServicesRefreshing(on) {
+  const badge = document.getElementById('services-refreshing');
+  if (badge) badge.style.display = on ? '' : 'none';
+}
+
+async function refreshServices({ force = false } = {}) {
+  // Paint whatever we already have, so the screen is never blank or frozen.
+  if (servicesCache) renderServicesTable(servicesCache);
+  else {
+    const tbody = document.getElementById('services-body');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="tbl-loading">
+      <i data-lucide="loader-circle"></i>Carregando serviços…</td></tr>`;
     lucide.createIcons();
   }
-  if (bannerEl) bannerEl.innerHTML = `<span class="inline-loading">${i18n.t('services.checkingStatus')}</span>`;
+
+  refreshKyrionBanner();
+
+  if (servicesFetching && !force) return;
+  servicesFetching = true;
+  setServicesRefreshing(true);
 
   try {
-    // Update Kyrion service banner
-    try {
-      const kStatus = await window.api.getKyrionServiceStatus();
-      const bannerStatus = document.getElementById('kyrion-svc-banner-status');
-      const bannerBtn = document.getElementById('btn-kyrion-svc-toggle');
-      if (kStatus.installed) {
-        const running = kStatus.status === 'Running';
-        bannerStatus.innerHTML = `<span style="color:${running ? 'var(--green)' : 'var(--red)'}">\u25cf ${kStatus.status}</span> \u2014 ${kStatus.serviceName}`;
-        bannerBtn.textContent = running ? 'Stop' : 'Start';
-        bannerBtn.onclick = async () => {
-          if (running) await window.api.uninstallKyrionService();
-          else await window.api.restartKyrionService();
-          refreshServices();
-        };
-      } else if (kStatus.nssmAvailable) {
-        bannerStatus.textContent = 'Not installed \u2014 tasks and backups run only when the app is open';
-        bannerBtn.textContent = 'Install';
-        bannerBtn.onclick = async () => { await window.api.installKyrionService(); refreshServices(); };
-      } else {
-        bannerStatus.textContent = 'NSSM not available \u2014 install NSSM to enable background service';
-        bannerBtn.style.display = 'none';
-      }
-    } catch (e) { console.error('Kyrion service status error:', e); }
+    const services = await window.api.getServices();
+    servicesCache = services;
+    renderServicesTable(services);
+  } catch (err) {
+    if (!servicesCache) {
+      const tbody = document.getElementById('services-body');
+      if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="tbl-empty">Erro: ${escHtml(err.message)}</td></tr>`;
+    }
+  } finally {
+    servicesFetching = false;
+    setServicesRefreshing(false);
+  }
+}
 
-    const allServices = await window.api.getServices();
-    const filterManaged = document.getElementById('filter-managed-only').checked;
-    const services = filterManaged ? allServices.filter(s => s.Name && (s.Name.startsWith('Kyrion_') || s.Name.startsWith('KyrionBackup_'))) : allServices;
-    const tbody = document.getElementById('services-body');
-    const empty = document.getElementById('services-empty');
-    if (services.length === 0) { tbody.innerHTML = ''; empty.style.display = 'block'; lucide.createIcons(); return; }
-    empty.style.display = 'none';
-    tbody.innerHTML = services.map(s => {
-      const isRunning = s.Status === 'Running';
-      const isCronMaster = s.Name && s.Name.startsWith('Kyrion_');
-      // For Kyrion services: uninstall button should warn (removes task too)
-      return `<tr${isCronMaster ? ' class="kyrion-managed"' : ''}>
-        <td>${escHtml(s.Name)}${isCronMaster ? ' <span class="badge badge-info" style="font-size:9px;">managed</span>' : ''}</td>
-        <td><span class="badge badge-${isRunning ? 'success' : 'error'}">${s.Status}</span></td>
-        <td>${escHtml(s.Application || '-')}</td>
-        <td>${s.StartupType}</td>
-        <td>
-          <button class="btn-secondary-sm" onclick="editServiceScript('${s.Name}')" title="Edit Parameters"><i data-lucide="pencil"></i></button>
-          ${!isRunning ? `<button class="btn-secondary-sm" onclick="svcAction('start','${s.Name}')" title="Start"><i data-lucide="play"></i></button>` : ''}
-          ${isRunning ? `<button class="btn-secondary-sm" onclick="svcAction('stop','${s.Name}')" title="Stop"><i data-lucide="square"></i></button>` : ''}
-          <button class="btn-secondary-sm" onclick="svcAction('restart','${s.Name}')" title="Restart"><i data-lucide="rotate-cw"></i></button>
-          ${isCronMaster ? `<button class="btn-danger" onclick="svcAction('uninstall','${s.Name}')" title="Uninstall (removes service)"><i data-lucide="trash-2"></i></button>` : `<button class="btn-danger" onclick="svcAction('uninstall','${s.Name}')" title="Uninstall"><i data-lucide="trash-2"></i></button>`}
-        </td>
-      </tr>`;
-    }).join('');
-    lucide.createIcons();
-  } finally { setLoading('page-services', false); }
+/** The banner above the table, refreshed independently of the list. */
+async function refreshKyrionBanner() {
+  const bannerStatus = document.getElementById('kyrion-svc-banner-status');
+  const bannerBtn = document.getElementById('btn-kyrion-svc-toggle');
+  if (!bannerStatus) return;
+
+  try {
+    const s = await window.api.getKyrionServiceStatus();
+    if (s.installed) {
+      const running = s.status === 'Running';
+      const alive = running && s.schedulerAlive;
+      bannerStatus.innerHTML = `<span style="color:${alive ? 'var(--green)' : running ? 'var(--amber)' : 'var(--red)'}">\u25cf ${escHtml(s.status)}</span>`
+        + (running && !alive ? ' \u2014 agendador sem resposta' : '')
+        + ` \u2014 ${escHtml(s.serviceName)}`;
+      bannerBtn.style.display = '';
+      bannerBtn.textContent = running ? 'Parar' : 'Iniciar';
+      bannerBtn.onclick = async () => {
+        const r = running ? await window.api.stopKyrionService() : await window.api.startKyrionService();
+        showToast(r.message || (r.success ? 'Pronto' : 'Falhou'), r.success ? 'success' : 'error');
+        refreshServices({ force: true });
+      };
+    } else if (s.nssmAvailable) {
+      bannerStatus.textContent = 'Não instalado \u2014 tarefas e backups rodam apenas com o app aberto';
+      bannerBtn.style.display = '';
+      bannerBtn.textContent = 'Instalar';
+      bannerBtn.onclick = async () => {
+        showToast('Instalando…', 'info');
+        const r = await window.api.installKyrionService();
+        showToast(r.message, r.success ? 'success' : 'error');
+        refreshServices({ force: true });
+      };
+    } else {
+      bannerStatus.textContent = 'NSSM não disponível \u2014 instale o NSSM para usar o serviço em segundo plano';
+      bannerBtn.style.display = 'none';
+    }
+  } catch (e) {
+    bannerStatus.textContent = 'Não foi possível consultar o serviço';
+  }
+}
+
+/**
+ * Duplicate a Windows service: read the original's configuration and install a
+ * new one with the same executable, arguments and working directory. The copy
+ * starts Manual so a clone made for editing cannot start competing with the
+ * original before it has been reviewed.
+ */
+async function cloneService(serviceName) {
+  const suggested = nextServiceCopyName(serviceName);
+  const newName = prompt(`Nome do novo serviço (cópia de "${serviceName}"):`, suggested);
+  if (!newName || !newName.trim()) return;
+
+  const name = newName.trim();
+  if (servicesCache && servicesCache.some(s => s.Name.toLowerCase() === name.toLowerCase())) {
+    showToast(`Já existe um serviço chamado "${name}"`, 'error');
+    return;
+  }
+
+  showToast('Lendo a configuração do serviço…', 'info');
+  const source = await window.api.getServiceParams(serviceName);
+  if (!source.success) {
+    showToast(source.message || 'Não foi possível ler o serviço de origem', 'error');
+    return;
+  }
+
+  const p = source.params || {};
+  showToast(`Criando "${name}"…`, 'info');
+  const result = await window.api.installService({
+    name,
+    appPath: p.Application,
+    args: p.AppParameters || '',
+    workDir: p.AppDirectory || '',
+    // Manual on purpose: a fresh copy should not start on its own.
+    startupType: 'Manual',
+  });
+
+  if (result.success) {
+    showToast(`Serviço "${name}" criado (inicialização manual)`, 'success');
+    servicesCache = null;
+    await refreshServices({ force: true });
+    editServiceScript(name);
+  } else {
+    showToast(result.message || 'Falha ao duplicar o serviço', 'error');
+  }
+}
+
+function nextServiceCopyName(baseName) {
+  const base = String(baseName || 'Servico').replace(/_copia(\d+)?$/i, '');
+  const taken = new Set((servicesCache || []).map(s => s.Name.toLowerCase()));
+  let candidate = `${base}_copia`;
+  let n = 2;
+  while (taken.has(candidate.toLowerCase())) candidate = `${base}_copia${n++}`;
+  return candidate;
 }
 
 // Managed-only filter toggle
@@ -909,7 +1186,8 @@ async function saveServiceParams(serviceName) {
   if (result.success) {
     showToast('Service parameters saved', 'success');
     hideModal();
-    refreshServices();
+    servicesCache = null;
+    refreshServices({ force: true });
   } else {
     showToast('Save failed: ' + result.message, 'error');
   }
@@ -936,14 +1214,17 @@ async function svcAction(action, name) {
   const map = { start: window.api.startService, stop: window.api.stopService, restart: window.api.restartService, uninstall: window.api.uninstallService };
   const r = await map[action](name);
   showToast(r.message, r.success ? 'success' : 'error');
-  refreshServices();
+  // The cached list is stale now, so refetch instead of repainting it.
+  servicesCache = null;
+  refreshServices({ force: true });
   refreshDashboard();
 }
 
 async function confirmSvcUninstall(name) {
   const r = await window.api.uninstallService(name);
   showToast(r.message, r.success ? 'success' : 'error');
-  refreshServices();
+  servicesCache = null;
+  refreshServices({ force: true });
   refreshDashboard();
 }
 
@@ -978,7 +1259,7 @@ async function installService() {
     workDir: document.getElementById('dlg-svc-workdir').value,
     startupType: document.getElementById('dlg-svc-startup').value
   });
-  if (r.success) { showToast(i18n.t('toast.serviceInstalled'), 'success'); refreshServices(); refreshDashboard(); }
+  if (r.success) { showToast(i18n.t('toast.serviceInstalled'), 'success'); servicesCache = null; refreshServices({ force: true }); refreshDashboard(); }
   else showToast(r.message, 'error');
   hideModal();
 }
@@ -1215,6 +1496,8 @@ async function loadTraySettings() {
   const settings = await window.api.getTraySettings();
   document.getElementById('cfg-close-to-tray').checked = settings.closeToTray;
   document.getElementById('cfg-start-windows').checked = settings.startWithWindows;
+  document.getElementById('cfg-start-minimized').checked = settings.startMinimized;
+  syncStartMinimizedRow();
   const notifEnabled = await window.api.getSetting('Notifications', true);
   document.getElementById('cfg-notifications').checked = notifEnabled;
 }
@@ -1228,13 +1511,30 @@ document.getElementById('cfg-close-to-tray').addEventListener('change', async (e
   showToast(e.target.checked ? i18n.t('settings.willCloseToTray') : i18n.t('settings.willCloseNormally'), 'info');
 });
 
+/** "Start minimized" only means anything when autostart is on. */
+function syncStartMinimizedRow() {
+  const row = document.getElementById('row-start-minimized');
+  const on = document.getElementById('cfg-start-windows').checked;
+  if (row) row.classList.toggle('muted', !on);
+}
+
 document.getElementById('cfg-start-windows').addEventListener('change', async (e) => {
   if (window.api.setStartWithWindows) {
     await window.api.setStartWithWindows(e.target.checked);
   } else {
     await window.api.setSetting('StartWithWindows', e.target.checked);
   }
+  syncStartMinimizedRow();
   showToast(e.target.checked ? i18n.t('settings.willStartWithWindows') : i18n.t('settings.removedFromStartup'), 'info');
+});
+
+document.getElementById('cfg-start-minimized').addEventListener('change', async (e) => {
+  if (window.api.setStartMinimized) {
+    await window.api.setStartMinimized(e.target.checked);
+  } else {
+    await window.api.setSetting('StartMinimized', e.target.checked);
+  }
+  showToast(e.target.checked ? 'Iniciará minimizado na bandeja' : 'Iniciará com a janela aberta', 'info');
 });
 
 document.getElementById('cfg-notifications').addEventListener('change', async (e) => {

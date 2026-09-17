@@ -66,20 +66,34 @@ describe('Web access: the allowlist', () => {
   });
 
   it('explains what is missing rather than silently refusing', () => {
-    expect(auth.configurationProblem()).to.include('Client ID');
-    config.setSetting('GithubClientId', 'id');
-    config.setSetting('GithubClientSecret', 'secret');
+    // The client ID ships with the app, so the only thing left to configure on
+    // a fresh install is who is allowed in.
     expect(auth.configurationProblem()).to.include('No GitHub account is allowed');
     config.setSetting('WebAllowedUsers', ['l1nds0n']);
     expect(auth.configurationProblem()).to.equal(null);
   });
 
-  it('is not considered configured without both OAuth halves', () => {
-    expect(auth.isConfigured()).to.equal(false);
-    config.setSetting('GithubClientId', 'id');
-    expect(auth.isConfigured()).to.equal(false);
-    config.setSetting('GithubClientSecret', 'secret');
+  it('is ready to sign in out of the box, using the built-in client ID', () => {
     expect(auth.isConfigured()).to.equal(true);
+    expect(auth.clientId).to.be.a('string').with.length.above(10);
+  });
+
+  it('uses the device flow by default, which needs no client secret', () => {
+    expect(auth.clientSecret).to.equal('');
+    expect(auth.flow).to.equal('device');
+  });
+
+  it('switches to the redirect flow only when an admin supplies a secret', () => {
+    config.setSetting('GithubClientSecret', 'their-own-secret');
+    expect(auth.flow).to.equal('redirect');
+  });
+
+  // An .asar is a plain archive: anything compiled in can be read straight out
+  // of the shipped binary, so a client secret must never be one of them.
+  it('ships no client secret in the source', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'main', 'webAuth.js'), 'utf8');
+    const assignments = src.match(/BUILTIN_CLIENT_SECRET|clientSecret\s*=\s*['"][a-f0-9]{20,}/gi);
+    expect(assignments).to.equal(null);
   });
 });
 
@@ -257,10 +271,10 @@ describe('Web interface: HTTP surface', function () {
     }
   });
 
-  it('explains on the login page when GitHub is not configured yet', async () => {
+  it('explains on the login page what still needs configuring', async () => {
     const res = await request('/login');
     expect(res.status).to.equal(302);
-    expect(decodeURIComponent(res.location)).to.include('not configured');
+    expect(decodeURIComponent(res.location)).to.include('No GitHub account is allowed');
   });
 
   // The first version redirected /login?problem=... back to itself forever and

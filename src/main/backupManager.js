@@ -4,9 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-
-// Prefix for the temporary MySQL defaults files that carry credentials.
-const CRED_DIR_PREFIX = 'kyrios-mycnf-';
+const engines = require('./db');
 
 class BackupManager {
   constructor(config, logger) {
@@ -110,114 +108,9 @@ class BackupManager {
   }
 
   // ─── MySQL Driver Detection ───
+  /** Kept for the Settings screen; the MySQL engine owns the search itself. */
   findMysqldump() {
-    // Check user-configured path first
-    const customPath = this.config.getSetting('MysqldumpPath', '');
-    if (customPath && fs.existsSync(customPath)) return customPath;
-
-    const candidates = [
-      // MySQL Server (various versions)
-      'C:\\Program Files\\MySQL\\MySQL Server 9.0\\bin\\mysqldump.exe',
-      'C:\\Program Files\\MySQL\\MySQL Server 8.4\\bin\\mysqldump.exe',
-      'C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysqldump.exe',
-      'C:\\Program Files\\MySQL\\MySQL Server 5.7\\bin\\mysqldump.exe',
-      'C:\\Program Files\\MySQL\\MySQL Server 5.6\\bin\\mysqldump.exe',
-      'C:\\Program Files (x86)\\MySQL\\MySQL Server 8.0\\bin\\mysqldump.exe',
-      // MariaDB
-      'C:\\Program Files\\MariaDB 11.0\\bin\\mysqldump.exe',
-      'C:\\Program Files\\MariaDB 10.6\\bin\\mysqldump.exe',
-      'C:\\Program Files\\MariaDB 10.5\\bin\\mysqldump.exe',
-      'C:\\Program Files\\MariaDB 10.4\\bin\\mysqldump.exe',
-      'C:\\Program Files (x86)\\MariaDB 10.4\\bin\\mysqldump.exe',
-      // XAMPP
-      'C:\\xampp\\mysql\\bin\\mysqldump.exe',
-      // WampServer
-      'C:\\wamp64\\bin\\mysql\\mysql8.0.31\\bin\\mysqldump.exe',
-      'C:\\wamp64\\bin\\mysql\\mysql8.2.0\\bin\\mysqldump.exe',
-      'C:\\wamp64\\bin\\mysql\\mariadb-10.6.12\\bin\\mysqldump.exe',
-      'C:\\wamp\\bin\\mysql\\mysql8.0.31\\bin\\mysqldump.exe',
-      // Laragon
-      'C:\\laragon\\bin\\mysql\\mysql-8.0.30\\bin\\mysqldump.exe',
-      'C:\\laragon\\bin\\mysql\\mariadb-10.6.9\\bin\\mysqldump.exe',
-      // Docker Desktop volumes
-      'C:\\ProgramData\\DockerDesktop\\version-bin\\mysqldump.exe',
-      // Chocolatey
-      'C:\\ProgramData\\chocolatey\\bin\\mysqldump.exe',
-      'C:\\tools\\mysql\\bin\\mysqldump.exe',
-      'C:\\tools\\mysql\\mysql-8.0.36\\bin\\mysqldump.exe',
-      'C:\\tools\\mysql\\mysql-8.4.0\\bin\\mysqldump.exe',
-      // Standalone installer paths
-      'C:\\MySQL\\bin\\mysqldump.exe',
-      'C:\\mysql\\bin\\mysqldump.exe',
-      // Linux/Mac
-      '/usr/bin/mysqldump',
-      '/usr/local/bin/mysqldump',
-      '/usr/local/mysql/bin/mysqldump',
-      '/opt/homebrew/bin/mysqldump',
-      '/opt/homebrew/opt/mysql-client/bin/mysqldump',
-      '/snap/bin/mysqldump'
-    ];
-
-    // Check PATH first
-    try {
-      const cmd = process.platform === 'win32' ? 'where mysqldump 2>nul' : 'which mysqldump 2>/dev/null';
-      const result = execSync(cmd, { encoding: 'utf8', timeout: 5000, windowsHide: true }).trim();
-      if (result) {
-        const firstLine = result.split('\n')[0].trim();
-        if (fs.existsSync(firstLine)) return firstLine;
-      }
-    } catch (e) {}
-
-    // Check common paths
-    for (const p of candidates) {
-      if (fs.existsSync(p)) return p;
-    }
-
-    // Check environment variables
-    const envVars = ['MYSQL_HOME', 'MYSQL_DIR', 'MYSQLPATH', 'MARIADB_HOME'];
-    for (const env of envVars) {
-      if (process.env[env]) {
-        const p = path.join(process.env[env], 'bin', 'mysqldump.exe');
-        if (fs.existsSync(p)) return p;
-        const p2 = path.join(process.env[env], 'bin', 'mysqldump');
-        if (fs.existsSync(p2)) return p2;
-      }
-    }
-
-    // Scan C:\tools\mysql (Chocolatey default)
-    try {
-      if (fs.existsSync('C:\\tools\\mysql')) {
-        const subDirs = fs.readdirSync('C:\\tools\\mysql');
-        for (const d of subDirs) {
-          const binDir = path.join('C:\\tools\\mysql', d, 'bin');
-          if (fs.existsSync(binDir)) {
-            const found = fs.readdirSync(binDir).find(f => f.toLowerCase() === 'mysqldump.exe');
-            if (found) return path.join(binDir, found);
-          }
-        }
-        // Also check C:\tools\mysql\bin directly
-        const directBin = path.join('C:\\tools\\mysql', 'bin');
-        if (fs.existsSync(directBin)) {
-          const found = fs.readdirSync(directBin).find(f => f.toLowerCase() === 'mysqldump.exe');
-          if (found) return path.join(directBin, found);
-        }
-      }
-    } catch (e) {}
-
-    // Scan Program Files for any MySQL/MariaDB installation
-    try {
-      const pf = process.env.ProgramFiles || 'C:\\Program Files';
-      const dirs = fs.readdirSync(pf).filter(d => /mysql|mariadb/i.test(d));
-      for (const d of dirs) {
-        const binDir = path.join(pf, d, 'bin');
-        if (fs.existsSync(binDir)) {
-          const found = fs.readdirSync(binDir).find(f => f.toLowerCase() === 'mysqldump.exe');
-          if (found) return path.join(binDir, found);
-        }
-      }
-    } catch (e) {}
-
-    return null;
+    return engines.get('mysql').findTool(this.config);
   }
 
   setCustomPath(p) {
@@ -433,146 +326,95 @@ class BackupManager {
    * Written as UTF-8 because mysqldump reads the file as raw bytes - that is
    * what makes a non-ASCII password survive intact.
    */
+  // One implementation, owned by the MySQL engine. Kept here as a thin
+  // delegate because the credential tests and older callers use these names.
   _writeCredentialsFile(profile) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), CRED_DIR_PREFIX));
-    const file = path.join(dir, 'my.cnf');
-    // Inside a double-quoted option-file value, MySQL treats "\" as an escape,
-    // so both it and the quote character must be doubled/escaped.
-    const esc = (v) => String(v == null ? '' : v).split('\\').join('\\\\').split('"').join('\\"');
-    const body = [
-      '[client]',
-      `host="${esc(profile.Host)}"`,
-      `port=${parseInt(profile.Port, 10) || 3306}`,
-      `user="${esc(profile.User)}"`,
-      `password="${esc(profile.Password)}"`,
-      '',
-    ].join(String.fromCharCode(10));
-
-    fs.writeFileSync(file, Buffer.from(body, 'utf8'), { mode: 0o600 });
-    return file;
+    return engines.get('mysql').writeCredentialsFile(profile);
   }
 
-  /** Delete the credentials file and its directory. */
   _removeCredentialsFile(file) {
-    if (!file) return;
-    try { fs.rmSync(path.dirname(file), { recursive: true, force: true }); } catch (e) {
-      // Older Node, or the directory is busy - fall back to a direct unlink.
-      try { fs.unlinkSync(file); } catch (e2) {}
-      try { fs.rmdirSync(path.dirname(file)); } catch (e2) {}
-    }
+    return engines.get('mysql').removeCredentialsFile(file);
   }
 
-  /**
-   * Remove credential files stranded by a previous run.
-   * A backup killed mid-dump (service stopped, machine rebooted) leaves its
-   * defaults file behind, and that file holds a database password - so sweep
-   * them on startup rather than letting them pile up in TEMP.
-   */
   _sweepStaleCredentialFiles() {
-    let entries;
-    try { entries = fs.readdirSync(os.tmpdir()); } catch (e) { return 0; }
-
-    let removed = 0;
-    for (const entry of entries) {
-      if (!entry.startsWith(CRED_DIR_PREFIX)) continue;
-      const dir = path.join(os.tmpdir(), entry);
-      try {
-        // Only touch directories that look like ours: a lone my.cnf inside.
-        const contents = fs.readdirSync(dir);
-        if (contents.length && !contents.every(f => f === 'my.cnf')) continue;
-        fs.rmSync(dir, { recursive: true, force: true });
-        removed++;
-      } catch (e) { /* in use by a running backup, or not ours - leave it */ }
-    }
-    return removed;
+    return engines.get('mysql').sweepStaleCredentialFiles();
   }
 
   async backupDatabase(profile, database) {
-    return new Promise((resolve) => {
-      const now = new Date();
-      const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
-      const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '');
+    const engine = engines.forProfile(profile);
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+    const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '');
 
-      let filename = profile.NamingPattern
-        .replace(/{database}/g, database === '--all-databases' ? 'all_databases' : database)
-        .replace(/{date}/g, dateStr)
-        .replace(/{time}/g, timeStr)
-        .replace(/{timestamp}/g, now.getTime().toString());
+    const filename = (profile.NamingPattern || '{database}_{date}_{time}')
+      .replace(/{database}/g, database === '--all-databases' ? 'all_databases' : database)
+      .replace(/{date}/g, dateStr)
+      .replace(/{time}/g, timeStr)
+      .replace(/{timestamp}/g, now.getTime().toString());
 
-      // Add extension based on compression
-      const dumpExt = '.sql';
-      let finalExt = dumpExt;
-      if (profile.Compression === 'zip') finalExt = '.sql.zip';
-      else if (profile.Compression === '7z') finalExt = '.sql.7z';
+    // The extension comes from the engine (and, for SQL Server, the chosen
+    // format), not from a hard-coded '.sql'.
+    const dumpExt = engines.extensionFor(profile);
+    let finalExt = dumpExt;
+    if (profile.Compression === 'zip') finalExt = dumpExt + '.zip';
+    else if (profile.Compression === '7z') finalExt = dumpExt + '.7z';
 
-      const dumpPath = path.join(profile.BackupPath, filename + dumpExt);
-      const finalPath = path.join(profile.BackupPath, filename + finalExt);
+    const dumpPath = path.join(profile.BackupPath, filename + dumpExt);
+    const finalPath = path.join(profile.BackupPath, filename + finalExt);
 
-      // Credentials go in a defaults file, never on the command line.
-      //
-      // On Windows mysqldump converts a --password argument (and MYSQL_PWD)
-      // through the process ANSI code page, which destroys the UTF-8 bytes of
-      // any non-ASCII password and yields "1045: Access denied" even though
-      // the password is correct. Verified against MySQL 9.2: command line and
-      // env var both fail for an accented password, a UTF-8 defaults file
-      // works. The defaults file also keeps the password out of the process
-      // list and silences mysqldump's insecure-password warning.
-      const credFile = this._writeCredentialsFile(profile);
+    this.logger.log('INFO', `Backing up ${engine.label} database: ${database}`);
 
-      // --defaults-file must come first, before every other option.
-      const args = [`--defaults-file=${credFile}`];
-
-      if (profile.ExtraArgs) {
-        args.push(...String(profile.ExtraArgs).split(/\s+/).filter(Boolean));
-      }
-
-      if (database === '--all-databases') {
-        args.push('--all-databases');
-      } else {
-        args.push(database);
-      }
-
-      args.push(`--result-file=${dumpPath}`);
-
-      this.logger.log('INFO', `Backing up database: ${database}`);
-
-      // execFile, not exec: no shell means no quoting or escaping to get wrong.
-      execFile(this.mysqldumpPath, args, { timeout: 600000, maxBuffer: 50 * 1024 * 1024, windowsHide: true }, async (error, stdout, stderr) => {
-        this._removeCredentialsFile(credFile);
-        if (error) {
-          const logOutput = [stdout, stderr, error.message].filter(Boolean).join('\n').trim();
-          this.logger.log('ERROR', `Backup failed for ${database}: ${logOutput.substring(0, 500)}`);
-          resolve({ success: false, database, message: logOutput.substring(0, 2000), stdout: stdout || '', stderr: stderr || '' });
-          return;
-        }
-
-        // Compress
-        if (profile.Compression !== 'none' && fs.existsSync(dumpPath)) {
-          try {
-            await this.compressFile(dumpPath, finalPath, profile.Compression, profile.CompressionLevel);
-            // Remove uncompressed dump
-            try { fs.unlinkSync(dumpPath); } catch (e) {}
-          } catch (e) {
-            resolve({ success: false, database, message: `Compression failed: ${e.message}` });
-            return;
-          }
-        }
-
-        const filePath = profile.Compression !== 'none' ? finalPath : dumpPath;
-        const stats = fs.existsSync(filePath) ? fs.statSync(filePath) : null;
-
-        resolve({
-          success: true,
-          database,
-          filePath,
-          size: stats ? stats.size : 0,
-          sizeHuman: stats ? this.formatSize(stats.size) : '0 B'
-        });
-      });
+    const result = await engine.backup(profile, database, dumpPath, {
+      config: this.config,
+      toolPath: engine.id === 'mysql' ? this.mysqldumpPath : undefined,
     });
+
+    if (!result.success) {
+      this.logger.log('ERROR', `Backup failed for ${database}: ${String(result.message).substring(0, 500)}`);
+      return {
+        success: false, database,
+        message: String(result.message || '').substring(0, 2000),
+        stdout: result.stdout || '', stderr: result.stderr || '',
+      };
+    }
+
+    // SQL Server native backups are written on the database host. When that is
+    // not this machine there is no local file to compress or upload, and
+    // pretending otherwise would produce a confusing failure.
+    if (result.remoteOnly || !fs.existsSync(dumpPath)) {
+      if (engines.writesOnServer(profile)) {
+        return {
+          success: true, database, filePath: dumpPath, remoteOnly: true,
+          size: 0, sizeHuman: 'no servidor',
+          message: result.message || 'Backup gravado no host do banco de dados',
+          stdout: result.stdout || '', stderr: result.stderr || '',
+        };
+      }
+      return { success: false, database, message: 'O backup terminou sem erro, mas o arquivo não foi criado.', stdout: result.stdout || '', stderr: result.stderr || '' };
+    }
+
+    // Compress
+    if (profile.Compression && profile.Compression !== 'none' && fs.existsSync(dumpPath)) {
+      try {
+        await this.compressFile(dumpPath, finalPath, profile.Compression, profile.CompressionLevel);
+        try { fs.unlinkSync(dumpPath); } catch (e) {}
+      } catch (e) {
+        return { success: false, database, message: `Compression failed: ${e.message}` };
+      }
+    }
+
+    const filePath = (profile.Compression && profile.Compression !== 'none') ? finalPath : dumpPath;
+    const stats = fs.existsSync(filePath) ? fs.statSync(filePath) : null;
+
+    return {
+      success: true, database, filePath,
+      size: stats ? stats.size : 0,
+      sizeHuman: this.formatSize(stats ? stats.size : 0),
+      message: 'Completed',
+      stdout: result.stdout || '', stderr: result.stderr || '',
+    };
   }
 
-  // ─── Compression ───
   async compressFile(inputPath, outputPath, method, level) {
     return new Promise((resolve, reject) => {
       if (method === 'zip') {
@@ -811,62 +653,38 @@ class BackupManager {
   }
 
   // ─── Test Connection (uses mysql2 driver, not mysqldump) ───
-  testConnection(host, port, user, password) {
-    return new Promise((resolve) => {
-      let mysql;
-      try { mysql = require('mysql2/promise'); } catch (e) {
-        resolve({ success: false, message: 'mysql2 driver not installed. Run: npm install mysql2' });
-        return;
-      }
-      const conn = mysql.createConnection({
-        host: host || 'localhost',
-        port: parseInt(port) || 3306,
-        user: user || 'root',
-        password: password || '',
-        connectTimeout: 10000
-      });
-      conn.then(connection => {
-        connection.query('SELECT 1 AS ok').then(() => {
-          connection.end();
-          resolve({ success: true, message: 'Connection successful' });
-        }).catch(err => {
-          connection.end().catch(() => {});
-          resolve({ success: false, message: err.message });
-        });
-      }).catch(err => {
-        resolve({ success: false, message: err.message });
-      });
-    });
+  /**
+   * Test a connection. Accepts either a profile object or the older
+   * (host, port, user, password) argument list, so existing callers keep
+   * working while new ones can pass an engine.
+   */
+  testConnection(hostOrProfile, port, user, password) {
+    const profile = this._asProfile(hostOrProfile, port, user, password);
+    const engine = engines.forProfile(profile);
+    return Promise.resolve(engine.testConnection(profile));
   }
 
-  // List databases (uses mysql2 driver, not mysqldump)
-  listDatabases(host, port, user, password) {
-    return new Promise((resolve) => {
-      let mysql;
-      try { mysql = require('mysql2/promise'); } catch (e) {
-        resolve({ success: false, databases: [], message: 'mysql2 driver not installed' });
-        return;
-      }
-      const conn = mysql.createConnection({
-        host: host || 'localhost',
-        port: parseInt(port) || 3306,
-        user: user || 'root',
-        password: password || '',
-        connectTimeout: 10000
-      });
-      conn.then(connection => {
-        connection.query('SHOW DATABASES').then(([rows]) => {
-          connection.end();
-          const dbs = rows.map(r => r.Database).filter(d => d && !['information_schema', 'performance_schema'].includes(d));
-          resolve({ success: true, databases: dbs });
-        }).catch(err => {
-          connection.end().catch(() => {});
-          resolve({ success: false, databases: [], message: err.message });
-        });
-      }).catch(err => {
-        resolve({ success: false, databases: [], message: err.message });
-      });
-    });
+  listDatabases(hostOrProfile, port, user, password) {
+    const profile = this._asProfile(hostOrProfile, port, user, password);
+    const engine = engines.forProfile(profile);
+    if (!engine.capabilities.listDatabases) {
+      return Promise.resolve({ success: false, databases: [], message: `${engine.label} does not support listing databases` });
+    }
+    return Promise.resolve(engine.listDatabases(profile));
+  }
+
+  /** Normalise the two calling conventions into one profile shape. */
+  _asProfile(hostOrProfile, port, user, password) {
+    if (hostOrProfile && typeof hostOrProfile === 'object') {
+      return Object.assign({ Engine: engines.DEFAULT_ENGINE }, hostOrProfile);
+    }
+    return {
+      Engine: engines.DEFAULT_ENGINE,
+      Host: hostOrProfile || 'localhost',
+      Port: parseInt(port, 10) || 3306,
+      User: user || 'root',
+      Password: password || '',
+    };
   }
 
   _cleanMysqlError(raw) {

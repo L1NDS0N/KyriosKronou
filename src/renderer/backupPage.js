@@ -8,6 +8,7 @@ class BackupPage {
     this.currentStep = 0;
     this.draft = {};
     this.mysqldumpStatus = null;
+    this.engines = [];
   }
 
   async load() {
@@ -17,6 +18,12 @@ class BackupPage {
     } catch (e) {
       console.error('Failed to load backup profiles:', e);
       this.profiles = [];
+    }
+    try {
+      this.engines = await window.api.getDbEngines();
+    } catch (e) {
+      // Fall back to MySQL only rather than rendering an empty picker.
+      this.engines = [{ id: 'mysql', label: 'MySQL / MariaDB', defaultPort: 3306, formats: null }];
     }
     try {
       this.mysqldumpStatus = await window.api.checkMysqldump();
@@ -64,21 +71,27 @@ class BackupPage {
 
     content.innerHTML = this.profiles.map(p => {
       const st = statsMap[p.Id] || {};
+      const engine = (this.engines || []).find(e => e.id === (p.Engine || 'mysql'));
+      let engineLabel = engine ? engine.label : 'MySQL / MariaDB';
+      if ((p.Engine || 'mysql') === 'sqlserver') engineLabel += ' · ' + String(p.BackupFormat || 'bak').toUpperCase();
       return `
-      <div class="glass-card backup-profile-card ${p.Enabled ? '' : 'disabled'}">
+      <div class="glass-card backup-profile-card clickable ${p.Enabled ? '' : 'disabled'}"
+           onclick="backupPage.editProfile('${p.Id}')" title="Clique para editar">
         <div class="backup-profile-header">
           <div class="backup-profile-info">
             <h3 class="backup-profile-name">${esc(p.Name)}</h3>
-            <span class="badge ${p.Enabled ? 'badge-active' : 'badge-disabled'}">${p.Enabled ? 'Active' : 'Disabled'}</span>
-            <span class="badge badge-info">${esc(p.Databases?.length ? p.Databases.join(', ') : 'All DBs')}</span>
+            <span class="badge badge-info">${esc(engineLabel)}</span>
+            <span class="badge ${p.Enabled ? 'badge-active' : 'badge-disabled'}">${p.Enabled ? 'Ativo' : 'Desativado'}</span>
+            <span class="badge badge-info">${esc(p.Databases?.length ? p.Databases.join(', ') : 'Todos os bancos')}</span>
             ${p.Compression !== 'none' ? `<span class="badge badge-info" style="font-size:10px">${p.Compression.toUpperCase()} L${p.CompressionLevel}</span>` : ''}
           </div>
-          <div class="backup-profile-actions">
-            <button class="btn-glow btn-sm" onclick="backupPage.runBackup('${p.Id}')"><i data-lucide="play"></i> Run</button>
-            <button class="btn-secondary-sm" onclick="backupPage.showHistory('${p.Id}')" title="Execution History"><i data-lucide="history"></i></button>
-            <button class="btn-secondary-sm" onclick="backupPage.editProfile('${p.Id}')" title="Edit Profile"><i data-lucide="pencil"></i> Edit</button>
-            <button class="btn-secondary-sm" onclick="backupPage.exportProfile('${p.Id}')" title="Export"><i data-lucide="download"></i></button>
-            <button class="btn-danger" onclick="backupPage.deleteProfile('${p.Id}','${esc(p.Name)}')"><i data-lucide="trash-2"></i></button>
+          <!-- stopPropagation so an action button never opens the editor too -->
+          <div class="backup-profile-actions" onclick="event.stopPropagation()">
+            <button class="btn-glow btn-sm" onclick="backupPage.runBackup('${p.Id}')"><i data-lucide="play"></i> Executar</button>
+            <button class="btn-secondary-sm" onclick="backupPage.showHistory('${p.Id}')" title="Histórico de execuções"><i data-lucide="history"></i></button>
+            <button class="btn-secondary-sm" onclick="backupPage.cloneProfile('${p.Id}')" title="Duplicar perfil"><i data-lucide="copy"></i></button>
+            <button class="btn-secondary-sm" onclick="backupPage.exportProfile('${p.Id}')" title="Exportar"><i data-lucide="download"></i></button>
+            <button class="btn-danger" onclick="backupPage.deleteProfile('${p.Id}','${esc(p.Name)}')" title="Excluir"><i data-lucide="trash-2"></i></button>
           </div>
         </div>
         <div class="backup-profile-details">
@@ -203,6 +216,65 @@ class BackupPage {
     this._renderWizard();
   }
 
+  /**
+   * Duplicate a profile. The copy is created disabled so a clone made to be
+   * tweaked cannot start running on the original's schedule before it is ready.
+   */
+  async cloneProfile(id) {
+    const source = this.profiles.find(x => x.Id === id);
+    if (!source) return;
+
+    const copy = { ...source };
+    delete copy.Id;
+    copy.Name = this._nextCopyName(source.Name);
+    copy.Enabled = false;
+    copy.LastRun = null;
+    copy.LastStatus = null;
+
+    const created = await window.api.createBackupProfile(copy);
+    if (!created || created.success === false) {
+      showToast((created && created.message) || 'Falha ao duplicar o perfil', 'error');
+      return;
+    }
+    showToast(`Perfil duplicado como "${copy.Name}" (desativado)`, 'success');
+    await this.loadProfiles();
+    // Open the copy straight away - duplicating is almost always a prelude to editing.
+    this.editProfile(created.Id);
+  }
+
+  /** "Nightly" -> "Nightly (cópia)" -> "Nightly (cópia 2)" ... */
+  _nextCopyName(baseName) {
+    const base = String(baseName || 'Perfil').replace(/\s*\(cópia( \d+)?\)$/, '');
+    const taken = new Set(this.profiles.map(p => p.Name));
+    let candidate = `${base} (cópia)`;
+    let n = 2;
+    while (taken.has(candidate)) candidate = `${base} (cópia ${n++})`;
+    return candidate;
+  }
+
+  /** Switching engine resets the port to that engine's default, unless the
+   *  user had already moved it off the previous engine's default. */
+  changeEngine(engineId) {
+    const list = this.engines || [];
+    const previous = list.find(e => e.id === (this.draft.Engine || 'mysql'));
+    const next = list.find(e => e.id === engineId);
+    if (!next) return;
+
+    if (!this.draft.Port || (previous && this.draft.Port === previous.defaultPort)) {
+      this.draft.Port = next.defaultPort;
+    }
+    this.draft.Engine = engineId;
+    if (next.formats && !this.draft.BackupFormat) this.draft.BackupFormat = next.formats[0].id;
+    // Databases picked for the old engine mean nothing for the new one.
+    this.draft.Databases = [];
+    this._renderWizard();
+  }
+
+  changeFormat(formatId) {
+    this.draft.BackupFormat = formatId;
+    this._renderWizard();
+  }
+
   editProfile(id) {
     const p = this.profiles.find(x => x.Id === id);
     if (!p) return;
@@ -312,11 +384,29 @@ class BackupPage {
   _renderStepContent() {
     const d = this.draft;
     switch (this.currentStep) {
-      case 0: return `
-        <label class="form-label">Profile Name *</label>
-        <input type="text" class="form-input" id="wiz-name" value="${esc(d.Name)}" placeholder="Daily MySQL Backup" oninput="backupPage.draft.Name=this.value; backupPage._updateFloatingSummary()">
+      case 0: {
+      const engineId = d.Engine || 'mysql';
+      const engineList = this.engines || [];
+      const engineDef = engineList.find(e => e.id === engineId);
+      const formats = (engineDef && engineDef.formats) || null;
+      return `
+        <label class="form-label">Nome do perfil *</label>
+        <input type="text" class="form-input" id="wiz-name" value="${esc(d.Name)}" placeholder="Backup diário" oninput="backupPage.draft.Name=this.value; backupPage._updateFloatingSummary()">
 
-        <label class="form-label">MySQL Connection</label>
+        <label class="form-label">Banco de dados</label>
+        <select class="form-input" id="wiz-engine" onchange="backupPage.changeEngine(this.value)">
+          ${engineList.map(e => `<option value="${e.id}" ${e.id === engineId ? 'selected' : ''}>${esc(e.label)}</option>`).join('')}
+        </select>
+
+        ${formats ? `
+        <label class="form-label" style="margin-top:12px">Formato do backup</label>
+        <select class="form-input" id="wiz-format" onchange="backupPage.changeFormat(this.value)">
+          ${formats.map(f => `<option value="${f.id}" ${f.id === (d.BackupFormat || 'bak') ? 'selected' : ''}>${esc(f.label)}</option>`).join('')}
+        </select>
+        <div class="form-hint" id="wiz-format-hint">${esc((formats.find(f => f.id === (d.BackupFormat || 'bak')) || formats[0]).description)}</div>
+        ` : ''}
+
+        <label class="form-label" style="margin-top:12px">Conexão</label>
         <div style="display:grid;grid-template-columns:1fr 80px;gap:8px">
           <div class="form-group"><label class="form-label">Host</label><input type="text" class="form-input" id="wiz-host" value="${esc(d.Host)}" oninput="backupPage.draft.Host=this.value; backupPage._updateFloatingSummary()"></div>
           <div class="form-group"><label class="form-label">Port</label><input type="number" class="form-input" id="wiz-port" value="${d.Port}" oninput="backupPage.draft.Port=parseInt(this.value)||3306; backupPage._updateFloatingSummary()"></div>
@@ -326,10 +416,10 @@ class BackupPage {
           <div class="form-group"><label class="form-label">Password</label><input type="password" class="form-input" id="wiz-pass" value="${esc(d.Password)}" oninput="backupPage.draft.Password=this.value"></div>
         </div>
         <div style="display:flex;gap:8px;margin-top:8px">
-          <button class="btn-outline btn-sm" onclick="backupPage.testWizardConn()"><i data-lucide="wifi"></i> Test Connection</button>
+          <button class="btn-outline btn-sm" onclick="backupPage.testWizardConn()"><i data-lucide="wifi"></i> Testar conexão</button>
           <span id="wiz-conn-status" style="font-size:12px;display:flex;align-items:center"></span>
         </div>
-      `;
+      `; }
 
       case 1: return `
         <label class="form-label">Select Databases</label>
