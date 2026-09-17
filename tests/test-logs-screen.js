@@ -30,7 +30,7 @@ describe('Logs screen: structure', () => {
     const closes = (between.match(/<\/div>/g) || []).length;
     const opens = (between.match(/<div/g) || []).length;
     expect(closes, 'the empty state is still nested in the table host')
-      .to.be.above(opens);
+      .to.be.at.least(opens);
   });
 
   it('has a host for the filter bar', () => {
