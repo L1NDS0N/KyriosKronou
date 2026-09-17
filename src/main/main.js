@@ -731,6 +731,28 @@ function registerIPC() {
   // ─── Backup Profiles ───
   ipcMain.handle('get-db-engines', () => require('./db').list());
 
+  // ─── Calendar ───
+  // Tasks, backups and service-managed jobs on one timeline, so the shape of
+  // the night is visible instead of spread across three screens.
+  ipcMain.handle('get-calendar', (e, fromIso, toIso, options) => {
+    try {
+      const calendar = require('./calendarData');
+      let backupHistory = [];
+      try { backupHistory = (backupManager.getHistory ? backupManager.getHistory() : backupManager.history) || []; } catch (err) {}
+
+      const result = calendar.build(cronParser, {
+        tasks: taskManager.getAllTasks(),
+        profiles: backupManager ? backupManager.getAllProfiles() : [],
+        taskHistory: taskManager.history || [],
+        backupHistory,
+      }, { from: new Date(fromIso), to: new Date(toIso) }, options || {});
+
+      return { success: true, ...result, hours: calendar.hourHistogram(result) };
+    } catch (err) {
+      return { success: false, days: {}, totals: {}, message: err.message };
+    }
+  });
+
   // ─── Live run monitoring ───
   ipcMain.handle('get-active-runs', () => (runs ? runs.active() : []));
   ipcMain.handle('get-recent-runs', () => (runs ? runs.recent() : []));

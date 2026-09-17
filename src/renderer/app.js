@@ -87,6 +87,11 @@ function switchPage(page) {
   if (btn) btn.click();
 }
 
+(function wireCalendar() {
+  const btn = document.getElementById('btn-open-calendar');
+  if (btn) btn.addEventListener('click', () => KyriosCalendar.open('month'));
+})();
+
 // ============================================================
 // Window Controls
 // ============================================================
@@ -178,6 +183,7 @@ async function refreshDashboard() {
     } catch (e) {}
 
     await renderSchedulerCard();
+    if (window.KyriosCalendar) KyriosCalendar.renderMini();
 
     // ─── Tasks ───
     const active = allTasks.filter(t => t.Enabled !== false).length;

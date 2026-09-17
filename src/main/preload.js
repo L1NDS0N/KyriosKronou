@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld('api', {
   getScriptsDir: () => ipcRenderer.invoke('get-scripts-dir'),
   browseFolder: (title) => ipcRenderer.invoke('browse-folder', title),
   getDbEngines: () => ipcRenderer.invoke('get-db-engines'),
+  getCalendar: (from, to, options) => ipcRenderer.invoke('get-calendar', from, to, options),
   getActiveRuns: () => ipcRenderer.invoke('get-active-runs'),
   getRecentRuns: () => ipcRenderer.invoke('get-recent-runs'),
   getRunDetail: (runId, sinceSeq) => ipcRenderer.invoke('get-run-detail', runId, sinceSeq),
