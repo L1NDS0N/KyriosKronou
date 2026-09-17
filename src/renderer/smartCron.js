@@ -1,10 +1,29 @@
 // SmartCronInput.js - Intelligent cron expression input component
 
+function escapeText(value) {
+  const d = document.createElement('div');
+  d.textContent = value == null ? '' : String(value);
+  return d.innerHTML;
+}
+
+// Escaped translation helper, so a label can never inject markup.
+function T(key, params) {
+  // i18n is a top-level const in a classic script, so it lives in the global
+  // scope but NOT on `window` - looking it up there silently fell back to
+  // printing the raw key.
+  const d = document.createElement('div');
+  d.textContent = (typeof i18n !== 'undefined' && i18n.t) ? i18n.t(key, params) : key;
+  return d.innerHTML;
+}
+
 class SmartCronInput {
   constructor(container, options = {}) {
     this.container = typeof container === 'string' ? document.querySelector(container) : container;
     this.onChange = options.onChange || (() => {});
     this.value = options.value || '* * * * *';
+    // Which item is being edited, so it is not reported as clashing with itself.
+    this.excludeId = options.excludeId || null;
+    this._conflictTimer = null;
     this.render();
   }
 
@@ -14,31 +33,31 @@ class SmartCronInput {
         <div class="cron-visual">
           <div class="cron-parts">
             <div class="cron-part" data-field="0">
-              <label>Minute</label>
+              <label>${T('cron.minute')}</label>
               <input type="text" class="cron-field" data-idx="0" placeholder="0-59">
               <div class="cron-part-hint"></div>
             </div>
             <div class="cron-sep">:</div>
             <div class="cron-part" data-field="1">
-              <label>Hour</label>
+              <label>${T('cron.hour')}</label>
               <input type="text" class="cron-field" data-idx="1" placeholder="0-23">
               <div class="cron-part-hint"></div>
             </div>
             <div class="cron-sep">&nbsp;</div>
             <div class="cron-part" data-field="2">
-              <label>Day</label>
+              <label>${T('cron.day')}</label>
               <input type="text" class="cron-field" data-idx="2" placeholder="1-31">
               <div class="cron-part-hint"></div>
             </div>
             <div class="cron-sep">&nbsp;</div>
             <div class="cron-part" data-field="3">
-              <label>Month</label>
+              <label>${T('cron.month')}</label>
               <input type="text" class="cron-field" data-idx="3" placeholder="1-12">
               <div class="cron-part-hint"></div>
             </div>
             <div class="cron-sep">&nbsp;</div>
             <div class="cron-part" data-field="4">
-              <label>Weekday</label>
+              <label>${T('cron.weekday')}</label>
               <input type="text" class="cron-field" data-idx="4" placeholder="0-7">
               <div class="cron-part-hint"></div>
             </div>
@@ -49,28 +68,31 @@ class SmartCronInput {
         <div class="cron-next-run" id="cron-next"></div>
         <div class="cron-validation" id="cron-valid"></div>
 
+        <!-- What else already runs at this time, and a way out of the clash. -->
+        <div class="cron-conflicts" id="cron-conflicts"></div>
+
         <div class="cron-templates">
-          <span class="cron-templates-label">Quick:</span>
-          <button class="cron-tpl" data-cron="* * * * *">Every min</button>
-          <button class="cron-tpl" data-cron="*/5 * * * *">Every 5 min</button>
-          <button class="cron-tpl" data-cron="*/15 * * * *">Every 15 min</button>
-          <button class="cron-tpl" data-cron="0 * * * *">Every hour</button>
-          <button class="cron-tpl" data-cron="0 0 * * *">Daily midnight</button>
-          <button class="cron-tpl" data-cron="0 9 * * *">Daily 9 AM</button>
-          <button class="cron-tpl" data-cron="0 2 * * *">Daily 2 AM</button>
-          <button class="cron-tpl" data-cron="0 0 * * 0">Weekly Sunday</button>
-          <button class="cron-tpl" data-cron="0 0 1 * *">Monthly 1st</button>
-          <button class="cron-tpl" data-cron="0 9-17 * * 1-5">Work hours</button>
+          <span class="cron-templates-label">${T('cron.quick')}</span>
+          <button class="cron-tpl" data-cron="* * * * *">${T('cron.everyMin')}</button>
+          <button class="cron-tpl" data-cron="*/5 * * * *">${T('cron.every5')}</button>
+          <button class="cron-tpl" data-cron="*/15 * * * *">${T('cron.every15')}</button>
+          <button class="cron-tpl" data-cron="0 * * * *">${T('cron.everyHour')}</button>
+          <button class="cron-tpl" data-cron="0 0 * * *">${T('cron.dailyMidnight')}</button>
+          <button class="cron-tpl" data-cron="0 9 * * *">${T('cron.daily9')}</button>
+          <button class="cron-tpl" data-cron="0 2 * * *">${T('cron.daily2')}</button>
+          <button class="cron-tpl" data-cron="0 0 * * 0">${T('cron.weeklySunday')}</button>
+          <button class="cron-tpl" data-cron="0 0 1 * *">${T('cron.monthly1st')}</button>
+          <button class="cron-tpl" data-cron="0 9-17 * * 1-5">${T('cron.workHours')}</button>
         </div>
 
-        <div class="cron-help-toggle" id="cron-help-toggle">Syntax help ▾</div>
+        <div class="cron-help-toggle" id="cron-help-toggle">${T('cron.syntaxHelp')} ▾</div>
         <div class="cron-help hidden" id="cron-help">
           <table class="cron-help-table">
-            <tr><td><code>*</code></td><td>Any value</td></tr>
-            <tr><td><code>*/5</code></td><td>Every 5 units</td></tr>
-            <tr><td><code>1-5</code></td><td>Range from 1 to 5</td></tr>
-            <tr><td><code>1,3,5</code></td><td>Specific values</td></tr>
-            <tr><td><code>0 9 * * 1-5</code></td><td>9:00 AM, Mon-Fri</td></tr>
+            <tr><td><code>*</code></td><td>${T('cron.helpAny')}</td></tr>
+            <tr><td><code>*/5</code></td><td>${T('cron.helpStep')}</td></tr>
+            <tr><td><code>1-5</code></td><td>${T('cron.helpRange')}</td></tr>
+            <tr><td><code>1,3,5</code></td><td>${T('cron.helpList')}</td></tr>
+            <tr><td><code>0 9 * * 1-5</code></td><td>${T('cron.helpExample')}</td></tr>
           </table>
         </div>
       </div>
@@ -95,6 +117,70 @@ class SmartCronInput {
     });
 
     this.setValue(this.value);
+  }
+
+  /**
+   * Show what else fires at the same minute.
+   * Debounced, because it runs on every keystroke and each check walks a week
+   * of fire times for every existing schedule.
+   */
+  checkConflicts() {
+    clearTimeout(this._conflictTimer);
+    this._conflictTimer = setTimeout(() => this._doCheckConflicts(), 350);
+  }
+
+  async _doCheckConflicts() {
+    const host = this.container.querySelector('#cron-conflicts');
+    if (!host || !window.api || !window.api.checkScheduleConflicts) return;
+
+    let result;
+    try { result = await window.api.checkScheduleConflicts(this.value, this.excludeId); }
+    catch (e) { host.innerHTML = ''; return; }
+
+    if (!result || !result.success) { host.innerHTML = ''; return; }
+
+    if (!result.conflicts.length) {
+      host.innerHTML = result.totalScheduled
+        ? `<div class="cron-conflict-ok"><i data-lucide="check"></i> ${T('cron.conflictFree')}</div>`
+        : '';
+      if (window.lucide) lucide.createIcons();
+      return;
+    }
+
+    const list = result.conflicts.slice(0, 6).map(c => {
+      const when = new Date(c.at).toLocaleString(undefined, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      const kind = T(c.kind === 'backup' ? 'dash.kindBackup' : 'dash.kindTask');
+      return `<div class="cron-conflict-item">
+        <span class="cron-conflict-kind">${kind}</span>
+        <span class="cron-conflict-name">${escapeText(c.name)}</span>
+        <code class="cron-conflict-cron">${escapeText(c.cron)}</code>
+        <span class="cron-conflict-when">${escapeText(when)}</span>
+      </div>`;
+    }).join('');
+
+    const title = result.conflicts.length === 1
+      ? T('cron.conflictsOne')
+      : T('cron.conflictsMany', { n: result.conflicts.length });
+
+    host.innerHTML = `
+      <div class="cron-conflict-box">
+        <div class="cron-conflict-head">
+          <i data-lucide="alert-triangle"></i>
+          <span>${title}</span>
+          ${result.suggestion ? `<button type="button" class="cron-suggest-btn" id="cron-suggest">${T('cron.suggestSlot')}</button>` : ''}
+        </div>
+        ${list}
+      </div>`;
+
+    const btn = host.querySelector('#cron-suggest');
+    if (btn && result.suggestion) {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.setValue(result.suggestion.expression);
+        if (typeof showToast === 'function') showToast(i18n.t('cron.suggestApplied', { minute: result.suggestion.minute }), 'success');
+      });
+    }
+    if (window.lucide) lucide.createIcons();
   }
 
   handleKeydown(e) {
@@ -124,6 +210,7 @@ class SmartCronInput {
     this.value = fields.join(' ');
     this.updateDescription();
     this.onChange(this.value);
+    this.checkConflicts();
   }
 
   setValue(cron) {
@@ -134,6 +221,7 @@ class SmartCronInput {
       if (input) input.value = parts[i] || '*';
     }
     this.updateDescription();
+    this.checkConflicts();
     this.onChange(this.value);
   }
 
@@ -179,12 +267,12 @@ class SmartCronInput {
 
     if (!this.isValid()) {
       descEl.textContent = '';
-      validEl.innerHTML = '<span class="cron-invalid">Invalid expression</span>';
+      validEl.innerHTML = `<span class="cron-invalid">${T('cron.invalidExpression')}</span>`;
       nextEl.textContent = '';
       return;
     }
 
-    validEl.innerHTML = '<span class="cron-valid">Valid</span>';
+    validEl.innerHTML = `<span class="cron-valid">${T('cron.valid')}</span>`;
     descEl.textContent = this.getDescription();
 
     const next = this.getNextRun();

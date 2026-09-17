@@ -76,22 +76,22 @@ class BackupPage {
       if ((p.Engine || 'mysql') === 'sqlserver') engineLabel += ' · ' + String(p.BackupFormat || 'bak').toUpperCase();
       return `
       <div class="glass-card backup-profile-card clickable ${p.Enabled ? '' : 'disabled'}"
-           onclick="backupPage.editProfile('${p.Id}')" title="Clique para editar">
+           onclick="backupPage.editProfile('${p.Id}')" title="${esc(i18n.t('profile.clickToEdit'))}">
         <div class="backup-profile-header">
           <div class="backup-profile-info">
             <h3 class="backup-profile-name">${esc(p.Name)}</h3>
             <span class="badge badge-info">${esc(engineLabel)}</span>
-            <span class="badge ${p.Enabled ? 'badge-active' : 'badge-disabled'}">${p.Enabled ? 'Ativo' : 'Desativado'}</span>
-            <span class="badge badge-info">${esc(p.Databases?.length ? p.Databases.join(', ') : 'Todos os bancos')}</span>
+            <span class="badge ${p.Enabled ? 'badge-active' : 'badge-disabled'}">${esc(i18n.t(p.Enabled ? 'profile.active' : 'profile.disabled'))}</span>
+            <span class="badge badge-info">${esc(p.Databases?.length ? p.Databases.join(', ') : i18n.t('wizard.allDatabases'))}</span>
             ${p.Compression !== 'none' ? `<span class="badge badge-info" style="font-size:10px">${p.Compression.toUpperCase()} L${p.CompressionLevel}</span>` : ''}
           </div>
           <!-- stopPropagation so an action button never opens the editor too -->
           <div class="backup-profile-actions" onclick="event.stopPropagation()">
-            <button class="btn-glow btn-sm" onclick="backupPage.runBackup('${p.Id}')"><i data-lucide="play"></i> Executar</button>
-            <button class="btn-secondary-sm" onclick="backupPage.showHistory('${p.Id}')" title="Histórico de execuções"><i data-lucide="history"></i></button>
-            <button class="btn-secondary-sm" onclick="backupPage.cloneProfile('${p.Id}')" title="Duplicar perfil"><i data-lucide="copy"></i></button>
-            <button class="btn-secondary-sm" onclick="backupPage.exportProfile('${p.Id}')" title="Exportar"><i data-lucide="download"></i></button>
-            <button class="btn-danger" onclick="backupPage.deleteProfile('${p.Id}','${esc(p.Name)}')" title="Excluir"><i data-lucide="trash-2"></i></button>
+            <button class="btn-glow btn-sm" onclick="backupPage.runBackup('${p.Id}')"><i data-lucide="play"></i> ${esc(i18n.t('profile.run'))}</button>
+            <button class="btn-secondary-sm" onclick="backupPage.showHistory('${p.Id}')" title="${esc(i18n.t('profile.history'))}"><i data-lucide="history"></i></button>
+            <button class="btn-secondary-sm" onclick="backupPage.cloneProfile('${p.Id}')" title="${esc(i18n.t('profile.clone'))}"><i data-lucide="copy"></i></button>
+            <button class="btn-secondary-sm" onclick="backupPage.exportProfile('${p.Id}')" title="${esc(i18n.t('profile.export'))}"><i data-lucide="download"></i></button>
+            <button class="btn-danger" onclick="backupPage.deleteProfile('${p.Id}','${esc(p.Name)}')" title="${esc(i18n.t('profile.delete'))}"><i data-lucide="trash-2"></i></button>
           </div>
         </div>
         <div class="backup-profile-details">
@@ -233,10 +233,10 @@ class BackupPage {
 
     const created = await window.api.createBackupProfile(copy);
     if (!created || created.success === false) {
-      showToast((created && created.message) || 'Falha ao duplicar o perfil', 'error');
+      showToast((created && created.message) || i18n.t('profile.cloneFailed'), 'error');
       return;
     }
-    showToast(`Perfil duplicado como "${copy.Name}" (desativado)`, 'success');
+    showToast(i18n.t('profile.cloned', { name: copy.Name }), 'success');
     await this.loadProfiles();
     // Open the copy straight away - duplicating is almost always a prelude to editing.
     this.editProfile(created.Id);
@@ -244,11 +244,12 @@ class BackupPage {
 
   /** "Nightly" -> "Nightly (cópia)" -> "Nightly (cópia 2)" ... */
   _nextCopyName(baseName) {
-    const base = String(baseName || 'Perfil').replace(/\s*\(cópia( \d+)?\)$/, '');
+    const suffix = i18n.t('profile.copySuffix');
+    const base = String(baseName || 'Profile').replace(/\s*\([^)]*\)$/, '');
     const taken = new Set(this.profiles.map(p => p.Name));
-    let candidate = `${base} (cópia)`;
+    let candidate = `${base} (${suffix})`;
     let n = 2;
-    while (taken.has(candidate)) candidate = `${base} (cópia ${n++})`;
+    while (taken.has(candidate)) candidate = `${base} (${suffix} ${n++})`;
     return candidate;
   }
 
@@ -286,13 +287,13 @@ class BackupPage {
 
   _renderWizard() {
     const isEdit = !!this.editingId;
-    const steps = ['Connection', 'Databases', 'Backup', 'Upload', 'Schedule'];
+    const steps = [i18n.t('wizard.stepConnection'), i18n.t('wizard.stepDatabases'), i18n.t('wizard.stepDestination'), i18n.t('wizard.stepUpload'), i18n.t('wizard.stepSchedule')];
     const stepIcons = ['database', 'list', 'hard-drive', 'upload', 'clock'];
 
     showModal(`
       <div class="wizard-layout">
         <div class="wizard-main">
-          <h2><i data-lucide="${isEdit ? 'pencil' : 'plus-circle'}"></i> ${isEdit ? 'Edit' : 'New'} Backup Profile</h2>
+          <h2><i data-lucide="${isEdit ? 'pencil' : 'plus-circle'}"></i> ${esc(i18n.t(isEdit ? 'wizard.editTitle' : 'wizard.newTitle'))}</h2>
 
           <div class="wizard-tabs">
             ${steps.map((s, i) => `
@@ -312,10 +313,10 @@ class BackupPage {
               ${this.currentStep > 0 ? `<button class="btn-outline" onclick="backupPage.prevStep()"><i data-lucide=\"arrow-left\"></i> Back</button>` : ''}
             </div>
             <div style="display:flex;gap:8px">
-              <button class="btn-ghost" onclick="hideModal()">Cancel</button>
+              <button class="btn-ghost" onclick="hideModal()">${esc(i18n.t('taskModal.cancel'))}</button>
               ${isEdit ? `<button class=\"btn-glow\" onclick=\"backupPage.saveProfile()\"><i data-lucide=\"save\"></i> Save</button>` : ''}
               ${this.currentStep < steps.length - 1
-                ? `<button class=\"btn-outline\" onclick=\"backupPage.nextStep()\">Next <i data-lucide=\"arrow-right\"></i></button>`
+                ? `<button class=\"btn-outline\" onclick=\"backupPage.nextStep()\">${esc(i18n.t('wizard.next'))} <i data-lucide=\"arrow-right\"></i></button>`
                 : `<button class=\"btn-glow\" onclick=\"backupPage.saveProfile()\"><i data-lucide=\"save\"></i> Create Profile</button>`}
             </div>
           </div>
@@ -330,45 +331,45 @@ class BackupPage {
 
   _renderFloatingSummary() {
     const d = this.draft;
-    const dbs = (d.Databases || []).length > 0 ? d.Databases.join(', ') : 'All databases';
+    const dbs = (d.Databases || []).length > 0 ? d.Databases.join(', ') : i18n.t('wizard.allDatabases');
     const uploads = (d.UploadTargets || []).length > 0 ? d.UploadTargets.map(t => t.type.toUpperCase()).join(', ') : 'None';
     return `
       <div class="ws-header">
         <i data-lucide="file-text" style="width:14px;height:14px"></i>
-        <span>Profile Summary</span>
+        <span>${esc(i18n.t('summary.title'))}</span>
       </div>
       <div class="ws-section">
-        <div class="ws-label">Name</div>
-        <div class="ws-value">${esc(d.Name) || '<em style="color:var(--text3)">not set</em>'}</div>
+        <div class="ws-label">${esc(i18n.t('summary.name'))}</div>
+        <div class="ws-value">${esc(d.Name) || `<em style="color:var(--text3)">${esc(i18n.t('summary.notSet'))}</em>`}</div>
       </div>
       <div class="ws-section">
-        <div class="ws-label">Connection</div>
+        <div class="ws-label">${esc(i18n.t('summary.connection'))}</div>
         <div class="ws-value ws-mono">${esc(d.Host || 'localhost')}:${d.Port || 3306}</div>
         <div class="ws-sub">${esc(d.User || 'root')}</div>
       </div>
       <div class="ws-section">
-        <div class="ws-label">Databases</div>
+        <div class="ws-label">${esc(i18n.t('summary.databases'))}</div>
         <div class="ws-value">${esc(dbs)}</div>
       </div>
       <div class="ws-section">
-        <div class="ws-label">Destination</div>
-        <div class="ws-value ws-mono" style="word-break:break-all">${esc(d.BackupPath) || '<em style="color:var(--text3)">not set</em>'}</div>
+        <div class="ws-label">${esc(i18n.t('summary.destination'))}</div>
+        <div class="ws-value ws-mono" style="word-break:break-all">${esc(d.BackupPath) || `<em style="color:var(--text3)">${esc(i18n.t('summary.notSet'))}</em>`}</div>
       </div>
       <div class="ws-section">
-        <div class="ws-label">Compression</div>
-        <div class="ws-value">${d.Compression ? d.Compression.toUpperCase() : 'ZIP'} Level ${d.CompressionLevel || 5}</div>
+        <div class="ws-label">${esc(i18n.t('summary.compression'))}</div>
+        <div class="ws-value">${d.Compression ? d.Compression.toUpperCase() : 'ZIP'} ${esc(i18n.t('summary.level'))} ${d.CompressionLevel || 5}</div>
       </div>
       <div class="ws-section">
-        <div class="ws-label">Upload</div>
+        <div class="ws-label">${esc(i18n.t('summary.upload'))}</div>
         <div class="ws-value">${esc(uploads)}</div>
       </div>
       <div class="ws-section">
-        <div class="ws-label">Schedule</div>
+        <div class="ws-label">${esc(i18n.t('summary.schedule'))}</div>
         <div class="ws-value ws-mono">${esc(d.CronExpression) || '* * * * *'}</div>
       </div>
       <div class="ws-section">
-        <div class="ws-label">Status</div>
-        <div class="ws-value">${d.Enabled !== false ? '<span style="color:var(--green)">&#9679; Enabled</span>' : '<span style="color:var(--red)">&#9679; Disabled</span>'}</div>
+        <div class="ws-label">${esc(i18n.t('summary.status'))}</div>
+        <div class="ws-value">${d.Enabled !== false ? `<span style="color:var(--green)">&#9679; ${esc(i18n.t('summary.enabled'))}</span>` : `<span style="color:var(--red)">&#9679; ${esc(i18n.t('summary.disabled'))}</span>`}</div>
       </div>
     `;
   }
@@ -390,33 +391,33 @@ class BackupPage {
       const engineDef = engineList.find(e => e.id === engineId);
       const formats = (engineDef && engineDef.formats) || null;
       return `
-        <label class="form-label">Nome do perfil *</label>
-        <input type="text" class="form-input" id="wiz-name" value="${esc(d.Name)}" placeholder="Backup diário" oninput="backupPage.draft.Name=this.value; backupPage._updateFloatingSummary()">
+        <label class="form-label">${esc(i18n.t('wizard.profileName'))} *</label>
+        <input type="text" class="form-input" id="wiz-name" value="${esc(d.Name)}" placeholder="${esc(i18n.t('taskModal.namePlaceholder'))}" oninput="backupPage.draft.Name=this.value; backupPage._updateFloatingSummary()">
 
-        <label class="form-label">Banco de dados</label>
+        <label class="form-label">${esc(i18n.t('wizard.engine'))}</label>
         <select class="form-input" id="wiz-engine" onchange="backupPage.changeEngine(this.value)">
           ${engineList.map(e => `<option value="${e.id}" ${e.id === engineId ? 'selected' : ''}>${esc(e.label)}</option>`).join('')}
         </select>
 
         ${formats ? `
-        <label class="form-label" style="margin-top:12px">Formato do backup</label>
+        <label class="form-label" style="margin-top:12px">${esc(i18n.t('wizard.format'))}</label>
         <select class="form-input" id="wiz-format" onchange="backupPage.changeFormat(this.value)">
           ${formats.map(f => `<option value="${f.id}" ${f.id === (d.BackupFormat || 'bak') ? 'selected' : ''}>${esc(f.label)}</option>`).join('')}
         </select>
         <div class="form-hint" id="wiz-format-hint">${esc((formats.find(f => f.id === (d.BackupFormat || 'bak')) || formats[0]).description)}</div>
         ` : ''}
 
-        <label class="form-label" style="margin-top:12px">Conexão</label>
+        <label class="form-label" style="margin-top:12px">${esc(i18n.t('wizard.connection'))}</label>
         <div style="display:grid;grid-template-columns:1fr 80px;gap:8px">
-          <div class="form-group"><label class="form-label">Host</label><input type="text" class="form-input" id="wiz-host" value="${esc(d.Host)}" oninput="backupPage.draft.Host=this.value; backupPage._updateFloatingSummary()"></div>
-          <div class="form-group"><label class="form-label">Port</label><input type="number" class="form-input" id="wiz-port" value="${d.Port}" oninput="backupPage.draft.Port=parseInt(this.value)||3306; backupPage._updateFloatingSummary()"></div>
+          <div class="form-group"><label class="form-label">${esc(i18n.t('wizard.host'))}</label><input type="text" class="form-input" id="wiz-host" value="${esc(d.Host)}" oninput="backupPage.draft.Host=this.value; backupPage._updateFloatingSummary()"></div>
+          <div class="form-group"><label class="form-label">${esc(i18n.t('wizard.port'))}</label><input type="number" class="form-input" id="wiz-port" value="${d.Port}" oninput="backupPage.draft.Port=parseInt(this.value)||3306; backupPage._updateFloatingSummary()"></div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <div class="form-group"><label class="form-label">User</label><input type="text" class="form-input" id="wiz-user" value="${esc(d.User)}" oninput="backupPage.draft.User=this.value"></div>
-          <div class="form-group"><label class="form-label">Password</label><input type="password" class="form-input" id="wiz-pass" value="${esc(d.Password)}" oninput="backupPage.draft.Password=this.value"></div>
+          <div class="form-group"><label class="form-label">${esc(i18n.t('wizard.user'))}</label><input type="text" class="form-input" id="wiz-user" value="${esc(d.User)}" oninput="backupPage.draft.User=this.value"></div>
+          <div class="form-group"><label class="form-label">${esc(i18n.t('wizard.password'))}</label><input type="password" class="form-input" id="wiz-pass" value="${esc(d.Password)}" oninput="backupPage.draft.Password=this.value"></div>
         </div>
         <div style="display:flex;gap:8px;margin-top:8px">
-          <button class="btn-outline btn-sm" onclick="backupPage.testWizardConn()"><i data-lucide="wifi"></i> Testar conexão</button>
+          <button class="btn-outline btn-sm" onclick="backupPage.testWizardConn()"><i data-lucide="wifi"></i> ${esc(i18n.t('wizard.testConnection'))}</button>
           <span id="wiz-conn-status" style="font-size:12px;display:flex;align-items:center"></span>
         </div>
       `; }
@@ -437,11 +438,11 @@ class BackupPage {
             </label>
           `).join('')}
         </div>
-        <p id="wiz-db-all-label" style="font-size:12px;color:var(--primary-light);margin-top:8px">${(!d.Databases || d.Databases.length === 0) ? '\u2713 All databases will be backed up' : `${d.Databases.length} selected`}</p>
+        <p id="wiz-db-all-label" style="font-size:12px;color:var(--primary-light);margin-top:8px">${(!d.Databases || d.Databases.length === 0) ? '\u2713 All databases will be backed up' : i18n.t('wizard.selectedCount', { n: d.Databases.length })}</p>
       `;
 
       case 2: return `
-        <label class="form-label">Backup Destination</label>
+        <label class="form-label">${esc(i18n.t('wizard.destination'))}</label>
         <div style="display:flex;gap:6px;margin-bottom:12px">
           <input type="text" class="form-input" id="wiz-path" data-path-input data-path-kind="directory" value="${esc(d.BackupPath)}" placeholder="C:\\Backups\\MySQL" oninput="backupPage.draft.BackupPath=this.value; backupPage._updateFloatingSummary()" style="flex:1">
           <button class="btn-outline btn-sm" onclick="backupPage.browseBackupPath()" title="Browse folder"><i data-lucide="folder-open"></i></button>
@@ -479,7 +480,7 @@ class BackupPage {
           <label class="mysql-opt"><input type="checkbox" id="opt-create-db" ${d.ExtraArgs?.includes('databases') || d.ExtraArgs?.includes('all-databases') ? 'checked' : ''} onchange="backupPage._syncMysqlOpts()"><span>Create Database</span><small>Include CREATE DATABASE statement</small></label>
           <label class="mysql-opt"><input type="checkbox" id="opt-compress" ${d.ExtraArgs?.includes('compress') ? 'checked' : ''} onchange="backupPage._syncMysqlOpts()"><span>Compress Protocol</span><small>Compress client-server traffic</small></label>
         </div>
-        <details style="margin-top:8px"><summary style="font-size:11px;color:var(--text3);cursor:pointer">Advanced: custom args</summary>
+        <details style="margin-top:8px"><summary style="font-size:11px;color:var(--text3);cursor:pointer">${esc(i18n.t('wizard.advancedArgs'))}</summary>
           <input type="text" class="form-input" id="wiz-args" value="${esc(d.ExtraArgs)}" oninput="backupPage.draft.ExtraArgs=this.value" style="margin-top:6px;font-size:12px;font-family:monospace" placeholder="--extra-args-here">
         </details>
 
@@ -665,7 +666,7 @@ class BackupPage {
     const label = document.getElementById('wiz-db-all-label');
     if (label) {
       const total = document.querySelectorAll('#wiz-db-chips .bp-db-check').length;
-      label.textContent = dbs.length === 0 ? `\u2713 All databases will be backed up` : `${dbs.length} of ${total} selected`;
+      label.textContent = dbs.length === 0 ? `\u2713 All databases will be backed up` : i18n.t('wizard.selectedOf', { n: dbs.length, total });
     }
   }
 

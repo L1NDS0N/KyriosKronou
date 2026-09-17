@@ -1141,74 +1141,289 @@ kbd {
 .path-status { font-size: 11px; margin-top: 4px; min-height: 0; color: var(--text3); }
 .path-status.bad { color: var(--red); }
 
-/* ═══ MODAL & NATIVE CONTROLS ═══ */
-/* Native selects, checkboxes, radios and number steppers arrive with Chrome's
-   light-theme chrome, which looked pasted onto a dark product. These restyle
-   them without replacing them, so keyboard behaviour and accessibility stay. */
-.modal select,
-select.form-input {
+
+
+/* ══════════════════════════════════════════════════════════
+   MODAL SHELL
+   The title used to scroll away and the action buttons sat at
+   the bottom of a long form, so on a small window you had to
+   scroll to find Save. The header and the actions are now
+   pinned and only the form between them scrolls - done in CSS
+   so no modal's markup had to change.
+   ══════════════════════════════════════════════════════════ */
+#modal-overlay { padding: 24px; align-items: flex-start; overflow-y: auto; }
+
+#modal-content {
+  padding: 0;
+  max-height: calc(100vh - 48px);
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+#modal-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
+}
+
+/* Title bar */
+#modal-body > h2 {
+  position: sticky; top: 0; z-index: 3;
+  display: flex; align-items: center; gap: 10px;
+  margin: 0; padding: 20px 26px 16px;
+  font-size: 16px; font-weight: 600; color: var(--text);
+  background: linear-gradient(rgba(10,10,18,.97), rgba(10,10,18,.92));
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--glass-border);
+  border-radius: 16px 16px 0 0;
+}
+#modal-body > h2 i,
+#modal-body > h2 svg { width: 17px; height: 17px; color: var(--text3); flex-shrink: 0; }
+
+/* Everything between the title and the actions scrolls. */
+#modal-body > *:not(h2):not(.modal-actions) { flex-shrink: 0; }
+#modal-body > h2 ~ *:not(.modal-actions) { padding-left: 26px; padding-right: 26px; }
+#modal-body > h2 + * { margin-top: 18px; }
+
+/* Action bar */
+#modal-body .modal-actions {
+  position: sticky; bottom: 0; z-index: 3;
+  display: flex; justify-content: flex-end; gap: 8px;
+  margin-top: auto; padding: 16px 26px 20px;
+  background: linear-gradient(rgba(10,10,18,.92), rgba(10,10,18,.98));
+  backdrop-filter: blur(20px);
+  border-top: 1px solid var(--glass-border);
+  border-radius: 0 0 16px 16px;
+}
+/* A destructive action belongs away from the safe one. */
+#modal-body .modal-actions .btn-danger { margin-right: auto; }
+
+/* ══════════════════════════════════════════════════════════
+   FORM SYSTEM
+   ══════════════════════════════════════════════════════════ */
+.form-label {
+  display: block; font-size: 10.5px; font-weight: 600;
+  color: var(--text3); margin: 0 0 6px;
+  letter-spacing: .5px; text-transform: uppercase;
+}
+.form-label + .form-input,
+.form-label + .form-select,
+.form-label + div { margin-bottom: 16px; }
+
+.form-input {
+  padding: 10px 14px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.form-input:focus {
+  outline: none;
+  border-color: var(--primary-light);
+  box-shadow: 0 0 0 3px var(--primary-dim);
+}
+.form-input:disabled { opacity: .45; cursor: not-allowed; }
+textarea.form-input { resize: vertical; min-height: 72px; font-family: var(--mono); }
+
+/* A section groups related fields and gives the eye somewhere to rest. */
+.form-section { margin-bottom: 22px; }
+.form-section-title {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .8px;
+  text-transform: uppercase; color: var(--text3);
+  margin-bottom: 12px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--glass-border);
+}
+.form-section-title i, .form-section-title svg { width: 13px; height: 13px; }
+
+/* Side-by-side fields that fold to one column when there is no room. */
+.form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.form-row.tight { grid-template-columns: 1fr auto; }
+.form-row > .form-group { margin-bottom: 0; }
+.form-group { margin-bottom: 16px; }
+
+.form-hint { font-size: 11px; color: var(--text3); line-height: 1.55; margin-top: 6px; }
+.form-hint.warn { color: var(--amber); }
+
+/* ══════════════════════════════════════════════════════════
+   NATIVE CONTROLS
+   Selects, checkboxes, radios, number steppers, ranges and file
+   pickers ship with Chrome's light-theme chrome, which looked
+   pasted onto a dark product. Restyled rather than replaced, so
+   keyboard behaviour and accessibility are untouched.
+   ══════════════════════════════════════════════════════════ */
+select, select.form-input {
   appearance: none; -webkit-appearance: none;
+  width: 100%; padding: 10px 34px 10px 14px;
   background-color: var(--glass);
   background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23808094' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 12px center;
-  padding-right: 34px; cursor: pointer;
   border: 1px solid var(--glass-border); border-radius: var(--radius-xs);
-  color: var(--text); font-family: var(--font); font-size: 12.5px;
+  color: var(--text); font-size: 12.5px; font-family: var(--font);
+  cursor: pointer; transition: var(--transition);
 }
-select.form-input:hover { border-color: var(--glass-border2); }
-select.form-input:focus { outline: none; border-color: var(--primary-light); box-shadow: 0 0 0 3px var(--primary-dim); }
-/* The popup list itself is drawn by the OS; these keep it legible on dark. */
-select.form-input option { background: var(--bg3); color: var(--text); padding: 8px; }
+select:hover { border-color: var(--glass-border2); }
+select:focus { outline: none; border-color: var(--primary-light); box-shadow: 0 0 0 3px var(--primary-dim); }
+/* The popup list is drawn by the OS; this keeps it legible on dark. */
+select option { background: var(--bg3); color: var(--text); }
+select:disabled { opacity: .45; cursor: not-allowed; }
 
-.modal input[type="checkbox"]:not(.toggle-switch input),
-.modal input[type="radio"] {
+input[type="checkbox"]:not(.toggle-switch input),
+input[type="radio"] {
   appearance: none; -webkit-appearance: none;
   width: 16px; height: 16px; flex-shrink: 0; margin: 0;
   border: 1px solid var(--glass-border2); background: var(--glass);
   cursor: pointer; transition: var(--transition); position: relative;
+  vertical-align: middle;
 }
-.modal input[type="checkbox"]:not(.toggle-switch input) { border-radius: 4px; }
-.modal input[type="radio"] { border-radius: 50%; }
-.modal input[type="checkbox"]:not(.toggle-switch input):hover,
-.modal input[type="radio"]:hover { border-color: var(--primary-light); }
-.modal input[type="checkbox"]:not(.toggle-switch input):checked {
+input[type="checkbox"]:not(.toggle-switch input) { border-radius: 4px; }
+input[type="radio"] { border-radius: 50%; }
+input[type="checkbox"]:not(.toggle-switch input):hover,
+input[type="radio"]:hover { border-color: var(--primary-light); }
+input[type="checkbox"]:not(.toggle-switch input):focus-visible,
+input[type="radio"]:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--primary-dim); }
+input[type="checkbox"]:not(.toggle-switch input):checked {
   background: var(--primary); border-color: var(--primary-light);
 }
-.modal input[type="checkbox"]:not(.toggle-switch input):checked::after {
-  content: ''; position: absolute; left: 4.5px; top: 1px;
-  width: 4px; height: 8px; border: solid var(--bg);
+input[type="checkbox"]:not(.toggle-switch input):checked::after {
+  content: ''; position: absolute; left: 4.5px; top: 1.5px;
+  width: 4px; height: 8px; border: solid var(--text);
   border-width: 0 2px 2px 0; transform: rotate(45deg);
 }
-.modal input[type="radio"]:checked { border-color: var(--primary-light); }
-.modal input[type="radio"]:checked::after {
+input[type="radio"]:checked { border-color: var(--primary-light); }
+input[type="radio"]:checked::after {
   content: ''; position: absolute; inset: 3px; border-radius: 50%; background: var(--primary-light);
 }
 
-/* Chrome's number spinners are tiny and light; hide them and let the field
-   behave like every other input. */
-.modal input[type="number"]::-webkit-outer-spin-button,
-.modal input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.modal input[type="number"] { -moz-appearance: textfield; }
+/* Chrome's number spinners are tiny and light-themed. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; }
 
-.modal input[type="range"] {
+input[type="range"] {
   appearance: none; -webkit-appearance: none; width: 100%;
   height: 4px; border-radius: 3px; background: var(--glass3); outline: none;
 }
-.modal input[type="range"]::-webkit-slider-thumb {
+input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
   background: var(--primary-light); cursor: pointer;
   box-shadow: 0 0 0 3px var(--primary-dim); transition: var(--transition);
 }
-.modal input[type="range"]::-webkit-slider-thumb:hover { background: var(--moon); }
+input[type="range"]::-webkit-slider-thumb:hover { background: var(--moon); }
 
-.modal label { cursor: pointer; }
-.modal .form-input:focus,
-.modal textarea:focus {
+input[type="file"]::file-selector-button {
+  padding: 7px 13px; margin-right: 10px;
+  border: 1px solid var(--glass-border); border-radius: var(--radius-xs);
+  background: var(--glass2); color: var(--text2);
+  font-family: var(--font); font-size: 11.5px; cursor: pointer;
+}
+input[type="file"]::file-selector-button:hover { background: var(--glass3); color: var(--text); }
+
+/* A checkbox and its text are one target, aligned on the box. */
+.check-row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 0; font-size: 12.5px; color: var(--text2); cursor: pointer;
+}
+.check-row:hover { color: var(--text); }
+.check-row .check-hint { font-size: 11px; color: var(--text3); display: block; margin-top: 2px; }
+
+/* The cron boxes were bare inputs among styled ones. */
+.cron-part input {
+  background: var(--glass); border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xs); color: var(--text);
+  font-family: var(--mono); transition: var(--transition);
+}
+.cron-part input:focus {
   outline: none; border-color: var(--primary-light);
   box-shadow: 0 0 0 3px var(--primary-dim);
 }
-.modal .form-input::placeholder { color: var(--text3); opacity: .6; }
 
-/* A checkbox and its text should be one click target, aligned on the box. */
-.check-row { display: flex; align-items: center; gap: 9px; padding: 7px 0; font-size: 12.5px; color: var(--text2); }
-.check-row:hover { color: var(--text); }
+/* ══════════════════════════════════════════════════════════
+   RESPONSIVENESS
+   ══════════════════════════════════════════════════════════ */
+@media (max-width: 1100px) {
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .settings-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  /* Sidebar becomes a strip of icons rather than eating a third of the width. */
+  #sidebar, .sidebar { width: 62px; }
+  #sidebar .nav-btn span, .sidebar .nav-btn span,
+  #sidebar .sidebar-footer-credits, .brand-name { display: none; }
+  #sidebar .nav-btn, .sidebar .nav-btn { justify-content: center; padding: 11px 0; }
+
+  #page-container { padding: 8px 16px 32px; }
+  #modal-content, #modal-content.wizard-wide { width: 100%; max-width: 560px; }
+
+  /* The wizard's summary column has nowhere to go; stack it. */
+  .wizard-layout { grid-template-columns: 1fr; }
+  .wizard-summary { display: none; }
+
+  .sched-card { flex-direction: column; align-items: flex-start; }
+  .sched-actions { width: 100%; }
+
+  .page-toolbar { flex-direction: column; align-items: stretch; }
+  .toolbar-left, .toolbar-right { justify-content: space-between; }
+}
+
+@media (max-width: 680px) {
+  .stats-grid { grid-template-columns: 1fr; }
+  #modal-overlay { padding: 10px; }
+  #modal-content { max-height: calc(100vh - 20px); }
+  #modal-body > h2 { padding: 16px 18px 13px; font-size: 15px; }
+  #modal-body > h2 ~ *:not(.modal-actions) { padding-left: 18px; padding-right: 18px; }
+  #modal-body .modal-actions { padding: 13px 18px 16px; flex-wrap: wrap; }
+  #modal-body .modal-actions button { flex: 1; justify-content: center; }
+  .form-row { grid-template-columns: 1fr; }
+
+  /* Wide tables scroll sideways instead of squashing every column. */
+  .table-wrap { overflow-x: auto; }
+  .data-table { min-width: 560px; }
+}
+
+/* A window that is short, not narrow - common on a laptop. */
+@media (max-height: 700px) {
+  #modal-content { max-height: calc(100vh - 24px); }
+  #modal-overlay { padding: 12px; }
+}
+
+/* ═══ SCHEDULE CONFLICTS ═══ */
+/* Two heavy jobs in the same minute is an operational problem, so the clash is
+   shown while the schedule is being chosen rather than discovered at 02:00. */
+.cron-conflicts { margin-top: 10px; }
+.cron-conflict-box {
+  border: 1px solid rgba(138,122,90,.2); border-radius: var(--radius-xs);
+  background: var(--amber-dim); padding: 10px 12px;
+}
+.cron-conflict-head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 12px; font-weight: 600; color: var(--amber); margin-bottom: 8px;
+}
+.cron-conflict-head i, .cron-conflict-head svg { width: 14px; height: 14px; flex-shrink: 0; }
+.cron-suggest-btn {
+  margin-left: auto; padding: 5px 11px;
+  border: 1px solid rgba(138,122,90,.3); border-radius: var(--radius-xs);
+  background: rgba(138,122,90,.14); color: var(--amber);
+  font-family: var(--font); font-size: 11px; font-weight: 600; cursor: pointer;
+  transition: var(--transition);
+}
+.cron-suggest-btn:hover { background: rgba(138,122,90,.22); border-color: rgba(138,122,90,.4); }
+.cron-conflict-item {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 5px 0; font-size: 11.5px; color: var(--text3);
+  border-top: 1px solid rgba(138,122,90,.08);
+}
+.cron-conflict-kind {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: .5px;
+  padding: 1px 6px; border-radius: 10px;
+  background: var(--glass2); color: var(--text3); flex-shrink: 0;
+}
+.cron-conflict-name { color: var(--text2); font-weight: 500; }
+.cron-conflict-cron { font-family: var(--mono); font-size: 10.5px; color: var(--text3); opacity: .8; }
+.cron-conflict-when { margin-left: auto; font-family: var(--mono); font-size: 10.5px; opacity: .7; }
+.cron-conflict-ok {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11.5px; color: var(--green); opacity: .85;
+}
+.cron-conflict-ok i, .cron-conflict-ok svg { width: 13px; height: 13px; }

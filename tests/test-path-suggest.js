@@ -153,25 +153,25 @@ describe('Path completion: validation', () => {
     const r = ps.validate(dir, { kind: 'file' });
     expect(r.exists).to.equal(true);
     expect(r.valid).to.equal(false);
-    expect(r.message).to.match(/pasta/i);
+    expect(r.messageKey).to.equal('path.expectedFile');
   });
 
   it('says so when a file was given where a folder is needed', () => {
     const r = ps.validate(file, { kind: 'directory' });
     expect(r.valid).to.equal(false);
-    expect(r.message).to.match(/arquivo/i);
+    expect(r.messageKey).to.equal('path.expectedFolder');
   });
 
   it('reports a path that does not exist', () => {
     const r = ps.validate(path.join(dir, 'nope.ps1'), { kind: 'file' });
     expect(r.exists).to.equal(false);
-    expect(r.message).to.be.a('string').with.length.above(0);
+    expect(r.messageKey).to.equal('path.notFound');
   });
 
   it('treats an empty field as neither valid nor invalid', () => {
     const r = ps.validate('', { kind: 'file' });
     expect(r.exists).to.equal(false);
-    expect(r.message).to.equal('');
+    expect(r.messageKey).to.equal('');
   });
 
   it('validates through an environment variable', () => {

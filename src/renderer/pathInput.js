@@ -14,6 +14,12 @@
   'use strict';
 
   const OPEN_CLASS = 'path-ac-open';
+
+  // The component is loaded before i18n in some paths, so fall back rather
+  // than showing a raw key.
+  const tr = (key, fallback) =>
+    (global.i18n && typeof global.i18n.t === 'function' && global.i18n.t(key) !== key)
+      ? global.i18n.t(key) : fallback;
   const DEBOUNCE_MS = 120;
 
   let activeBox = null;
@@ -47,8 +53,8 @@
 
     if (!items.length) {
       const noneMsg = result && result.error === 'not-found'
-        ? 'Essa pasta não existe'
-        : 'Nada encontrado';
+        ? tr('path.folderNotFound', 'That folder does not exist')
+        : tr('path.nothingFound', 'Nothing found');
       box.list.innerHTML = '<div class="path-ac-empty">' + noneMsg + '</div>';
       return;
     }
@@ -127,7 +133,7 @@
     box.input.classList.toggle('path-invalid', !ok);
     box.input.classList.toggle('path-valid', ok);
     if (box.status) {
-      box.status.textContent = ok ? '' : (result.message || '');
+      box.status.textContent = ok ? '' : (result.messageKey ? tr(result.messageKey, result.messageKey) : '');
       box.status.className = 'path-status' + (ok ? '' : ' bad');
     }
   }

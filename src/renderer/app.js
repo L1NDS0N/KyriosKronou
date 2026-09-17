@@ -184,7 +184,8 @@ async function refreshDashboard() {
     animateCounter('stat-active', active);
     const disabled = allTasks.length - active;
     document.getElementById('stat-active-sub').textContent =
-      allTasks.length + ' no total' + (disabled > 0 ? ' · ' + disabled + ' desativada(s)' : '');
+      i18n.t('dash.totalCount', { n: allTasks.length })
+      + (disabled > 0 ? ' \u00b7 ' + i18n.t('dash.disabledCount', { n: disabled }) : '');
 
     // ─── Backups ───
     const activeBackups = profiles.filter(p => p.Enabled).length;
@@ -193,13 +194,13 @@ async function refreshDashboard() {
       .filter(p => p.LastRun)
       .sort((a, b) => new Date(b.LastRun) - new Date(a.LastRun))[0];
     document.getElementById('stat-backups-sub').textContent = lastBackup
-      ? activeBackups + ' ativo(s) · último: ' + (lastBackup.LastStatus === 'Success' ? 'ok' : 'falhou')
-      : activeBackups + ' ativo(s) · nunca executado';
+      ? i18n.t('dash.activeCount', { n: activeBackups }) + ' \u00b7 ' + i18n.t(lastBackup.LastStatus === 'Success' ? 'dash.lastOk' : 'dash.lastFailed')
+      : i18n.t('dash.activeCount', { n: activeBackups }) + ' \u00b7 ' + i18n.t('dash.neverRun');
 
     // ─── Next run: the question an operator actually asks ───
     const next = await nextScheduled(allTasks, profiles);
     document.getElementById('stat-next').textContent = next ? next.when : '—';
-    document.getElementById('stat-next-sub').textContent = next ? next.name : 'nada agendado';
+    document.getElementById('stat-next-sub').textContent = next ? next.name : i18n.t('dash.nothingScheduled');
 
     // ─── Failures in the last 24h, across tasks and backups ───
     const since = Date.now() - 86400000;
@@ -207,15 +208,17 @@ async function refreshDashboard() {
     const backupErrors = backupHistory.filter(h => h.Status !== 'Success' && new Date(h.Timestamp).getTime() > since).length;
     animateCounter('stat-errors', taskErrors + backupErrors);
     document.getElementById('stat-errors-sub').textContent =
-      (taskErrors + backupErrors) === 0 ? 'tudo certo' : taskErrors + ' tarefa(s) · ' + backupErrors + ' backup(s)';
+      (taskErrors + backupErrors) === 0
+        ? i18n.t('dash.allClear')
+        : i18n.t('dash.failureBreakdown', { tasks: taskErrors, backups: backupErrors });
 
     // ─── Recent activity: tasks and backups on one timeline ───
     const rows = [];
     for (const h of allHistory.slice(0, 10)) {
-      rows.push({ ts: h.Timestamp, what: h.TaskName, kind: 'tarefa', ok: h.Status === 'Success', status: h.Status, duration: h.Duration });
+      rows.push({ ts: h.Timestamp, what: h.TaskName, kind: i18n.t('dash.kindTask'), ok: h.Status === 'Success', status: h.Status, duration: h.Duration });
     }
     for (const h of backupHistory.slice(0, 10)) {
-      rows.push({ ts: h.Timestamp, what: h.ProfileName, kind: 'backup', ok: h.Status === 'Success', status: h.Status, duration: h.Duration });
+      rows.push({ ts: h.Timestamp, what: h.ProfileName, kind: i18n.t('dash.kindBackup'), ok: h.Status === 'Success', status: h.Status, duration: h.Duration });
     }
     rows.sort((a, b) => new Date(b.ts) - new Date(a.ts));
 
@@ -260,9 +263,9 @@ async function nextScheduled(tasks, profiles) {
   const mins = Math.max(0, Math.round((soonest.at - Date.now()) / 60000));
 
   let when;
-  if (mins < 1) when = 'agora';
-  else if (mins < 60) when = 'em ' + mins + ' min';
-  else if (mins < 1440) when = 'em ' + Math.round(mins / 60) + ' h';
+  if (mins < 1) when = i18n.t('dash.now');
+  else if (mins < 60) when = i18n.t('dash.inMinutes', { n: mins });
+  else if (mins < 1440) when = i18n.t('dash.inHours', { n: Math.round(mins / 60) });
   else when = soonest.at.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
   return { when: when, name: soonest.name };
@@ -293,20 +296,20 @@ async function renderSchedulerCard() {
 
   if (!status.nssmAvailable) {
     indicator.className = 'sched-indicator warn';
-    title.textContent = 'Executando pelo aplicativo';
-    detail.textContent = 'As tarefas só rodam com esta janela aberta. Instale o NSSM para executar como serviço do Windows e continuar após o logoff.';
-    actions.innerHTML = btn('btn-dash-nssm', 'Configurar NSSM');
+    title.textContent = i18n.t('dash.schedRunningApp');
+    detail.textContent = i18n.t('dash.schedNssmDetail');
+    actions.innerHTML = btn('btn-dash-nssm', escHtml(i18n.t('dash.schedConfigureNssm')));
     wire('btn-dash-nssm', () => switchPage('settings'));
     return;
   }
 
   if (!status.installed) {
     indicator.className = 'sched-indicator warn';
-    title.textContent = 'Executando pelo aplicativo';
-    detail.textContent = 'As tarefas só rodam com esta janela aberta. Instale como serviço para que continuem após o logoff do servidor.';
-    actions.innerHTML = btn('btn-dash-install', 'Instalar como serviço', 'btn-glow');
+    title.textContent = i18n.t('dash.schedRunningApp');
+    detail.textContent = i18n.t('dash.schedRunningAppDetail');
+    actions.innerHTML = btn('btn-dash-install', escHtml(i18n.t('dash.schedInstall')), 'btn-glow');
     wire('btn-dash-install', async () => {
-      showToast('Instalando o serviço…', 'info');
+      showToast(i18n.t('dash.schedInstalling'), 'info');
       const r = await window.api.installKyrionService();
       showToast(r.message, r.success ? 'success' : 'error');
       refreshDashboard();
@@ -316,37 +319,38 @@ async function renderSchedulerCard() {
 
   if (status.running && status.schedulerAlive) {
     indicator.className = 'sched-indicator ok';
-    title.textContent = 'Serviço ativo';
-    detail.textContent = 'O serviço do Windows está executando as tarefas em segundo plano, independente desta janela.';
-    actions.innerHTML = btn('btn-dash-restart', 'Reiniciar') + btn('btn-dash-remove', 'Remover serviço', 'btn-danger');
+    title.textContent = i18n.t('dash.schedActive');
+    detail.textContent = i18n.t('dash.schedActiveDetail');
+    actions.innerHTML = btn('btn-dash-restart', escHtml(i18n.t('dash.schedRestart')))
+      + btn('btn-dash-remove', escHtml(i18n.t('dash.schedRemove')), 'btn-danger');
   } else if (status.running) {
     indicator.className = 'sched-indicator bad';
-    title.textContent = 'Serviço iniciado, mas sem resposta';
-    detail.textContent = status.heartbeatStale
-      ? 'O Windows diz que o serviço está rodando, mas o agendador parou de responder. Reinicie e confira os logs.'
-      : 'O serviço iniciou mas o agendador ainda não sinalizou. Se persistir, reinicie e confira os logs.';
-    actions.innerHTML = btn('btn-dash-restart', 'Reiniciar', 'btn-glow') + btn('btn-dash-logs', 'Ver logs');
+    title.textContent = i18n.t('dash.schedUnresponsive');
+    detail.textContent = i18n.t(status.heartbeatStale ? 'dash.schedStaleDetail' : 'dash.schedPendingDetail');
+    actions.innerHTML = btn('btn-dash-restart', escHtml(i18n.t('dash.schedRestart')), 'btn-glow')
+      + btn('btn-dash-logs', escHtml(i18n.t('dash.schedViewLogs')));
   } else {
     indicator.className = 'sched-indicator bad';
-    title.textContent = 'Serviço parado' + (status.status ? ' (' + status.status + ')' : '');
-    detail.textContent = 'Nenhuma tarefa será executada em segundo plano enquanto ele estiver parado.';
-    actions.innerHTML = btn('btn-dash-start', 'Iniciar serviço', 'btn-glow') + btn('btn-dash-remove', 'Remover serviço', 'btn-danger');
+    title.textContent = i18n.t('dash.schedStopped') + (status.status ? ' (' + status.status + ')' : '');
+    detail.textContent = i18n.t('dash.schedStoppedDetail');
+    actions.innerHTML = btn('btn-dash-start', escHtml(i18n.t('dash.schedStart')), 'btn-glow')
+      + btn('btn-dash-remove', escHtml(i18n.t('dash.schedRemove')), 'btn-danger');
   }
 
   wire('btn-dash-restart', async () => {
-    showToast('Reiniciando o serviço…', 'info');
+    showToast(i18n.t('dash.schedRestarting'), 'info');
     const r = await window.api.restartKyrionService();
-    showToast(r.message || (r.success ? 'Reiniciado' : 'Falhou'), r.success ? 'success' : 'error');
+    showToast(r.message || (r.success ? 'OK' : 'Erro'), r.success ? 'success' : 'error');
     refreshDashboard();
   });
   wire('btn-dash-start', async () => {
-    showToast('Iniciando o serviço…', 'info');
+    showToast(i18n.t('dash.schedStarting'), 'info');
     const r = await window.api.startKyrionService();
-    showToast(r.message || (r.success ? 'Iniciado' : 'Falhou'), r.success ? 'success' : 'error');
+    showToast(r.message || (r.success ? 'OK' : 'Erro'), r.success ? 'success' : 'error');
     refreshDashboard();
   });
   wire('btn-dash-remove', async () => {
-    if (!confirm('Remover o serviço do Windows? As tarefas passarão a rodar apenas com o aplicativo aberto.')) return;
+    if (!confirm(i18n.t('dash.schedRemoveConfirm'))) return;
     const r = await window.api.uninstallKyrionService();
     showToast(r.message, r.success ? 'success' : 'error');
     refreshDashboard();
@@ -543,46 +547,84 @@ function showTaskDialog(task = null) {
   const isEdit = !!task;
   const cron = isEdit ? task.CronExpression : '* * * * *';
   const hasInline = isEdit && task.ScriptContent;
+  const T = (k, p) => escHtml(i18n.t(k, p));
+
+  // Grouped into sections - identity, schedule, what runs, options - so a long
+  // form reads as four short ones instead of a wall of fields.
   showModal(`
-    <h2>${isEdit ? '<i data-lucide="pencil"></i> Edit Task' : '<i data-lucide="plus-circle"></i> New Task'}</h2>
-    <label class="form-label">Task Name *</label>
-    <input type="text" class="form-input" id="dlg-name" value="${isEdit ? escAttr(task.Name) : ''}" placeholder="e.g. Daily Backup">
-    <label class="form-label">Schedule</label>
-    <div id="smart-cron-container"></div>
-    <label class="form-label">Script</label>
-    <div class="script-mode-tabs">
-      <button class="script-mode-tab ${!hasInline ? 'active' : ''}" id="tab-file" onclick="scriptEditorSwitchMode('file')">
-        <i data-lucide="file-input"></i> File Path
-      </button>
-      <button class="script-mode-tab ${hasInline ? 'active' : ''}" id="tab-editor" onclick="scriptEditorSwitchMode('editor')">
-        <i data-lucide="code-2"></i> Write Script
-      </button>
-    </div>
-    <div id="script-mode-file">
-      <div class="input-row">
-        <input type="text" class="form-input" id="dlg-script" data-path-input data-path-kind="file" data-path-ext=".ps1,.bat,.cmd,.exe,.vbs,.py" value="${isEdit ? escAttr(task.ScriptPath || '') : ''}" placeholder="C:\Scripts\backup.ps1">
-        <button class="btn-outline" onclick="browseScript()"><i data-lucide="folder-open"></i> Browse</button>
+    <h2>${isEdit
+      ? `<i data-lucide="pencil"></i> ${T('taskModal.editTitle')}`
+      : `<i data-lucide="plus-circle"></i> ${T('taskModal.newTitle')}`}</h2>
+
+    <div class="form-section">
+      <div class="form-group">
+        <label class="form-label" for="dlg-name">${T('taskModal.name')} *</label>
+        <input type="text" class="form-input" id="dlg-name" value="${isEdit ? escAttr(task.Name) : ''}" placeholder="${T('taskModal.namePlaceholder')}">
       </div>
-      <div class="script-hint">Supported: <code>.ps1</code> PowerShell, <code>.bat</code> <code>.cmd</code> Batch</div>
     </div>
-    <div id="script-mode-editor" style="display:none">
-      <div id="dialog-script-editor"></div>
-      <div id="script-file-path" class="script-path-display" style="display:none"></div>
+
+    <div class="form-section">
+      <div class="form-section-title"><i data-lucide="clock"></i> ${T('taskModal.scheduleSection')}</div>
+      <div id="smart-cron-container"></div>
     </div>
-    <label class="form-label">Arguments</label>
-    <input type="text" class="form-input" id="dlg-args" value="${isEdit ? escAttr(task.Arguments || '') : ''}" placeholder="-Param Value">
-    <label class="form-label">Working Directory</label>
-    <input type="text" class="form-input" id="dlg-workdir" data-path-input data-path-kind="directory" value="${isEdit ? escAttr(task.WorkingDirectory || '') : ''}"
-           data-path-input data-path-kind="directory">
-    <label class="form-label">Description</label>
-    <textarea class="form-input" id="dlg-desc" placeholder="Optional description">${isEdit ? escHtml(task.Description || '') : ''}</textarea>
-    <div class="checkbox-row">
-      <input type="checkbox" id="dlg-enabled" ${isEdit && !task.Enabled ? '' : 'checked'}>
-      <label for="dlg-enabled">Enable this task</label>
+
+    <div class="form-section">
+      <div class="form-section-title"><i data-lucide="terminal"></i> ${T('taskModal.whatSection')}</div>
+      <div class="script-mode-tabs">
+        <button class="script-mode-tab ${!hasInline ? 'active' : ''}" id="tab-file" onclick="scriptEditorSwitchMode('file')">
+          <i data-lucide="file-input"></i> ${T('taskModal.tabFile')}
+        </button>
+        <button class="script-mode-tab ${hasInline ? 'active' : ''}" id="tab-editor" onclick="scriptEditorSwitchMode('editor')">
+          <i data-lucide="code-2"></i> ${T('taskModal.tabEditor')}
+        </button>
+      </div>
+
+      <div id="script-mode-file">
+        <div class="input-row">
+          <input type="text" class="form-input" id="dlg-script" data-path-input data-path-kind="file" data-path-ext=".ps1,.bat,.cmd,.exe,.vbs,.py" value="${isEdit ? escAttr(task.ScriptPath || '') : ''}" placeholder="C:\\Scripts\\backup.ps1">
+          <button class="btn-outline" onclick="browseScript()"><i data-lucide="folder-open"></i> ${T('taskModal.browse')}</button>
+        </div>
+        <div class="form-hint">${i18n.t('taskModal.supported', {
+          ps1: '<code>.ps1</code>', bat: '<code>.bat</code>', cmd: '<code>.cmd</code>', exe: '<code>.exe</code>',
+        })}</div>
+      </div>
+
+      <div id="script-mode-editor" style="display:none">
+        <div id="dialog-script-editor"></div>
+        <div id="script-file-path" class="script-path-display" style="display:none"></div>
+      </div>
+
+      <div class="form-row" style="margin-top:14px">
+        <div class="form-group">
+          <label class="form-label" for="dlg-args">${T('taskModal.arguments')}</label>
+          <input type="text" class="form-input" id="dlg-args" value="${isEdit ? escAttr(task.Arguments || '') : ''}" placeholder="${T('taskModal.argumentsPlaceholder')}">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="dlg-workdir">${T('taskModal.workdir')}</label>
+          <input type="text" class="form-input" id="dlg-workdir" data-path-input data-path-kind="directory" value="${isEdit ? escAttr(task.WorkingDirectory || '') : ''}" placeholder="${T('taskModal.optional')}">
+        </div>
+      </div>
     </div>
+
+    <div class="form-section">
+      <div class="form-section-title"><i data-lucide="settings-2"></i> ${T('taskModal.optionsSection')}</div>
+      <div class="form-group">
+        <label class="form-label" for="dlg-desc">${T('taskModal.description')}</label>
+        <textarea class="form-input" id="dlg-desc" placeholder="${T('taskModal.descriptionPlaceholder')}">${isEdit ? escHtml(task.Description || '') : ''}</textarea>
+      </div>
+      <label class="check-row" for="dlg-enabled">
+        <input type="checkbox" id="dlg-enabled" ${isEdit && !task.Enabled ? '' : 'checked'}>
+        <span>${T('taskModal.enabled')}
+          <span class="check-hint">${T('taskModal.enabledHint')}</span>
+        </span>
+      </label>
+    </div>
+
     <div class="modal-actions">
-      <button class="btn-ghost" onclick="hideModal()">Cancel</button>
-      <button class="btn-glow" id="btn-save-task" onclick="saveTask(${isEdit ? `'${task.Id}'` : 'null'})">${isEdit ? '<i data-lucide="save"></i> Save Changes' : '<i data-lucide="plus"></i> Create Task'}</button>
+      <button class="btn-ghost" onclick="hideModal()">${T('taskModal.cancel')}</button>
+      <button class="btn-glow" id="btn-save-task" onclick="saveTask(${isEdit ? `'${task.Id}'` : 'null'})">${isEdit
+        ? `<i data-lucide="save"></i> ${T('taskModal.save')}`
+        : `<i data-lucide="plus"></i> ${T('taskModal.create')}`}</button>
     </div>
   `);
 
@@ -948,17 +990,17 @@ function renderServicesTable(services) {
     const isRunning = s.Status === 'Running';
     const isManaged = s.Name && s.Name.startsWith('Kyrion_');
     const cls = ['svc-row', isManaged ? 'kyrion-managed' : ''].filter(Boolean).join(' ');
-    return `<tr class="${cls}" onclick="editServiceScript('${escAttr(s.Name)}')" title="Clique para editar">
-      <td>${escHtml(s.Name)}${isManaged ? ' <span class="badge badge-info" style="font-size:9px;">gerenciado</span>' : ''}</td>
+    return `<tr class="${cls}" onclick="editServiceScript('${escAttr(s.Name)}')" title="${escHtml(i18n.t('svc.clickToEdit'))}">
+      <td>${escHtml(s.Name)}${isManaged ? `<span class="badge badge-info" style="font-size:9px;margin-left:6px">${escHtml(i18n.t('svc.managed'))}</span>` : ''}</td>
       <td><span class="badge badge-${isRunning ? 'success' : 'error'}">${escHtml(s.Status)}</span></td>
       <td>${escHtml(s.Application || '-')}</td>
       <td>${escHtml(s.StartupType)}</td>
       <td onclick="event.stopPropagation()">
-        ${!isRunning ? `<button class="btn-secondary-sm" onclick="svcAction('start','${escAttr(s.Name)}')" title="Iniciar"><i data-lucide="play"></i></button>` : ''}
-        ${isRunning ? `<button class="btn-secondary-sm" onclick="svcAction('stop','${escAttr(s.Name)}')" title="Parar"><i data-lucide="square"></i></button>` : ''}
-        <button class="btn-secondary-sm" onclick="svcAction('restart','${escAttr(s.Name)}')" title="Reiniciar"><i data-lucide="rotate-cw"></i></button>
-        <button class="btn-secondary-sm" onclick="cloneService('${escAttr(s.Name)}')" title="Duplicar serviço"><i data-lucide="copy"></i></button>
-        <button class="btn-danger" onclick="svcAction('uninstall','${escAttr(s.Name)}')" title="Remover serviço"><i data-lucide="trash-2"></i></button>
+        ${!isRunning ? `<button class="btn-secondary-sm" onclick="svcAction('start','${escAttr(s.Name)}')" title="${escHtml(i18n.t('svc.start'))}"><i data-lucide="play"></i></button>` : ''}
+        ${isRunning ? `<button class="btn-secondary-sm" onclick="svcAction('stop','${escAttr(s.Name)}')" title="${escHtml(i18n.t('svc.stop'))}"><i data-lucide="square"></i></button>` : ''}
+        <button class="btn-secondary-sm" onclick="svcAction('restart','${escAttr(s.Name)}')" title="${escHtml(i18n.t('svc.restart'))}"><i data-lucide="rotate-cw"></i></button>
+        <button class="btn-secondary-sm" onclick="cloneService('${escAttr(s.Name)}')" title="${escHtml(i18n.t('svc.clone'))}"><i data-lucide="copy"></i></button>
+        <button class="btn-danger" onclick="svcAction('uninstall','${escAttr(s.Name)}')" title="${escHtml(i18n.t('svc.remove'))}"><i data-lucide="trash-2"></i></button>
       </td>
     </tr>`;
   }).join('');
@@ -981,7 +1023,7 @@ async function refreshServices({ force = false } = {}) {
   else {
     const tbody = document.getElementById('services-body');
     if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="tbl-loading">
-      <i data-lucide="loader-circle"></i>Carregando serviços…</td></tr>`;
+      <i data-lucide="loader-circle"></i>${escHtml(i18n.t('svc.loading'))}</td></tr>`;
     lucide.createIcons();
   }
 
@@ -1018,31 +1060,31 @@ async function refreshKyrionBanner() {
       const running = s.status === 'Running';
       const alive = running && s.schedulerAlive;
       bannerStatus.innerHTML = `<span style="color:${alive ? 'var(--green)' : running ? 'var(--amber)' : 'var(--red)'}">\u25cf ${escHtml(s.status)}</span>`
-        + (running && !alive ? ' \u2014 agendador sem resposta' : '')
+        + (running && !alive ? ' \u2014 ' + escHtml(i18n.t('svc.schedulerUnresponsive')) : '')
         + ` \u2014 ${escHtml(s.serviceName)}`;
       bannerBtn.style.display = '';
-      bannerBtn.textContent = running ? 'Parar' : 'Iniciar';
+      bannerBtn.textContent = running ? i18n.t('svc.stop') : i18n.t('svc.start');
       bannerBtn.onclick = async () => {
         const r = running ? await window.api.stopKyrionService() : await window.api.startKyrionService();
-        showToast(r.message || (r.success ? 'Pronto' : 'Falhou'), r.success ? 'success' : 'error');
+        showToast(r.message || (r.success ? 'OK' : 'Erro'), r.success ? 'success' : 'error');
         refreshServices({ force: true });
       };
     } else if (s.nssmAvailable) {
-      bannerStatus.textContent = 'Não instalado \u2014 tarefas e backups rodam apenas com o app aberto';
+      bannerStatus.textContent = i18n.t('svc.notInstalled');
       bannerBtn.style.display = '';
-      bannerBtn.textContent = 'Instalar';
+      bannerBtn.textContent = i18n.t('svc.install');
       bannerBtn.onclick = async () => {
-        showToast('Instalando…', 'info');
+        showToast(i18n.t('dash.schedInstalling'), 'info');
         const r = await window.api.installKyrionService();
         showToast(r.message, r.success ? 'success' : 'error');
         refreshServices({ force: true });
       };
     } else {
-      bannerStatus.textContent = 'NSSM não disponível \u2014 instale o NSSM para usar o serviço em segundo plano';
+      bannerStatus.textContent = i18n.t('svc.nssmMissing');
       bannerBtn.style.display = 'none';
     }
   } catch (e) {
-    bannerStatus.textContent = 'Não foi possível consultar o serviço';
+    bannerStatus.textContent = i18n.t('svc.statusFailed');
   }
 }
 
@@ -1054,24 +1096,24 @@ async function refreshKyrionBanner() {
  */
 async function cloneService(serviceName) {
   const suggested = nextServiceCopyName(serviceName);
-  const newName = prompt(`Nome do novo serviço (cópia de "${serviceName}"):`, suggested);
+  const newName = prompt(i18n.t('svc.clonePrompt', { name: serviceName }), suggested);
   if (!newName || !newName.trim()) return;
 
   const name = newName.trim();
   if (servicesCache && servicesCache.some(s => s.Name.toLowerCase() === name.toLowerCase())) {
-    showToast(`Já existe um serviço chamado "${name}"`, 'error');
+    showToast(i18n.t('svc.cloneExists', { name }), 'error');
     return;
   }
 
-  showToast('Lendo a configuração do serviço…', 'info');
+  showToast(i18n.t('svc.cloneReading'), 'info');
   const source = await window.api.getServiceParams(serviceName);
   if (!source.success) {
-    showToast(source.message || 'Não foi possível ler o serviço de origem', 'error');
+    showToast(source.message || i18n.t('svc.cloneFailed'), 'error');
     return;
   }
 
   const p = source.params || {};
-  showToast(`Criando "${name}"…`, 'info');
+  showToast(i18n.t('svc.cloneCreating', { name }), 'info');
   const result = await window.api.installService({
     name,
     appPath: p.Application,
@@ -1082,21 +1124,21 @@ async function cloneService(serviceName) {
   });
 
   if (result.success) {
-    showToast(`Serviço "${name}" criado (inicialização manual)`, 'success');
+    showToast(i18n.t('svc.cloneCreated', { name }), 'success');
     servicesCache = null;
     await refreshServices({ force: true });
     editServiceScript(name);
   } else {
-    showToast(result.message || 'Falha ao duplicar o serviço', 'error');
+    showToast(result.message || i18n.t('svc.cloneFailed'), 'error');
   }
 }
 
 function nextServiceCopyName(baseName) {
-  const base = String(baseName || 'Servico').replace(/_copia(\d+)?$/i, '');
+  const base = String(baseName || 'Service').replace(/_copy(\d+)?$/i, '');
   const taken = new Set((servicesCache || []).map(s => s.Name.toLowerCase()));
-  let candidate = `${base}_copia`;
+  let candidate = `${base}_copy`;
   let n = 2;
-  while (taken.has(candidate.toLowerCase())) candidate = `${base}_copia${n++}`;
+  while (taken.has(candidate.toLowerCase())) candidate = `${base}_copy${n++}`;
   return candidate;
 }
 
@@ -1288,21 +1330,52 @@ async function confirmSvcUninstall(name) {
 }
 
 document.getElementById('btn-install-service').addEventListener('click', () => {
+  const T = (k) => escHtml(i18n.t(k));
   showModal(`
-    <h2><i data-lucide="server"></i> Install NSSM Service</h2>
-    <label class="form-label">Service Name *</label>
-    <input type="text" class="form-input" id="dlg-svc-name" placeholder="MyService">
-    <label class="form-label">Application Path *</label>
-    <input type="text" class="form-input" id="dlg-svc-app" data-path-input data-path-kind="file" data-path-ext=".exe,.bat,.cmd,.ps1" placeholder="C:\app\service.exe">
-    <label class="form-label">Arguments</label>
-    <input type="text" class="form-input" id="dlg-svc-args">
-    <label class="form-label">Startup Directory</label>
-    <input type="text" class="form-input" id="dlg-svc-workdir" data-path-input data-path-kind="directory">
-    <label class="form-label">Startup Type</label>
-    <select class="form-input" id="dlg-svc-startup"><option>Automatic</option><option>Manual</option><option>Disabled</option></select>
+    <h2><i data-lucide="server"></i> ${T('svcModal.title')}</h2>
+
+    <div class="form-section">
+      <div class="form-section-title"><i data-lucide="tag"></i> ${T('svcModal.identitySection')}</div>
+      <div class="form-group">
+        <label class="form-label" for="dlg-svc-name">${T('svcModal.name')} *</label>
+        <input type="text" class="form-input" id="dlg-svc-name" placeholder="${T('svcModal.namePlaceholder')}">
+        <div class="form-hint">${T('svcModal.nameHint')}</div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title"><i data-lucide="terminal"></i> ${T('svcModal.whatSection')}</div>
+      <div class="form-group">
+        <label class="form-label" for="dlg-svc-app">${T('svcModal.executable')} *</label>
+        <input type="text" class="form-input" id="dlg-svc-app" data-path-input data-path-kind="file" data-path-ext=".exe,.bat,.cmd,.ps1" placeholder="C:\\app\\servico.exe">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="dlg-svc-args">${T('svcModal.arguments')}</label>
+          <input type="text" class="form-input" id="dlg-svc-args" placeholder="${T('taskModal.optional')}">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="dlg-svc-workdir">${T('svcModal.workdir')}</label>
+          <input type="text" class="form-input" id="dlg-svc-workdir" data-path-input data-path-kind="directory" placeholder="${T('taskModal.optional')}">
+        </div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title"><i data-lucide="power"></i> ${T('svcModal.startupSection')}</div>
+      <div class="form-group">
+        <label class="form-label" for="dlg-svc-startup">${T('svcModal.startupWhen')}</label>
+        <select class="form-input" id="dlg-svc-startup">
+          <option value="Automatic">${T('svcModal.startupAuto')}</option>
+          <option value="Manual">${T('svcModal.startupManual')}</option>
+          <option value="Disabled">${T('svcModal.startupDisabled')}</option>
+        </select>
+      </div>
+    </div>
+
     <div class="modal-actions">
-      <button class="btn-ghost" onclick="hideModal()">Cancel</button>
-      <button class="btn-glow" onclick="installService()"><i data-lucide="download"></i> Install</button>
+      <button class="btn-ghost" onclick="hideModal()">${T('taskModal.cancel')}</button>
+      <button class="btn-glow" onclick="installService()"><i data-lucide="download"></i> ${T('svcModal.install')}</button>
     </div>
   `);
 });
@@ -1593,7 +1666,7 @@ document.getElementById('cfg-start-minimized').addEventListener('change', async 
   } else {
     await window.api.setSetting('StartMinimized', e.target.checked);
   }
-  showToast(e.target.checked ? 'Iniciará minimizado na bandeja' : 'Iniciará com a janela aberta', 'info');
+  showToast(i18n.t(e.target.checked ? 'settings.willStartMinimized' : 'settings.willStartWindowed'), 'info');
 });
 
 document.getElementById('cfg-notifications').addEventListener('change', async (e) => {
@@ -2083,7 +2156,7 @@ document.getElementById('cfg-language').addEventListener('change', async (e) => 
   i18n.setLang(lang);
   await window.api.setSetting('Language', lang);
   applyTranslations();
-  showToast(lang === 'pt-BR' ? 'Idioma alterado para Português' : 'Language changed to English', 'info');
+  showToast(i18n.t('lang.changed'), 'info');
 });
 
 // Initialize i18n on load
@@ -2105,18 +2178,18 @@ async function refreshWebAccess() {
     document.getElementById('oauth-callback-hint').textContent = base + '/auth/github/callback';
 
     if (!cfg.users.length) {
-      list.innerHTML = '<div style="color:var(--amber);font-size:12px;padding:10px 0">Nenhuma conta autorizada — ninguém consegue entrar na interface web.</div>';
+      list.innerHTML = `<div style="color:var(--amber);font-size:12px;padding:10px 0">${escHtml(i18n.t('webAccess.noUsers'))}</div>`;
       return;
     }
     list.innerHTML = cfg.users.map(u => `
       <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--glass-border)">
         <i data-lucide="user" style="width:14px;height:14px;color:var(--text3)"></i>
         <span style="flex:1;font-size:12.5px;color:var(--text2)">${escHtml(u)}</span>
-        <button class="btn-danger" data-rm-gh="${escHtml(u)}">Remover</button>
+        <button class="btn-danger" data-rm-gh="${escHtml(u)}">${escHtml(i18n.t('webAccess.remove'))}</button>
       </div>`).join('');
     lucide.createIcons();
   } catch (err) {
-    list.innerHTML = `<div style="color:var(--red);font-size:12px">Erro: ${escHtml(err.message)}</div>`;
+    list.innerHTML = `<div style="color:var(--red);font-size:12px">${escHtml(i18n.t('webAccess.error'))}: ${escHtml(err.message)}</div>`;
   }
 }
 
@@ -2130,10 +2203,10 @@ async function saveWebAccessFields() {
   });
   if (result.success) {
     secretEl.value = '';
-    showToast('Configuração de acesso salva', 'success');
+    showToast(i18n.t('webAccess.saved'), 'success');
     refreshWebAccess();
   } else {
-    showToast(result.message || 'Falha ao salvar', 'error');
+    showToast(result.message || i18n.t('webAccess.saveFailed'), 'error');
   }
 }
 
@@ -2144,7 +2217,7 @@ async function saveWebAccessFields() {
   const input = document.getElementById('gh-user-input');
   const add = async () => {
     const result = await window.api.addWebUser(input.value);
-    if (result.success) { input.value = ''; showToast('Conta autorizada', 'success'); refreshWebAccess(); }
+    if (result.success) { input.value = ''; showToast(i18n.t('webAccess.userAdded'), 'success'); refreshWebAccess(); }
     else showToast(result.message, 'error');
   };
   addBtn.addEventListener('click', add);
@@ -2154,9 +2227,9 @@ async function saveWebAccessFields() {
     const btn = e.target.closest('[data-rm-gh]');
     if (!btn) return;
     const login = btn.getAttribute('data-rm-gh');
-    if (!confirm(`Remover "${login}"? As sessões web dessa conta serão encerradas imediatamente.`)) return;
+    if (!confirm(i18n.t('webAccess.removeConfirm', { login }))) return;
     await window.api.removeWebUser(login);
-    showToast('Acesso revogado', 'success');
+    showToast(i18n.t('webAccess.userRemoved'), 'success');
     refreshWebAccess();
   });
 

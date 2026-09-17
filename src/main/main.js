@@ -727,6 +727,26 @@ function registerIPC() {
   // ─── Backup Profiles ───
   ipcMain.handle('get-db-engines', () => require('./db').list());
 
+  // ─── Schedule conflicts ───
+  // Two heavy jobs in the same minute is a real operational problem; the UI
+  // warns before saving rather than leaving it to be discovered at 02:00.
+  ipcMain.handle('check-schedule-conflicts', (e, expression, excludeId) => {
+    try {
+      const advisor = require('./scheduleAdvisor');
+      const schedules = advisor.collectSchedules(
+        taskManager.getAllTasks(),
+        backupManager ? backupManager.getAllProfiles() : []
+      );
+      const conflicts = advisor.findConflicts(cronParser, expression, schedules, { excludeId });
+      const suggestion = conflicts.length
+        ? advisor.suggestFreeSlot(cronParser, expression, schedules, { excludeId })
+        : null;
+      return { success: true, conflicts, suggestion, totalScheduled: schedules.length };
+    } catch (err) {
+      return { success: false, conflicts: [], suggestion: null, message: err.message };
+    }
+  });
+
   // ─── Windows path completion (used by every path field) ───
   ipcMain.handle('suggest-path', (e, input, options) => {
     try { return require('./pathSuggest').suggest(input, options || {}); }

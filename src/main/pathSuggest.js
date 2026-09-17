@@ -141,15 +141,16 @@ function suggest(input, options = {}) {
 function validate(input, options = {}) {
   const kind = options.kind || 'any';
   const full = expandEnv(input || '').trim();
-  if (!full) return { exists: false, message: '' };
+  if (!full) return { exists: false, messageKey: '' };
 
   let stat;
   try { stat = fs.statSync(full); }
-  catch (e) { return { exists: false, message: 'Este caminho não existe' }; }
+  // Return a key, not a sentence: the renderer owns the language.
+  catch (e) { return { exists: false, messageKey: 'path.notFound' }; }
 
   const directory = stat.isDirectory();
-  if (kind === 'directory' && !directory) return { exists: true, valid: false, directory, message: 'É um arquivo; informe uma pasta' };
-  if (kind === 'file' && directory) return { exists: true, valid: false, directory, message: 'É uma pasta; informe um arquivo' };
+  if (kind === 'directory' && !directory) return { exists: true, valid: false, directory, messageKey: 'path.expectedFolder' };
+  if (kind === 'file' && directory) return { exists: true, valid: false, directory, messageKey: 'path.expectedFile' };
 
   return { exists: true, valid: true, directory, resolved: full, size: directory ? null : stat.size };
 }
