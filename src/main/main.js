@@ -239,6 +239,27 @@ function initComponents() {
   logger.audit('APP_STARTED', { targetType: 'app', after: { version: app.getVersion() } });
 }
 
+/**
+ * Start or stop the GUI's web interface to match scheduler ownership.
+ * Only the process actually running the jobs serves the web UI, which keeps
+ * the two from racing for the port and means the page always reflects the
+ * process doing the work.
+ */
+function syncWebInterface() {
+  const enabled = config.getSetting('ApiEnabled', false);
+  const shouldHost = enabled && scheduler && scheduler.isOwner;
+
+  if (shouldHost && (!apiServer || !apiServer.isRunning())) {
+    apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator, backupManager);
+    apiServer.start()
+      .then((info) => logger.log('INFO', `Web interface started on ${info.url}`))
+      .catch((err) => logger.error('Web interface failed to start', err));
+  } else if (!shouldHost && apiServer && apiServer.isRunning()) {
+    logger.log('INFO', 'Handing the web interface to the service');
+    apiServer.stop().catch(() => {});
+  }
+}
+
 // ─── GUI scheduler ───
 // Same engine the service runs. It only executes when it holds the ownership
 // lease, so with the service installed the GUI stays a passive viewer and jobs
@@ -266,6 +287,7 @@ Duration: ${(result && result.duration) || '-'}`,
         if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('data-updated');
       },
       onOwnershipChange: (isOwner) => {
+        syncWebInterface();
         if (mainWindow && mainWindow.webContents) {
           mainWindow.webContents.send('scheduler-ownership-changed', { isOwner });
         }
@@ -855,7 +877,7 @@ function registerIPC() {
   ipcMain.handle('api-server-start', async (e, port) => {
     try {
       if (apiServer && apiServer.isRunning()) return { success: false, message: 'API server already running' };
-      apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator);
+      apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator, backupManager);
       const result = await apiServer.start(port);
       config.setSetting('ApiEnabled', true);
       if (port) config.setSetting('ApiPort', port);
@@ -1043,6 +1065,71 @@ function registerIPC() {
     }
   });
 
+  // ─── Web access control (GitHub allowlist) ───
+  ipcMain.handle('get-web-access', () => {
+    const raw = config.getSetting('WebAllowedUsers', []);
+    const users = Array.isArray(raw) ? raw : String(raw || '').split(/[\s,;]+/).filter(Boolean);
+    return {
+      clientId: config.getSetting('GithubClientId', ''),
+      // Never send the secret back to the renderer; only whether one is set.
+      hasClientSecret: !!config.getSetting('GithubClientSecret', ''),
+      baseUrl: config.getSetting('WebBaseUrl', ''),
+      bindAll: config.getSetting('ApiBindAll', false),
+      port: config.getSetting('ApiPort', 7600),
+      users,
+    };
+  });
+
+  ipcMain.handle('set-web-access', (e, data) => {
+    try {
+      if (data.clientId !== undefined) config.setSetting('GithubClientId', String(data.clientId).trim());
+      // An empty string means "leave the stored secret alone".
+      if (data.clientSecret) config.setSetting('GithubClientSecret', String(data.clientSecret).trim());
+      if (data.baseUrl !== undefined) config.setSetting('WebBaseUrl', String(data.baseUrl).trim());
+      if (data.bindAll !== undefined) config.setSetting('ApiBindAll', !!data.bindAll);
+      logger.audit('WEB_ACCESS_SETTINGS_CHANGED', {
+        targetType: 'web',
+        after: { clientId: config.getSetting('GithubClientId', ''), bindAll: config.getSetting('ApiBindAll', false) },
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  });
+
+  ipcMain.handle('add-web-user', (e, login) => {
+    const name = String(login || '').trim().replace(/^@/, '');
+    if (!name) return { success: false, message: 'Informe um login do GitHub' };
+    if (!/^[A-Za-z0-9-]{1,39}$/.test(name)) {
+      return { success: false, message: 'Login do GitHub inválido' };
+    }
+    const raw = config.getSetting('WebAllowedUsers', []);
+    const users = Array.isArray(raw) ? raw.slice() : [];
+    if (users.some(u => u.toLowerCase() === name.toLowerCase())) {
+      return { success: false, message: 'Esse login já está na lista' };
+    }
+    users.push(name);
+    config.setSetting('WebAllowedUsers', users);
+    logger.audit('WEB_USER_ALLOWED', { targetType: 'web', target: name, after: { login: name } });
+    return { success: true, users };
+  });
+
+  ipcMain.handle('remove-web-user', (e, login) => {
+    const name = String(login || '').trim();
+    const raw = config.getSetting('WebAllowedUsers', []);
+    const users = (Array.isArray(raw) ? raw : []).filter(u => u.toLowerCase() !== name.toLowerCase());
+    config.setSetting('WebAllowedUsers', users);
+    // Kick the account out now rather than letting its session run its course.
+    if (apiServer && apiServer.auth) apiServer.auth.revokeUser(name);
+    logger.audit('WEB_USER_REVOKED', { targetType: 'web', target: name, before: { login: name } });
+    return { success: true, users };
+  });
+
+  ipcMain.handle('get-web-sessions', () => {
+    if (!apiServer || !apiServer.auth) return { success: true, sessions: [] };
+    return { success: true, sessions: apiServer.auth.listSessions() };
+  });
+
   ipcMain.handle('start-kyrion-service', async () => kyrionService.start());
   ipcMain.handle('stop-kyrion-service', async () => kyrionService.stop());
 
@@ -1102,14 +1189,10 @@ app.whenReady().then(() => {
     createTray();
     startScheduler();
 
-    // Start API server if enabled
-    const apiEnabled = config.getSetting('ApiEnabled', false);
-    if (apiEnabled) {
-      apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator);
-      apiServer.start().catch(err => {
-        logger.error('API Server failed to start', err);
-      });
-    }
+    // The web interface is hosted by whichever process owns the scheduler.
+    // With the service installed that is the service, so the GUI must not try
+    // to bind the same port - see syncWebInterface().
+    syncWebInterface();
 
     const startWithWin = config.getSetting('StartWithWindows', false);
     const currentLogin = app.getLoginItemSettings().openAtLogin;

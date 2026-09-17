@@ -1716,3 +1716,83 @@ document.getElementById('cfg-language').addEventListener('change', async (e) => 
 
 // Initialize i18n on load
 initI18n();
+
+// ─── Web Access (GitHub sign-in allowlist) ───
+async function refreshWebAccess() {
+  const list = document.getElementById('gh-users-list');
+  if (!list) return;
+  try {
+    const cfg = await window.api.getWebAccess();
+
+    document.getElementById('cfg-gh-client-id').value = cfg.clientId || '';
+    document.getElementById('cfg-gh-client-secret').placeholder = cfg.hasClientSecret ? '•••••••• (salvo)' : '••••••••••••';
+    document.getElementById('cfg-web-base-url').value = cfg.baseUrl || '';
+    document.getElementById('cfg-api-bind-all').checked = !!cfg.bindAll;
+
+    const base = (cfg.baseUrl || `http://localhost:${cfg.port || 7600}`).replace(/\/+$/, '');
+    document.getElementById('oauth-callback-hint').textContent = base + '/auth/github/callback';
+
+    if (!cfg.users.length) {
+      list.innerHTML = '<div style="color:var(--amber);font-size:12px;padding:10px 0">Nenhuma conta autorizada — ninguém consegue entrar na interface web.</div>';
+      return;
+    }
+    list.innerHTML = cfg.users.map(u => `
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--glass-border)">
+        <i data-lucide="user" style="width:14px;height:14px;color:var(--text3)"></i>
+        <span style="flex:1;font-size:12.5px;color:var(--text2)">${escHtml(u)}</span>
+        <button class="btn-danger" data-rm-gh="${escHtml(u)}">Remover</button>
+      </div>`).join('');
+    lucide.createIcons();
+  } catch (err) {
+    list.innerHTML = `<div style="color:var(--red);font-size:12px">Erro: ${escHtml(err.message)}</div>`;
+  }
+}
+
+async function saveWebAccessFields() {
+  const secretEl = document.getElementById('cfg-gh-client-secret');
+  const result = await window.api.setWebAccess({
+    clientId: document.getElementById('cfg-gh-client-id').value,
+    clientSecret: secretEl.value,   // empty keeps the stored one
+    baseUrl: document.getElementById('cfg-web-base-url').value,
+    bindAll: document.getElementById('cfg-api-bind-all').checked,
+  });
+  if (result.success) {
+    secretEl.value = '';
+    showToast('Configuração de acesso salva', 'success');
+    refreshWebAccess();
+  } else {
+    showToast(result.message || 'Falha ao salvar', 'error');
+  }
+}
+
+(function wireWebAccess() {
+  const addBtn = document.getElementById('btn-add-gh-user');
+  if (!addBtn) return;
+
+  const input = document.getElementById('gh-user-input');
+  const add = async () => {
+    const result = await window.api.addWebUser(input.value);
+    if (result.success) { input.value = ''; showToast('Conta autorizada', 'success'); refreshWebAccess(); }
+    else showToast(result.message, 'error');
+  };
+  addBtn.addEventListener('click', add);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
+
+  document.getElementById('gh-users-list').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-rm-gh]');
+    if (!btn) return;
+    const login = btn.getAttribute('data-rm-gh');
+    if (!confirm(`Remover "${login}"? As sessões web dessa conta serão encerradas imediatamente.`)) return;
+    await window.api.removeWebUser(login);
+    showToast('Acesso revogado', 'success');
+    refreshWebAccess();
+  });
+
+  ['cfg-gh-client-id', 'cfg-web-base-url'].forEach(id => {
+    document.getElementById(id).addEventListener('change', saveWebAccessFields);
+  });
+  document.getElementById('cfg-gh-client-secret').addEventListener('change', saveWebAccessFields);
+  document.getElementById('cfg-api-bind-all').addEventListener('change', saveWebAccessFields);
+
+  refreshWebAccess();
+})();

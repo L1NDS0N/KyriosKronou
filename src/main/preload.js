@@ -114,6 +114,11 @@ contextBridge.exposeInMainWorld('api', {
   startKyrionService: () => ipcRenderer.invoke('start-kyrion-service'),
   stopKyrionService: () => ipcRenderer.invoke('stop-kyrion-service'),
   getSchedulerOwnership: () => ipcRenderer.invoke('get-scheduler-ownership'),
+  getWebAccess: () => ipcRenderer.invoke('get-web-access'),
+  setWebAccess: (data) => ipcRenderer.invoke('set-web-access', data),
+  addWebUser: (login) => ipcRenderer.invoke('add-web-user', login),
+  removeWebUser: (login) => ipcRenderer.invoke('remove-web-user', login),
+  getWebSessions: () => ipcRenderer.invoke('get-web-sessions'),
   onSchedulerOwnershipChanged: (cb) => ipcRenderer.on('scheduler-ownership-changed', (_e, data) => cb(data)),
 
   // Events

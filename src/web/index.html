@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Κύριος Χρόνος</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="bg-effects"><div class="moon"></div><div class="dot-field"></div></div>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div class="brand-name">Κύριος Χρόνος</div>
+    </div>
+
+    <div class="nav-item active" data-page="monitor">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+      Monitor
+    </div>
+    <div class="nav-item" data-page="tasks">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      Tarefas
+    </div>
+    <div class="nav-item" data-page="backups">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>
+      Backups
+    </div>
+    <div class="nav-item" data-page="history">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3v6h6"/><path d="M3.5 9a9 9 0 1 0 2.1-3.4L3 9"/><path d="M12 8v4l3 2"/></svg>
+      Histórico
+    </div>
+    <div class="nav-item" data-page="logs">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+      Logs
+    </div>
+
+    <div class="sidebar-spacer"></div>
+
+    <div class="sidebar-user" id="user-box">
+      <img id="user-avatar" alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">
+      <div class="sidebar-user-meta">
+        <div class="sidebar-user-name" id="user-name">—</div>
+        <div class="sidebar-user-login" id="user-login"></div>
+      </div>
+    </div>
+    <div class="nav-item" id="btn-logout">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>
+      Sair
+    </div>
+  </aside>
+
+  <main class="main">
+    <!-- ═══ MONITOR ═══ -->
+    <section class="page active" id="page-monitor">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Monitor de recursos</div>
+          <div class="page-sub" id="host-line">—</div>
+        </div>
+        <div class="row-gap">
+          <span class="badge badge-info" id="monitor-state">conectando</span>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card stat-blue"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="s-cpu">—<small>%</small></div><div class="stat-label">CPU</div>
+          <div class="stat-sub" id="s-cpu-sub">—</div></div></div>
+        <div class="stat-card stat-green"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="s-mem">—<small>%</small></div><div class="stat-label">Memória</div>
+          <div class="stat-sub" id="s-mem-sub">—</div></div></div>
+        <div class="stat-card stat-amber"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="s-disk">—</div><div class="stat-label">Disco I/O</div>
+          <div class="stat-sub" id="s-disk-sub">—</div></div></div>
+        <div class="stat-card stat-cyan"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="s-net">—</div><div class="stat-label">Rede</div>
+          <div class="stat-sub" id="s-net-sub">—</div></div></div>
+      </div>
+
+      <div class="monitor-grid">
+        <div class="glass-card chart-card">
+          <div class="chart-head"><span class="chart-title">CPU</span><span class="chart-now" id="c-cpu">—</span></div>
+          <canvas class="chart-canvas" id="chart-cpu"></canvas>
+          <div class="chart-legend"><span><i class="legend-dot" style="background:var(--primary)"></i>uso total</span></div>
+        </div>
+
+        <div class="glass-card chart-card">
+          <div class="chart-head"><span class="chart-title">Memória</span><span class="chart-now" id="c-mem">—</span></div>
+          <canvas class="chart-canvas" id="chart-mem"></canvas>
+          <div class="chart-legend"><span><i class="legend-dot" style="background:var(--green)"></i>em uso</span></div>
+        </div>
+
+        <div class="glass-card chart-card">
+          <div class="chart-head"><span class="chart-title">Disco — leitura e escrita</span><span class="chart-now" id="c-disk">—</span></div>
+          <canvas class="chart-canvas" id="chart-disk"></canvas>
+          <div class="chart-legend">
+            <span><i class="legend-dot" style="background:var(--amber)"></i>leitura</span>
+            <span><i class="legend-dot" style="background:var(--red)"></i>escrita</span>
+          </div>
+        </div>
+
+        <div class="glass-card chart-card">
+          <div class="chart-head"><span class="chart-title">Rede — tráfego</span><span class="chart-now" id="c-net">—</span></div>
+          <canvas class="chart-canvas" id="chart-net"></canvas>
+          <div class="chart-legend">
+            <span><i class="legend-dot" style="background:var(--cyan)"></i>recebido</span>
+            <span><i class="legend-dot" style="background:var(--primary-light)"></i>enviado</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-card">
+        <div class="glass-card-header"><h3>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/></svg>
+          Uso de disco</h3></div>
+        <div class="glass-card-body" id="volumes"><div class="tbl-loading">carregando</div></div>
+      </div>
+    </section>
+
+    <!-- ═══ TAREFAS ═══ -->
+    <section class="page" id="page-tasks">
+      <div class="page-head">
+        <div><div class="page-title">Tarefas</div><div class="page-sub" id="tasks-sub">—</div></div>
+        <button class="btn-ghost" id="btn-reload-tasks">Atualizar</button>
+      </div>
+      <div class="glass-card">
+        <table class="tbl">
+          <thead><tr><th>Nome</th><th>Cron</th><th>Script</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="tasks-body"><tr><td colspan="5" class="tbl-loading">carregando</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ═══ BACKUPS ═══ -->
+    <section class="page" id="page-backups">
+      <div class="page-head">
+        <div><div class="page-title">Perfis de backup</div><div class="page-sub" id="backups-sub">—</div></div>
+        <button class="btn-ghost" id="btn-reload-backups">Atualizar</button>
+      </div>
+      <div class="glass-card">
+        <table class="tbl">
+          <thead><tr><th>Perfil</th><th>Servidor</th><th>Bancos</th><th>Cron</th><th>Último</th><th></th></tr></thead>
+          <tbody id="backups-body"><tr><td colspan="6" class="tbl-loading">carregando</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ═══ HISTÓRICO ═══ -->
+    <section class="page" id="page-history">
+      <div class="page-head">
+        <div><div class="page-title">Histórico de execuções</div><div class="page-sub">Tarefas executadas recentemente</div></div>
+        <button class="btn-ghost" id="btn-reload-history">Atualizar</button>
+      </div>
+      <div class="glass-card">
+        <table class="tbl">
+          <thead><tr><th>Quando</th><th>Tarefa</th><th>Status</th><th>Duração</th><th>Mensagem</th></tr></thead>
+          <tbody id="history-body"><tr><td colspan="5" class="tbl-loading">carregando</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ═══ LOGS ═══ -->
+    <section class="page" id="page-logs">
+      <div class="page-head">
+        <div><div class="page-title">Logs</div><div class="page-sub">Inclui o que o serviço executou em segundo plano</div></div>
+        <button class="btn-ghost" id="btn-reload-logs">Atualizar</button>
+      </div>
+      <div class="glass-card" id="logs-card"><div class="tbl-loading">carregando</div></div>
+    </section>
+  </main>
+</div>
+
+<div class="toast-host" id="toasts"></div>
+<script src="/app.js"></script>
+</body>
+</html>

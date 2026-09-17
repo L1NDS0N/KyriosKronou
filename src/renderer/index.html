@@ -319,19 +319,19 @@
               </div>
             </div>
             <div class="glass-card settings-card">
-              <div class="glass-card-header"><h3><i data-lucide="globe"></i> API Server</h3></div>
+              <div class="glass-card-header"><h3><i data-lucide="globe"></i> Web Interface</h3></div>
               <div class="settings-body">
                 <div class="toggle-row">
                   <div class="toggle-info">
-                    <div class="toggle-label">Enable REST API</div>
-                    <div class="toggle-desc">Start an HTTP server for managing tasks via API and web dashboard</div>
+                    <div class="toggle-label">Enable web interface</div>
+                    <div class="toggle-desc">Serves the web UI and REST API. Hosted by the Windows service when it is installed, so it stays reachable after you log off.</div>
                   </div>
                   <label class="toggle-switch"><input type="checkbox" id="cfg-api-enabled"><span class="toggle-slider"></span></label>
                 </div>
                 <div class="toggle-row">
                   <div class="toggle-info">
-                    <div class="toggle-label">API Port</div>
-                    <div class="toggle-desc">HTTP port for the API server (default: 7600)</div>
+                    <div class="toggle-label">Port</div>
+                    <div class="toggle-desc">HTTP port for the web interface (default: 7600)</div>
                   </div>
                   <input type="number" class="form-input" id="cfg-api-port" value="7600" min="1024" max="65535" style="width:80px;text-align:center">
                 </div>
@@ -344,6 +344,60 @@
                 </div>
               </div>
             </div>
+
+            <div class="glass-card settings-card" style="grid-column:1/-1">
+              <div class="glass-card-header"><h3><i data-lucide="github"></i> Web Access &mdash; GitHub Sign-in</h3></div>
+              <div class="settings-body">
+                <p style="color:var(--text3);font-size:13px;margin-bottom:14px">
+                  The web interface requires a GitHub account, so every change it makes is recorded against a real person.
+                  Create an OAuth App at <span class="mono" style="color:var(--text2)">github.com/settings/developers</span> and set its
+                  callback URL to <span class="mono" id="oauth-callback-hint" style="color:var(--text2)">http://localhost:7600/auth/github/callback</span>.
+                </p>
+
+                <div class="toggle-row">
+                  <div class="toggle-info">
+                    <div class="toggle-label">Client ID</div>
+                    <div class="toggle-desc">From your GitHub OAuth App</div>
+                  </div>
+                  <input type="text" class="form-input" id="cfg-gh-client-id" placeholder="Iv1.xxxxxxxxxxxx" style="width:280px">
+                </div>
+
+                <div class="toggle-row">
+                  <div class="toggle-info">
+                    <div class="toggle-label">Client Secret</div>
+                    <div class="toggle-desc">Stored in this machine's configuration file</div>
+                  </div>
+                  <input type="password" class="form-input" id="cfg-gh-client-secret" placeholder="••••••••••••" style="width:280px">
+                </div>
+
+                <div class="toggle-row">
+                  <div class="toggle-info">
+                    <div class="toggle-label">Public address</div>
+                    <div class="toggle-desc">Optional. Set this when reaching the server by name or through a proxy, so GitHub returns to the right host.</div>
+                  </div>
+                  <input type="text" class="form-input" id="cfg-web-base-url" placeholder="http://servidor:7600" style="width:280px">
+                </div>
+
+                <div class="toggle-row">
+                  <div class="toggle-info">
+                    <div class="toggle-label">Reachable from other machines</div>
+                    <div class="toggle-desc">Off by default: the interface listens only on this machine. Turn on to expose it to the network.</div>
+                  </div>
+                  <label class="toggle-switch"><input type="checkbox" id="cfg-api-bind-all"><span class="toggle-slider"></span></label>
+                </div>
+
+                <div style="margin-top:18px;border-top:1px solid var(--glass-border);padding-top:16px">
+                  <div class="toggle-label" style="margin-bottom:6px">Allowed GitHub accounts</div>
+                  <div class="toggle-desc" style="margin-bottom:10px">Nobody can sign in until a login is added here &mdash; including you. Removing a login ends its active sessions immediately.</div>
+                  <div style="display:flex;gap:8px;margin-bottom:12px">
+                    <input type="text" class="form-input" id="gh-user-input" placeholder="login do GitHub" style="flex:1" autocomplete="off">
+                    <button class="btn-primary" id="btn-add-gh-user">Add</button>
+                  </div>
+                  <div id="gh-users-list"></div>
+                </div>
+              </div>
+            </div>
+
             <div class="glass-card settings-card" style="grid-column:1/-1">
               <div class="glass-card-header"><h3><i data-lucide="server"></i> Kyrios Chronos Scheduler Service</h3></div>
               <div class="settings-body">

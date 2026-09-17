@@ -24,6 +24,7 @@ const CronParser = require('./cronParser');
 const TaskManager = require('./taskManager');
 const BackupManager = require('./backupManager');
 const { SchedulerCore, ROLE_SERVICE, releaseOwnership } = require('./schedulerCore');
+const ApiServer = require('./apiServer');
 
 function bootstrap() {
   paths.ensureDirs();
@@ -49,10 +50,25 @@ function bootstrap() {
     ROLE_SERVICE
   ).start();
 
+  // ─── Web interface ───
+  // Hosted by the service, not the desktop app: on a server nobody is logged
+  // in, so a web UI that only ran inside the GUI would be unreachable exactly
+  // when it is most needed.
+  let apiServer = null;
+  if (config.getSetting('ApiEnabled', false)) {
+    apiServer = new ApiServer(taskManager, config, logger, null, null, backupManager);
+    apiServer.start()
+      .then((info) => logger.log('INFO', `Web interface listening on ${info.url} (bound to ${info.host})`))
+      .catch((err) => logger.error('Web interface failed to start', err));
+  } else {
+    logger.log('INFO', 'Web interface disabled (enable it in the desktop app under Settings)');
+  }
+
   const shutdown = (signal) => {
     logger.log('INFO', `Service stopping (${signal})`);
     logger.audit('SERVICE_STOPPED', { targetType: 'service', before: { pid: process.pid } });
     try { scheduler.stop(); } catch (e) {}
+    if (apiServer) { try { apiServer.stop(); } catch (e) {} }
     try { fs.unlinkSync(pidFile); } catch (e) {}
     try { logger.flush(); } catch (e) {}
     process.exit(0);
@@ -81,7 +97,7 @@ function bootstrap() {
   logger.log('INFO', 'Scheduler loop running (15s interval)');
   logger.flush();
 
-  return { scheduler, logger, taskManager, backupManager, config };
+  return { scheduler, logger, taskManager, backupManager, config, apiServer };
 }
 
 // Only bootstrap when executed directly, so tests can require this file.

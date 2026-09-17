@@ -1,64 +1,282 @@
-// apiServer.js - HTTP API Server + Web Dashboard for Kyrios Chronos
+// apiServer.js - HTTP API + web interface for Kyrios Chronos.
+//
+// Runs in the desktop app and in the Windows service, so it must not require
+// anything from electron.
+//
+// Access is gated by GitHub sign-in (see webAuth.js) and every mutating call is
+// attributed to the signed-in account, which is the point: the audit log has to
+// name a person, not just an IP.
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 
+const WebAuth = require('./webAuth');
+const SystemMetrics = require('./systemMetrics');
+
+// Paths that must work before anyone is signed in.
+const PUBLIC_PATHS = new Set(['/login', '/style.css', '/api/health', '/favicon.ico']);
+
 class ApiServer {
-  constructor(taskManager, config, logger, serviceManager, wrapperGenerator) {
+  constructor(taskManager, config, logger, serviceManager, wrapperGenerator, backupManager) {
     this.taskManager = taskManager;
     this.config = config;
     this.logger = logger;
     this.serviceManager = serviceManager;
     this.wrapperGenerator = wrapperGenerator;
+    this.backupManager = backupManager;
+
     this.app = express();
     this.server = null;
     this.port = config.getSetting('ApiPort', 7600);
     this.apiKey = config.getSetting('ApiKey', '');
+
+    this.auth = new WebAuth(config, logger);
+    this.metrics = new SystemMetrics(logger, {
+      intervalMs: config.getSetting('MetricsIntervalMs', SystemMetrics.DEFAULT_INTERVAL_MS),
+    });
+    this.sseClients = new Set();
+
+    this.webRoot = this._resolveWebRoot();
     this.setupMiddleware();
     this.setupRoutes();
   }
 
+  _resolveWebRoot() {
+    const candidates = [
+      path.join(__dirname, '..', 'web'),
+      path.join(process.resourcesPath || '', 'app.asar', 'src', 'web'),
+      path.join(process.resourcesPath || '', 'app', 'src', 'web'),
+    ];
+    for (const dir of candidates) {
+      try { if (fs.existsSync(path.join(dir, 'index.html'))) return dir; } catch (e) {}
+    }
+    return candidates[0];
+  }
+
+  /**
+   * Read a web asset. Files are read through fs rather than express.static
+   * because they live inside app.asar in a packaged build, and reading them
+   * directly is the one approach that works identically in both layouts.
+   */
+  _asset(name) {
+    try { return fs.readFileSync(path.join(this.webRoot, name), 'utf8'); }
+    catch (e) { return null; }
+  }
+
+  _sendAsset(res, name, type) {
+    const body = this._asset(name);
+    if (body == null) return res.status(500).type('text/plain').send(`Web asset missing: ${name}`);
+    res.type(type).send(body);
+  }
+
+  /** The signed-in GitHub account for this request, as an audit actor. */
+  _actor(req) {
+    const user = req.kyriosUser;
+    return {
+      actor: user ? `${user.login} (github:${user.id})` : 'anonymous',
+      actorLogin: user ? user.login : null,
+      ip: req.ip || (req.socket && req.socket.remoteAddress) || 'unknown',
+      via: 'web',
+    };
+  }
+
+  _audit(req, action, details) {
+    this.logger.audit(action, Object.assign({}, details, this._actor(req)));
+  }
+
   setupMiddleware() {
-    this.app.use(cors());
+    this.app.set('trust proxy', true);
+    this.app.use(cors({ origin: false, credentials: true }));
     this.app.use(express.json({ limit: '10mb' }));
     this.app.use(express.urlencoded({ extended: true }));
-
-    // API key auth (optional)
-    this.app.use('/api', (req, res, next) => {
-      if (this.apiKey && req.headers['x-api-key'] !== this.apiKey) {
-        return res.status(401).json({ error: 'Unauthorized', message: 'Provide X-API-Key header' });
-      }
-      next();
-    });
 
     // Request logging
     this.app.use((req, res, next) => {
       const start = Date.now();
       res.on('finish', () => {
         const ms = Date.now() - start;
-        this.logger.log('API', `${req.method} ${req.originalUrl} → ${res.statusCode} (${ms}ms)`);
+        const who = req.kyriosUser ? ` [${req.kyriosUser.login}]` : '';
+        this.logger.log('API', `${req.method} ${req.originalUrl} -> ${res.statusCode} (${ms}ms)${who}`);
       });
       next();
+    });
+
+    // ─── Authentication gate ───
+    this.app.use((req, res, next) => {
+      const routePath = req.path;
+      if (PUBLIC_PATHS.has(routePath) || routePath.startsWith('/auth/')) return next();
+
+      // A machine-to-machine caller may still use the API key, so existing
+      // integrations keep working without a browser.
+      if (this.apiKey && req.headers['x-api-key'] === this.apiKey) {
+        req.kyriosUser = { login: 'api-key', id: 0, name: 'API key client' };
+        return next();
+      }
+
+      const user = this.auth.authenticate(req);
+      if (user) { req.kyriosUser = user; return next(); }
+
+      if (routePath.startsWith('/api/')) {
+        return res.status(401).json({ error: 'Unauthorized', message: 'Sign in with GitHub, or send a valid X-API-Key header.' });
+      }
+      return res.redirect('/login');
     });
   }
 
   setupRoutes() {
-    // ─── Health ───
+    this._authRoutes();
+    this._webRoutes();
+    this._metricsRoutes();
+    this._taskRoutes();
+    this._backupRoutes();
+    this._miscRoutes();
+  }
+
+  // ─── GitHub sign-in ───
+  _authRoutes() {
+    const callbackUrl = (req) => {
+      const configured = (this.config.getSetting('WebBaseUrl', '') || '').trim();
+      const base = configured || `${req.protocol}://${req.get('host')}`;
+      return `${base.replace(/\/+$/, '')}/auth/github/callback`;
+    };
+
+    this.app.get('/login', (req, res) => {
+      if (this.auth.authenticate(req)) return res.redirect('/');
+      // Redirect once to surface the configuration problem. Without the
+      // req.query.problem check this redirects to itself forever and the
+      // browser gives up with ERR_TOO_MANY_REDIRECTS.
+      const problem = this.auth.configurationProblem();
+      if (problem && !req.query.problem && !req.query.error && !req.query.notice) {
+        return res.redirect('/login?problem=' + encodeURIComponent(problem));
+      }
+      this._sendAsset(res, 'login.html', 'html');
+    });
+
+    this.app.get('/auth/github', (req, res) => {
+      if (!this.auth.isConfigured()) {
+        return res.redirect('/login?problem=' + encodeURIComponent(this.auth.configurationProblem()));
+      }
+      res.redirect(this.auth.buildAuthorizeUrl(callbackUrl(req), req.query.next || '/'));
+    });
+
+    this.app.get('/auth/github/callback', async (req, res) => {
+      const { code, state } = req.query;
+      const entry = this.auth.consumeState(state);
+      if (!entry) return res.redirect('/login?error=state');
+      if (!code) return res.redirect('/login?error=failed');
+
+      try {
+        const token = await this.auth.exchangeCodeForToken(code, callbackUrl(req));
+        const user = await this.auth.fetchGithubUser(token);
+        const ip = req.ip || 'unknown';
+
+        if (!this.auth.isAllowed(user.login)) {
+          // A refused attempt is exactly the kind of thing an audit log is for.
+          this.logger.audit('WEB_LOGIN_DENIED', {
+            targetType: 'web', target: user.login,
+            after: { login: user.login, id: user.id }, actor: `${user.login} (github:${user.id})`, ip, via: 'web',
+          });
+          this.logger.log('WARN', `Web sign-in refused for GitHub user "${user.login}" from ${ip} (not on the allowed list)`);
+          return res.redirect('/login?error=denied&login=' + encodeURIComponent(user.login));
+        }
+
+        const sid = this.auth.createSession(user, ip);
+        this.auth.setSessionCookie(res, sid);
+        this.logger.audit('WEB_LOGIN', {
+          targetType: 'web', target: user.login,
+          after: { login: user.login, id: user.id }, actor: `${user.login} (github:${user.id})`, ip, via: 'web',
+        });
+        this.logger.log('INFO', `Web sign-in: ${user.login} from ${ip}`);
+        res.redirect(entry.redirectTo || '/');
+      } catch (err) {
+        this.logger.error('GitHub sign-in failed', err);
+        res.redirect('/login?error=failed');
+      }
+    });
+
+    this.app.post('/auth/logout', (req, res) => {
+      const user = this.auth.authenticate(req);
+      if (user) {
+        this.auth.destroySession(user.sid);
+        this.logger.audit('WEB_LOGOUT', {
+          targetType: 'web', target: user.login,
+          actor: `${user.login} (github:${user.id})`, ip: req.ip, via: 'web',
+        });
+      }
+      this.auth.clearSessionCookie(res);
+      res.json({ success: true });
+    });
+  }
+
+  // ─── Static web interface ───
+  _webRoutes() {
+    this.app.get('/style.css', (req, res) => this._sendAsset(res, 'style.css', 'css'));
+    this.app.get('/app.js', (req, res) => this._sendAsset(res, 'app.js', 'application/javascript'));
+    this.app.get('/', (req, res) => this._sendAsset(res, 'index.html', 'html'));
+    this.app.get('/dashboard', (req, res) => res.redirect('/'));
+
+    this.app.get('/api/me', (req, res) => {
+      const u = req.kyriosUser;
+      res.json({ login: u.login, id: u.id, name: u.name, avatar: u.avatar || '' });
+    });
+  }
+
+  // ─── Resource monitor ───
+  _metricsRoutes() {
+    this.app.get('/api/metrics', (req, res) => {
+      const limit = parseInt(req.query.limit, 10) || 300;
+      const current = this.metrics.current();
+      res.json(Object.assign({ history: this.metrics.getHistory(limit) }, current));
+    });
+
+    // Server-sent events: one long-lived connection per viewer, pushed from the
+    // single sampler rather than polled per client.
+    this.app.get('/api/metrics/stream', (req, res) => {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      res.write('retry: 5000\n\n');
+
+      const send = (sample) => {
+        try { res.write(`event: sample\ndata: ${JSON.stringify(sample)}\n\n`); } catch (e) {}
+      };
+      if (this.metrics.latest) send(this.metrics.latest);
+
+      this.metrics.on('sample', send);
+      this.sseClients.add(res);
+
+      // Keep intermediaries from closing an idle connection.
+      const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch (e) {} }, 25000);
+
+      const cleanup = () => {
+        clearInterval(ping);
+        this.metrics.removeListener('sample', send);
+        this.sseClients.delete(res);
+      };
+      req.on('close', cleanup);
+      req.on('error', cleanup);
+    });
+  }
+
+  // ─── Tasks ───
+  _taskRoutes() {
     this.app.get('/api/health', (req, res) => {
       res.json({
         status: 'ok',
         version: require('../../package.json').version,
         uptime: process.uptime(),
         tasks: this.taskManager.getAllTasks().length,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
     });
 
-    // ─── Tasks CRUD ───
     this.app.get('/api/tasks', (req, res) => {
       let tasks = this.taskManager.getAllTasks();
-      // Filter by query params
       if (req.query.enabled !== undefined) {
         const enabled = req.query.enabled === 'true';
         tasks = tasks.filter(t => t.Enabled === enabled);
@@ -68,8 +286,7 @@ class ApiServer {
         tasks = tasks.filter(t =>
           (t.Name || '').toLowerCase().includes(q) ||
           (t.CronExpression || '').toLowerCase().includes(q) ||
-          (t.ScriptPath || '').toLowerCase().includes(q)
-        );
+          (t.ScriptPath || '').toLowerCase().includes(q));
       }
       res.json({ success: true, data: tasks, count: tasks.length });
     });
@@ -85,91 +302,79 @@ class ApiServer {
       if (!Name || !CronExpression || !ScriptPath) {
         return res.status(400).json({ error: 'Missing required fields: Name, CronExpression, ScriptPath' });
       }
-      // Validate cron
-      const validation = this.config._cronParser ? this.config._cronParser.validate(CronExpression) : { valid: true };
-      // Try to use the cronParser from taskManager
       const result = this.taskManager.addTask({
         Name, CronExpression, ScriptPath,
         Arguments: Arguments || '',
         WorkingDirectory: WorkingDirectory || '',
         Description: Description || '',
-        Enabled: Enabled !== false
+        Enabled: Enabled !== false,
       });
-      if (result.success === false) {
-        return res.status(400).json({ error: result.message || 'Failed to create task' });
-      }
-      this.logger.audit('TASK_CREATED_API', { targetType: 'task', target: result.Id, before: null, after: { Name, CronExpression } });
+      if (result.success === false) return res.status(400).json({ error: result.message || 'Failed to create task' });
+      this._audit(req, 'TASK_CREATED_WEB', { targetType: 'task', target: result.Id, before: null, after: { Name, CronExpression } });
       res.status(201).json({ success: true, data: result });
     });
 
     this.app.put('/api/tasks/:id', (req, res) => {
       const existing = this.taskManager.getTask(req.params.id);
       if (!existing) return res.status(404).json({ error: 'Task not found' });
-      const data = { ...existing, ...req.body, Id: req.params.id };
+      const data = Object.assign({}, existing, req.body, { Id: req.params.id });
       const result = this.taskManager.updateTask(data);
-      if (result.success === false) {
-        return res.status(400).json({ error: result.message || 'Failed to update task' });
-      }
-      this.logger.audit('TASK_UPDATED_API', { targetType: 'task', target: req.params.id, before: { Name: existing.Name }, after: { Name: data.Name } });
+      if (result.success === false) return res.status(400).json({ error: result.message || 'Failed to update task' });
+      this._audit(req, 'TASK_UPDATED_WEB', {
+        targetType: 'task', target: req.params.id,
+        before: { Name: existing.Name, CronExpression: existing.CronExpression, Enabled: existing.Enabled },
+        after: { Name: data.Name, CronExpression: data.CronExpression, Enabled: data.Enabled },
+      });
       res.json({ success: true, data: result });
     });
 
     this.app.delete('/api/tasks/:id', (req, res) => {
       const existing = this.taskManager.getTask(req.params.id);
       if (!existing) return res.status(404).json({ error: 'Task not found' });
-      const result = this.taskManager.deleteTask(req.params.id);
-      this.logger.audit('TASK_DELETED_API', { targetType: 'task', target: req.params.id, before: { Name: existing.Name }, after: null });
+      this.taskManager.deleteTask(req.params.id);
+      this._audit(req, 'TASK_DELETED_WEB', { targetType: 'task', target: req.params.id, before: { Name: existing.Name }, after: null });
       res.json({ success: true, message: `Task "${existing.Name}" deleted` });
     });
 
-    // ─── Execute Task ───
     this.app.post('/api/tasks/:id/run', async (req, res) => {
       const task = this.taskManager.getTask(req.params.id);
       if (!task) return res.status(404).json({ error: 'Task not found' });
       try {
         const result = await this.taskManager.executeTask(task);
-        this.logger.audit('TASK_EXECUTED_API', { targetType: 'task', target: req.params.id, after: result });
+        this._audit(req, 'TASK_EXECUTED_WEB', { targetType: 'task', target: req.params.id, after: { Status: result.Status, Duration: result.Duration } });
         res.json({ success: true, data: result });
       } catch (e) {
         res.status(500).json({ error: e.message });
       }
     });
 
-    // ─── History ───
     this.app.get('/api/history', (req, res) => {
       let history = this.taskManager.history || [];
-      if (req.query.taskId) {
-        history = history.filter(h => h.TaskId === req.query.taskId);
-      }
-      if (req.query.limit) {
-        history = history.slice(-parseInt(req.query.limit));
-      }
+      if (req.query.taskId) history = history.filter(h => h.TaskId === req.query.taskId);
+      const limit = parseInt(req.query.limit, 10);
+      if (limit) history = history.slice(0, limit);
       res.json({ success: true, data: history, count: history.length });
     });
 
-    // ─── Script Attach/Detach ───
     this.app.post('/api/tasks/:id/attach', (req, res) => {
       const task = this.taskManager.getTask(req.params.id);
       if (!task) return res.status(404).json({ error: 'Task not found' });
       const { ScriptPath, Arguments, WorkingDirectory } = req.body;
       if (!ScriptPath) return res.status(400).json({ error: 'ScriptPath is required' });
-      const update = {
-        ...task,
+      const result = this.taskManager.updateTask(Object.assign({}, task, {
         ScriptPath,
         Arguments: Arguments || task.Arguments,
-        WorkingDirectory: WorkingDirectory || task.WorkingDirectory
-      };
-      const result = this.taskManager.updateTask(update);
-      this.logger.audit('SCRIPT_ATTACHED_API', { targetType: 'task', target: task.Id, before: { ScriptPath: task.ScriptPath }, after: { ScriptPath } });
+        WorkingDirectory: WorkingDirectory || task.WorkingDirectory,
+      }));
+      this._audit(req, 'SCRIPT_ATTACHED_WEB', { targetType: 'task', target: task.Id, before: { ScriptPath: task.ScriptPath }, after: { ScriptPath } });
       res.json({ success: true, data: result, message: `Script attached: ${ScriptPath}` });
     });
 
     this.app.delete('/api/tasks/:id/attach', (req, res) => {
       const task = this.taskManager.getTask(req.params.id);
       if (!task) return res.status(404).json({ error: 'Task not found' });
-      const update = { ...task, ScriptPath: '', Arguments: '', WorkingDirectory: '' };
-      const result = this.taskManager.updateTask(update);
-      this.logger.audit('SCRIPT_DETACHED_API', { targetType: 'task', target: task.Id, before: { ScriptPath: task.ScriptPath }, after: { ScriptPath: '' } });
+      this.taskManager.updateTask(Object.assign({}, task, { ScriptPath: '', Arguments: '', WorkingDirectory: '' }));
+      this._audit(req, 'SCRIPT_DETACHED_WEB', { targetType: 'task', target: task.Id, before: { ScriptPath: task.ScriptPath }, after: { ScriptPath: '' } });
       res.json({ success: true, message: `Script detached from "${task.Name}"` });
     });
 
@@ -179,64 +384,103 @@ class ApiServer {
       res.json({
         success: true,
         data: {
-          taskId: task.Id,
-          taskName: task.Name,
-          scriptPath: task.ScriptPath,
-          arguments: task.Arguments,
-          workingDirectory: task.WorkingDirectory,
-          exists: task.ScriptPath ? fs.existsSync(task.ScriptPath) : false
-        }
+          taskId: task.Id, taskName: task.Name, scriptPath: task.ScriptPath,
+          arguments: task.Arguments, workingDirectory: task.WorkingDirectory,
+          exists: task.ScriptPath ? fs.existsSync(task.ScriptPath) : false,
+        },
       });
     });
+  }
 
-    // ─── Services ───
+  // ─── Backups ───
+  _backupRoutes() {
+    const guard = (res) => {
+      if (!this.backupManager) { res.status(503).json({ error: 'Backup manager unavailable' }); return false; }
+      return true;
+    };
+
+    this.app.get('/api/backups', (req, res) => {
+      if (!guard(res)) return;
+      // Passwords never leave the machine through this API.
+      const data = this.backupManager.getAllProfiles().map(p => Object.assign({}, p, { Password: undefined }));
+      res.json({ success: true, data, count: data.length });
+    });
+
+    this.app.get('/api/backups/history', (req, res) => {
+      if (!guard(res)) return;
+      const limit = parseInt(req.query.limit, 10) || 100;
+      const history = (this.backupManager.history || []).slice(0, limit);
+      res.json({ success: true, data: history, count: history.length });
+    });
+
+    this.app.post('/api/backups/:id/run', async (req, res) => {
+      if (!guard(res)) return;
+      const profile = this.backupManager.getProfile(req.params.id);
+      if (!profile) return res.status(404).json({ error: 'Backup profile not found' });
+      try {
+        const result = await this.backupManager.executeBackup(req.params.id);
+        this._audit(req, 'BACKUP_EXECUTED_WEB', {
+          targetType: 'backup', target: req.params.id,
+          after: { profile: profile.Name, success: result.success, duration: result.duration },
+        });
+        res.json({ success: true, data: result });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+  }
+
+  // ─── Everything else ───
+  _miscRoutes() {
+    this.app.get('/api/logs', (req, res) => {
+      const limit = parseInt(req.query.limit, 10) || 200;
+      // From disk, so the web UI also sees what the service did.
+      const logs = this.logger.getRecentLogsFromDisk
+        ? this.logger.getRecentLogsFromDisk(limit)
+        : this.logger.getRecentLogs(limit);
+      res.json({ success: true, data: logs, count: logs.length });
+    });
+
     this.app.get('/api/services', (req, res) => {
-      const services = this.serviceManager.getAllServices();
+      const services = this.serviceManager ? this.serviceManager.getAllServices() : [];
       res.json({ success: true, data: services, count: services.length });
     });
 
-    // ─── Config ───
     this.app.get('/api/config', (req, res) => {
       res.json({
         success: true,
         data: {
           profiles: this.config.getProfileList(),
           activeProfile: this.config.getSetting('_activeProfile', 'default'),
-          settings: {
-            notifications: this.config.getSetting('Notifications', true),
-            apiPort: this.port
-          }
-        }
+          settings: { notifications: this.config.getSetting('Notifications', true), apiPort: this.port },
+        },
       });
     });
 
-    // ─── Cron Validation ───
+    // API reference page, kept from the previous server.
+    this.app.get('/docs', (req, res) => res.type('html').send(this.getDocsHTML()));
+
     this.app.post('/api/validate-cron', (req, res) => {
       const { expression } = req.body;
       if (!expression) return res.status(400).json({ error: 'expression is required' });
       try {
         const cronParser = this.taskManager.cronParser;
         const result = cronParser.validate(expression);
-        const desc = cronParser.getDescription(expression);
-        const nextRun = cronParser.getNextRunTime(expression);
-        res.json({ success: true, valid: result.valid, description: desc, nextRun: nextRun ? nextRun.toISOString() : null, errors: result.errors || [] });
+        res.json({
+          success: true, valid: result.valid,
+          description: cronParser.getDescription(expression),
+          nextRun: (cronParser.getNextRunTime(expression) || {}).toISOString
+            ? cronParser.getNextRunTime(expression).toISOString() : null,
+          errors: result.errors || [],
+        });
       } catch (e) {
         res.json({ success: true, valid: false, description: 'Invalid', errors: [e.message] });
       }
     });
 
-    // ─── API Documentation ───
-    this.app.get('/docs', (req, res) => {
-      res.type('html').send(this.getDocsHTML());
-    });
-
-    // ─── Web Dashboard ───
-    this.app.get('/', (req, res) => {
-      res.type('html').send(this.getDashboardHTML());
-    });
-
-    this.app.get('/dashboard', (req, res) => {
-      res.type('html').send(this.getDashboardHTML());
+    this.app.use((req, res) => {
+      if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
+      res.redirect('/');
     });
   }
 
@@ -244,18 +488,22 @@ class ApiServer {
     return new Promise((resolve, reject) => {
       try {
         this.port = port || this.port;
-        this.server = this.app.listen(this.port, '0.0.0.0', () => {
-          this.logger.log('API', `API Server started on http://localhost:${this.port}`);
-          this.logger.log('API', `Web Dashboard: http://localhost:${this.port}/`);
-          this.logger.log('API', `API Docs: http://localhost:${this.port}/docs`);
-          resolve({ success: true, port: this.port, url: `http://localhost:${this.port}` });
+        // Loopback-only unless explicitly opened up: a scheduler that can run
+        // arbitrary scripts should not be reachable from the whole network by
+        // accident.
+        const host = this.config.getSetting('ApiBindAll', false) ? '0.0.0.0' : '127.0.0.1';
+
+        this.server = this.app.listen(this.port, host, () => {
+          this.metrics.start();
+          this.logger.log('API', `Web interface on http://${host === '0.0.0.0' ? 'localhost' : host}:${this.port}/`);
+          const problem = this.auth.configurationProblem();
+          if (problem) this.logger.log('WARN', `Web interface: ${problem}`);
+          resolve({ success: true, port: this.port, host, url: `http://localhost:${this.port}` });
         });
+
         this.server.on('error', (err) => {
-          if (err.code === 'EADDRINUSE') {
-            reject(new Error(`Port ${this.port} is already in use`));
-          } else {
-            reject(err);
-          }
+          if (err.code === 'EADDRINUSE') reject(new Error(`Port ${this.port} is already in use`));
+          else reject(err);
         });
       } catch (e) {
         reject(e);
@@ -265,9 +513,14 @@ class ApiServer {
 
   stop() {
     return new Promise((resolve) => {
+      this.metrics.stop();
+      this.auth.dispose();
+      for (const client of this.sseClients) { try { client.end(); } catch (e) {} }
+      this.sseClients.clear();
+
       if (this.server) {
         this.server.close(() => {
-          this.logger.log('API', 'API Server stopped');
+          this.logger.log('API', 'Web interface stopped');
           this.server = null;
           resolve({ success: true });
         });
@@ -278,201 +531,9 @@ class ApiServer {
   }
 
   isRunning() {
-    return this.server && this.server.listening;
+    return !!(this.server && this.server.listening);
   }
 
-  // ─── Web Dashboard HTML ───
-  getDashboardHTML() {
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Kyrios Chronos Dashboard</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-:root{--bg:#08080c;--card:#0f0f14;--border:rgba(255,255,255,.06);--text:#c0c0d0;--text2:#808094;--primary:#6a5acd;--green:#6a8a6e;--red:#8a5a5a;--amber:#8a7a5a}
-body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
-.container{max-width:1000px;margin:0 auto;padding:24px}
-h1{font-size:22px;font-weight:600;margin-bottom:20px;background:linear-gradient(135deg,var(--primary),#8a7acd);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
-.stat{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;text-align:center}
-.stat-num{font-size:28px;font-weight:700;margin:4px 0}
-.stat-label{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text2)}
-.toolbar{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
-input,select{background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:13px;outline:none}
-input:focus{border-color:var(--primary)}
-button{background:var(--primary);color:#fff;border:none;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:500;transition:opacity .2s}
-button:hover{opacity:.85}
-.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}
-.btn-danger{background:var(--red)}
-.btn-success{background:var(--green)}
-table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden}
-th{text-align:left;padding:12px 16px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text2);background:rgba(255,255,255,.02);border-bottom:1px solid var(--border)}
-td{padding:10px 16px;border-bottom:1px solid var(--border);font-size:13px}
-tr:last-child td{border-bottom:none}
-.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500}
-.badge-green{background:rgba(106,138,110,.15);color:var(--green)}
-.badge-red{background:rgba(138,90,90,.15);color:var(--red)}
-.badge-gray{background:rgba(255,255,255,.05);color:var(--text2)}
-.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;justify-content:center;align-items:center}
-.modal-overlay.active{display:flex}
-.modal{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;width:90%;max-width:500px}
-.modal h2{font-size:16px;margin-bottom:16px}
-.form-group{margin-bottom:12px}
-.form-group label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);margin-bottom:4px}
-.form-group input,.form-group select{width:100%}
-.modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
-pre{background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px;overflow-x:auto;color:var(--text);margin:12px 0}
-code{background:rgba(255,255,255,.06);padding:1px 4px;border-radius:3px;font-size:12px}
-.toast{position:fixed;bottom:20px;right:20px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 20px;font-size:13px;z-index:200;animation:slideIn .3s}
-@keyframes slideIn{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
-</style>
-</head>
-<body>
-<div class="container">
-  <h1>⚙ Kyrios Chronos Dashboard</h1>
-  <div class="stats">
-    <div class="stat"><div class="stat-label">Total Tasks</div><div class="stat-num" id="stat-total">-</div></div>
-    <div class="stat"><div class="stat-label">Active</div><div class="stat-num" id="stat-active" style="color:var(--green)">-</div></div>
-    <div class="stat"><div class="stat-label">Disabled</div><div class="stat-num" id="stat-disabled" style="color:var(--red)">-</div></div>
-    <div class="stat"><div class="stat-label">Services</div><div class="stat-num" id="stat-services" style="color:var(--amber)">-</div></div>
-  </div>
-  <div class="toolbar">
-    <button onclick="showCreateModal()">+ New Task</button>
-    <button class="btn-outline" onclick="loadTasks()">↻ Refresh</button>
-    <input type="text" id="search" placeholder="Search tasks..." oninput="filterTasks()" style="flex:1">
-    <a href="/docs" class="btn-outline" style="padding:8px 16px;text-decoration:none;display:inline-flex;align-items:center;border-radius:8px">API Docs</a>
-  </div>
-  <table>
-    <thead><tr><th>Name</th><th>Cron</th><th>Script</th><th>Status</th><th>Actions</th></tr></thead>
-    <tbody id="tasks-body"></tbody>
-  </table>
-</div>
-<div class="modal-overlay" id="modal">
-  <div class="modal">
-    <h2 id="modal-title">New Task</h2>
-    <div class="form-group"><label>Name *</label><input type="text" id="f-name" placeholder="My Task"></div>
-    <div class="form-group"><label>Cron Expression *</label><input type="text" id="f-cron" placeholder="0 5 * * *" oninput="validateCronLive()"><small id="f-cron-desc" style="color:var(--text2);font-size:11px"></small></div>
-    <div class="form-group"><label>Script Path *</label><input type="text" id="f-script" placeholder="C:\\Scripts\\task.ps1"></div>
-    <div class="form-group"><label>Arguments</label><input type="text" id="f-args" placeholder="-Param1 value"></div>
-    <div class="form-group"><label>Working Directory</label><input type="text" id="f-workdir" placeholder="C:\\Scripts"></div>
-    <div class="form-group"><label>Description</label><input type="text" id="f-desc" placeholder="Optional description"></div>
-    <div class="modal-actions">
-      <button class="btn-outline" onclick="hideModal()">Cancel</button>
-      <button id="btn-save" onclick="saveTask()">Save</button>
-    </div>
-  </div>
-</div>
-<script>
-let tasks=[],editingId=null;
-const API=window.location.origin+'/api';
-async function loadTasks(){
-  try{
-    const r=await fetch(API+'/tasks');const d=await r.json();
-    tasks=d.data||[];
-    renderTasks();
-    document.getElementById('stat-total').textContent=tasks.length;
-    document.getElementById('stat-active').textContent=tasks.filter(t=>t.Enabled).length;
-    document.getElementById('stat-disabled').textContent=tasks.filter(t=>!t.Enabled).length;
-    const sr=await fetch(API+'/services');const sd=await sr.json();
-    document.getElementById('stat-services').textContent=sd.count||0;
-  }catch(e){toast('Failed to load: '+e.message)}
-}
-function renderTasks(filter=''){
-  const q=(filter||document.getElementById('search').value).toLowerCase();
-  let list=tasks;
-  if(q)list=list.filter(t=>(t.Name||'').toLowerCase().includes(q)||(t.CronExpression||'').toLowerCase().includes(q)||(t.ScriptPath||'').toLowerCase().includes(q));
-  const tbody=document.getElementById('tasks-body');
-  if(!list.length){tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:40px">No tasks found</td></tr>';return}
-  tbody.innerHTML=list.map(t=>'<tr>'+
-    '<td><strong>'+esc(t.Name)+'</strong></td>'+
-    '<td><code>'+esc(t.CronExpression)+'</code></td>'+
-    '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">'+esc(t.ScriptPath||'—')+'</td>'+
-    '<td><span class="badge '+(t.Enabled?'badge-green':'badge-red')+'">'+(t.Enabled?'Active':'Disabled')+'</span></td>'+
-    '<td style="white-space:nowrap">'+
-      '<button class="btn-outline" style="padding:4px 8px;font-size:11px" onclick="runTask(\''+t.Id+'\')">▶ Run</button> '+
-      '<button class="btn-outline" style="padding:4px 8px;font-size:11px" onclick="editTask(\''+t.Id+'\')">✎ Edit</button> '+
-      '<button class="btn-danger" style="padding:4px 8px;font-size:11px" onclick="deleteTask(\''+t.Id+'\\',\\''+esc(t.Name)+'\')">✕</button>'+
-    '</td></tr>').join('');
-}
-function filterTasks(){renderTasks()}
-function showCreateModal(){
-  editingId=null;
-  document.getElementById('modal-title').textContent='New Task';
-  ['f-name','f-cron','f-script','f-args','f-workdir','f-desc'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('f-cron-desc').textContent='';
-  document.getElementById('modal').classList.add('active');
-  document.getElementById('f-name').focus();
-}
-function editTask(id){
-  const t=tasks.find(x=>x.Id===id);if(!t)return;
-  editingId=id;
-  document.getElementById('modal-title').textContent='Edit Task';
-  document.getElementById('f-name').value=t.Name||'';
-  document.getElementById('f-cron').value=t.CronExpression||'';
-  document.getElementById('f-script').value=t.ScriptPath||'';
-  document.getElementById('f-args').value=t.Arguments||'';
-  document.getElementById('f-workdir').value=t.WorkingDirectory||'';
-  document.getElementById('f-desc').value=t.Description||'';
-  validateCronLive();
-  document.getElementById('modal').classList.add('active');
-}
-function hideModal(){document.getElementById('modal').classList.remove('active')}
-async function saveTask(){
-  const data={
-    Name:document.getElementById('f-name').value.trim(),
-    CronExpression:document.getElementById('f-cron').value.trim(),
-    ScriptPath:document.getElementById('f-script').value.trim(),
-    Arguments:document.getElementById('f-args').value.trim(),
-    WorkingDirectory:document.getElementById('f-workdir').value.trim(),
-    Description:document.getElementById('f-desc').value.trim()
-  };
-  if(!data.Name||!data.CronExpression||!data.ScriptPath){toast('Name, Cron, and Script are required','error');return}
-  try{
-    const url=editingId?API+'/tasks/'+editingId:API+'/tasks';
-    const method=editingId?'PUT':'POST';
-    const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-    const d=await r.json();
-    if(d.error){toast(d.error,'error');return}
-    toast(editingId?'Task updated':'Task created');
-    hideModal();loadTasks();
-  }catch(e){toast('Error: '+e.message,'error')}
-}
-async function deleteTask(id,name){
-  if(!confirm('Delete "'+name+'"?'))return;
-  try{await fetch(API+'/tasks/'+id,{method:'DELETE'});toast('Task deleted');loadTasks()}catch(e){toast(e.message,'error')}
-}
-async function runTask(id){
-  try{toast('Running...');const r=await fetch(API+'/tasks/'+id+'/run',{method:'POST'});const d=await r.json();
-    toast(d.data?(d.data.Status+' ('+d.data.Duration+')'):'Done',d.data&&d.data.Status==='Success'?'success':'error');
-    loadTasks();}catch(e){toast(e.message,'error')}
-}
-let cronTimer=null;
-function validateCronLive(){
-  clearTimeout(cronTimer);
-  const v=document.getElementById('f-cron').value;
-  const desc=document.getElementById('f-cron-desc');
-  if(!v){desc.textContent='';return}
-  cronTimer=setTimeout(async()=>{
-    try{const r=await fetch(API+'/validate-cron',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expression:v})});
-      const d=await r.json();desc.textContent=d.valid?'✓ '+d.description:'✕ '+((d.errors||[]).join(', ')||'Invalid');desc.style.color=d.valid?'var(--green)':'var(--red)';
-    }catch(e){desc.textContent=''}
-  },300);
-}
-function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
-function toast(msg,type){
-  const t=document.createElement('div');t.className='toast';
-  t.style.borderColor=type==='error'?'var(--red)':type==='success'?'var(--green)':'var(--border)';
-  t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),3000);
-}
-document.getElementById('modal').addEventListener('click',e=>{if(e.target===e.currentTarget)hideModal()});
-document.addEventListener('keydown',e=>{if(e.key==='Escape')hideModal();if(e.key==='Enter'&&document.getElementById('modal').classList.contains('active'))saveTask()});
-loadTasks();
-</script>
-</body></html>`;
-  }
-
-  // ─── API Documentation HTML ───
   getDocsHTML() {
     return `<!DOCTYPE html>
 <html lang="en">
