@@ -1114,3 +1114,101 @@ kbd {
    screen never goes blank waiting on the service control manager. */
 .svc-refreshing { opacity: .8; }
 .svc-refreshing::before { content: ''; width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--glass-border2); border-top-color: var(--text2); animation: spin .8s linear infinite; background: none; }
+
+/* ═══ PATH AUTOCOMPLETE ═══ */
+/* The list is appended to <body> and positioned against the viewport so it is
+   never clipped by a modal's overflow. */
+.path-ac-list {
+  position: fixed; z-index: 4000; max-height: 260px; overflow-y: auto;
+  background: var(--bg3); border: 1px solid var(--glass-border2);
+  border-radius: var(--radius-xs); box-shadow: 0 12px 40px rgba(0,0,0,.55);
+  padding: 4px;
+}
+.path-ac-item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 10px; border-radius: 6px; cursor: pointer;
+  font-size: 12px; color: var(--text2); font-family: var(--mono);
+  white-space: nowrap; overflow: hidden;
+}
+.path-ac-item:hover, .path-ac-item.active { background: var(--glass2); color: var(--text); }
+.path-ac-icon { font-size: 11px; opacity: .75; flex-shrink: 0; }
+.path-ac-name { overflow: hidden; text-overflow: ellipsis; }
+.path-ac-hint { margin-left: auto; font-size: 10.5px; color: var(--text3); flex-shrink: 0; }
+.path-ac-empty { padding: 12px; font-size: 11.5px; color: var(--text3); text-align: center; }
+
+.form-input.path-invalid { border-color: rgba(138,90,90,.4); }
+.form-input.path-valid { border-color: rgba(106,138,110,.28); }
+.path-status { font-size: 11px; margin-top: 4px; min-height: 0; color: var(--text3); }
+.path-status.bad { color: var(--red); }
+
+/* ═══ MODAL & NATIVE CONTROLS ═══ */
+/* Native selects, checkboxes, radios and number steppers arrive with Chrome's
+   light-theme chrome, which looked pasted onto a dark product. These restyle
+   them without replacing them, so keyboard behaviour and accessibility stay. */
+.modal select,
+select.form-input {
+  appearance: none; -webkit-appearance: none;
+  background-color: var(--glass);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23808094' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center;
+  padding-right: 34px; cursor: pointer;
+  border: 1px solid var(--glass-border); border-radius: var(--radius-xs);
+  color: var(--text); font-family: var(--font); font-size: 12.5px;
+}
+select.form-input:hover { border-color: var(--glass-border2); }
+select.form-input:focus { outline: none; border-color: var(--primary-light); box-shadow: 0 0 0 3px var(--primary-dim); }
+/* The popup list itself is drawn by the OS; these keep it legible on dark. */
+select.form-input option { background: var(--bg3); color: var(--text); padding: 8px; }
+
+.modal input[type="checkbox"]:not(.toggle-switch input),
+.modal input[type="radio"] {
+  appearance: none; -webkit-appearance: none;
+  width: 16px; height: 16px; flex-shrink: 0; margin: 0;
+  border: 1px solid var(--glass-border2); background: var(--glass);
+  cursor: pointer; transition: var(--transition); position: relative;
+}
+.modal input[type="checkbox"]:not(.toggle-switch input) { border-radius: 4px; }
+.modal input[type="radio"] { border-radius: 50%; }
+.modal input[type="checkbox"]:not(.toggle-switch input):hover,
+.modal input[type="radio"]:hover { border-color: var(--primary-light); }
+.modal input[type="checkbox"]:not(.toggle-switch input):checked {
+  background: var(--primary); border-color: var(--primary-light);
+}
+.modal input[type="checkbox"]:not(.toggle-switch input):checked::after {
+  content: ''; position: absolute; left: 4.5px; top: 1px;
+  width: 4px; height: 8px; border: solid var(--bg);
+  border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.modal input[type="radio"]:checked { border-color: var(--primary-light); }
+.modal input[type="radio"]:checked::after {
+  content: ''; position: absolute; inset: 3px; border-radius: 50%; background: var(--primary-light);
+}
+
+/* Chrome's number spinners are tiny and light; hide them and let the field
+   behave like every other input. */
+.modal input[type="number"]::-webkit-outer-spin-button,
+.modal input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.modal input[type="number"] { -moz-appearance: textfield; }
+
+.modal input[type="range"] {
+  appearance: none; -webkit-appearance: none; width: 100%;
+  height: 4px; border-radius: 3px; background: var(--glass3); outline: none;
+}
+.modal input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--primary-light); cursor: pointer;
+  box-shadow: 0 0 0 3px var(--primary-dim); transition: var(--transition);
+}
+.modal input[type="range"]::-webkit-slider-thumb:hover { background: var(--moon); }
+
+.modal label { cursor: pointer; }
+.modal .form-input:focus,
+.modal textarea:focus {
+  outline: none; border-color: var(--primary-light);
+  box-shadow: 0 0 0 3px var(--primary-dim);
+}
+.modal .form-input::placeholder { color: var(--text3); opacity: .6; }
+
+/* A checkbox and its text should be one click target, aligned on the box. */
+.check-row { display: flex; align-items: center; gap: 9px; padding: 7px 0; font-size: 12.5px; color: var(--text2); }
+.check-row:hover { color: var(--text); }

@@ -47,6 +47,8 @@ contextBridge.exposeInMainWorld('api', {
   getScriptsDir: () => ipcRenderer.invoke('get-scripts-dir'),
   browseFolder: (title) => ipcRenderer.invoke('browse-folder', title),
   getDbEngines: () => ipcRenderer.invoke('get-db-engines'),
+  suggestPath: (input, options) => ipcRenderer.invoke('suggest-path', input, options),
+  validatePath: (input, options) => ipcRenderer.invoke('validate-path', input, options),
   getBackupProfiles: () => ipcRenderer.invoke('get-backup-profiles'),
   createBackupProfile: (data) => ipcRenderer.invoke('create-backup-profile', data),
   updateBackupProfile: (data) => ipcRenderer.invoke('update-backup-profile', data),

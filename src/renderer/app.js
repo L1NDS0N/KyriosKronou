@@ -5,6 +5,61 @@ let currentFilter = 'all';
 let smartCron = null;
 let autoRefreshTimer = null;
 
+
+// ============================================================
+// Stale-while-revalidate
+// ============================================================
+//
+// Several screens fetch from the main process, and some of those calls are
+// genuinely slow (the service control manager takes seconds). Blocking on them
+// made the app feel frozen. This keeps the last result per key, paints it at
+// once, then refetches in the background and repaints if anything changed.
+//
+//   swr('tasks', () => window.api.getTasks(), render)
+//
+const swrCache = new Map();   // key -> { data, at }
+const swrInFlight = new Map(); // key -> Promise
+
+async function swr(key, fetcher, render, options = {}) {
+  const cached = swrCache.get(key);
+
+  // Paint immediately from cache; the screen is never blank waiting.
+  if (cached) {
+    try { render(cached.data, { stale: true }); } catch (e) { console.error(e); }
+  } else if (options.onLoading) {
+    try { options.onLoading(); } catch (e) {}
+  }
+
+  // Never run the same fetch twice at once.
+  if (swrInFlight.has(key)) return swrInFlight.get(key);
+
+  const promise = (async () => {
+    try {
+      const data = await fetcher();
+      const changed = !cached || JSON.stringify(cached.data) !== JSON.stringify(data);
+      swrCache.set(key, { data, at: Date.now() });
+      // Repaint only when something actually changed, so a background refresh
+      // does not wipe the user's scroll position or hover state for nothing.
+      if (changed || !cached) render(data, { stale: false });
+      return data;
+    } catch (err) {
+      if (!cached && options.onError) options.onError(err);
+      throw err;
+    } finally {
+      swrInFlight.delete(key);
+    }
+  })();
+
+  swrInFlight.set(key, promise);
+  return promise.catch(() => cached && cached.data);
+}
+
+/** Drop a cached entry after a mutation, so the next read refetches. */
+function swrInvalidate(key) {
+  if (key) swrCache.delete(key);
+  else swrCache.clear();
+}
+
 // ============================================================
 // Navigation
 // ============================================================
@@ -80,6 +135,9 @@ function showModal(html, wide) {
   document.getElementById('modal-overlay').classList.remove('hidden');
   document.getElementById('modal-content').classList.toggle('wizard-wide', !!wide);
   lucide.createIcons();
+  // Any [data-path-input] inside the modal gets autocomplete, wired here so no
+  // caller has to remember to do it.
+  if (window.PathInput) PathInput.attachAll(document.getElementById('modal-body'));
   // Focus first input
   setTimeout(() => {
     const firstInput = document.querySelector('#modal-body input[type="text"], #modal-body textarea');
@@ -87,6 +145,7 @@ function showModal(html, wide) {
   }, 100);
 }
 function hideModal() {
+  if (window.PathInput) PathInput.close();
   document.getElementById('modal-overlay').classList.add('hidden');
   document.getElementById('modal-content').classList.remove('wizard-wide');
 }
@@ -315,11 +374,10 @@ function animateCounter(id, target) {
 // Tasks
 // ============================================================
 async function refreshTasks() {
-  setLoading('page-tasks', true);
-  try {
-    allTasks = await window.api.getTasks();
+  await swr('tasks', () => window.api.getTasks(), (tasks) => {
+    allTasks = tasks;
     renderTasks();
-  } finally { setLoading('page-tasks', false); }
+  });
 }
 
 function renderTasks() {
@@ -502,7 +560,7 @@ function showTaskDialog(task = null) {
     </div>
     <div id="script-mode-file">
       <div class="input-row">
-        <input type="text" class="form-input" id="dlg-script" value="${isEdit ? escAttr(task.ScriptPath || '') : ''}" placeholder="C:\Scripts\backup.ps1">
+        <input type="text" class="form-input" id="dlg-script" data-path-input data-path-kind="file" data-path-ext=".ps1,.bat,.cmd,.exe,.vbs,.py" value="${isEdit ? escAttr(task.ScriptPath || '') : ''}" placeholder="C:\Scripts\backup.ps1">
         <button class="btn-outline" onclick="browseScript()"><i data-lucide="folder-open"></i> Browse</button>
       </div>
       <div class="script-hint">Supported: <code>.ps1</code> PowerShell, <code>.bat</code> <code>.cmd</code> Batch</div>
@@ -514,7 +572,8 @@ function showTaskDialog(task = null) {
     <label class="form-label">Arguments</label>
     <input type="text" class="form-input" id="dlg-args" value="${isEdit ? escAttr(task.Arguments || '') : ''}" placeholder="-Param Value">
     <label class="form-label">Working Directory</label>
-    <input type="text" class="form-input" id="dlg-workdir" value="${isEdit ? escAttr(task.WorkingDirectory || '') : ''}">
+    <input type="text" class="form-input" id="dlg-workdir" data-path-input data-path-kind="directory" value="${isEdit ? escAttr(task.WorkingDirectory || '') : ''}"
+           data-path-input data-path-kind="directory">
     <label class="form-label">Description</label>
     <textarea class="form-input" id="dlg-desc" placeholder="Optional description">${isEdit ? escHtml(task.Description || '') : ''}</textarea>
     <div class="checkbox-row">
@@ -614,10 +673,10 @@ async function saveTask(editId) {
   if (editId) {
     data.Id = editId;
     await window.api.updateTask(data);
-    showToast(i18n.t('toast.taskUpdated'), 'success');
+    swrInvalidate('tasks'); showToast(i18n.t('toast.taskUpdated'), 'success');
   } else {
     await window.api.addTask(data);
-    showToast(i18n.t('toast.taskCreated'), 'success');
+    swrInvalidate('tasks'); showToast(i18n.t('toast.taskCreated'), 'success');
   }
   scriptEditor.destroy();
   hideModal();
@@ -707,7 +766,7 @@ async function deleteTask(id, name) {
 async function confirmDelete(id) {
   await window.api.deleteTask(id);
   hideModal();
-  showToast(i18n.t('toast.taskDeleted'), 'success');
+  swrInvalidate('tasks'); showToast(i18n.t('toast.taskDeleted'), 'success');
   refreshTasks();
   refreshDashboard();
 }
@@ -1234,11 +1293,11 @@ document.getElementById('btn-install-service').addEventListener('click', () => {
     <label class="form-label">Service Name *</label>
     <input type="text" class="form-input" id="dlg-svc-name" placeholder="MyService">
     <label class="form-label">Application Path *</label>
-    <input type="text" class="form-input" id="dlg-svc-app" placeholder="C:\app\service.exe">
+    <input type="text" class="form-input" id="dlg-svc-app" data-path-input data-path-kind="file" data-path-ext=".exe,.bat,.cmd,.ps1" placeholder="C:\app\service.exe">
     <label class="form-label">Arguments</label>
     <input type="text" class="form-input" id="dlg-svc-args">
     <label class="form-label">Startup Directory</label>
-    <input type="text" class="form-input" id="dlg-svc-workdir">
+    <input type="text" class="form-input" id="dlg-svc-workdir" data-path-input data-path-kind="directory">
     <label class="form-label">Startup Type</label>
     <select class="form-input" id="dlg-svc-startup"><option>Automatic</option><option>Manual</option><option>Disabled</option></select>
     <div class="modal-actions">
@@ -1869,6 +1928,19 @@ document.querySelectorAll('.logs-tab').forEach(btn => {
 });
 
 async function refreshLogs() {
+  try {
+    await swr('logs', () => Promise.all([
+      window.api.getErrors(),
+      window.api.getAuditLogs(),
+      window.api.getLogs(),
+    ]), ([errors, audit, logs]) => {
+      allErrors = errors; allAudit = audit; allLogs = logs;
+      renderLogsStats();
+      renderLogsTable();
+    });
+    return;
+  } catch (e) { /* fall through to the original path below */ }
+
   try {
     [allErrors, allAudit, allLogs] = await Promise.all([
       window.api.getErrors(),

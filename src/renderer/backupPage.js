@@ -124,7 +124,7 @@ class BackupPage {
         <h4><i data-lucide="folder-open"></i> Set Path Manually</h4>
         <p style="font-size:12px;color:var(--text3)">Point to mysqldump.exe on your system.</p>
         <div style="display:flex;gap:8px;margin-top:8px">
-          <input type="text" class="form-input" id="manual-mysqldump-path" placeholder="C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysqldump.exe" style="flex:1">
+          <input type="text" class="form-input" id="manual-mysqldump-path" data-path-input data-path-kind="file" data-path-ext=".exe" placeholder="C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysqldump.exe" style="flex:1">
           <button class="btn-outline btn-sm" onclick="backupPage.browseMysqldump()"><i data-lucide="folder-open"></i></button>
           <button class="btn-glow btn-sm" onclick="backupPage.setManualPath()">Set</button>
         </div>
@@ -443,7 +443,7 @@ class BackupPage {
       case 2: return `
         <label class="form-label">Backup Destination</label>
         <div style="display:flex;gap:6px;margin-bottom:12px">
-          <input type="text" class="form-input" id="wiz-path" value="${esc(d.BackupPath)}" placeholder="C:\\Backups\\MySQL" oninput="backupPage.draft.BackupPath=this.value; backupPage._updateFloatingSummary()" style="flex:1">
+          <input type="text" class="form-input" id="wiz-path" data-path-input data-path-kind="directory" value="${esc(d.BackupPath)}" placeholder="C:\\Backups\\MySQL" oninput="backupPage.draft.BackupPath=this.value; backupPage._updateFloatingSummary()" style="flex:1">
           <button class="btn-outline btn-sm" onclick="backupPage.browseBackupPath()" title="Browse folder"><i data-lucide="folder-open"></i></button>
         </div>
 

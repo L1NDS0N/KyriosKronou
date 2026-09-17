@@ -726,6 +726,16 @@ function registerIPC() {
 
   // ─── Backup Profiles ───
   ipcMain.handle('get-db-engines', () => require('./db').list());
+
+  // ─── Windows path completion (used by every path field) ───
+  ipcMain.handle('suggest-path', (e, input, options) => {
+    try { return require('./pathSuggest').suggest(input, options || {}); }
+    catch (err) { return { base: '', suggestions: [], error: err.message }; }
+  });
+  ipcMain.handle('validate-path', (e, input, options) => {
+    try { return require('./pathSuggest').validate(input, options || {}); }
+    catch (err) { return { exists: false, message: err.message }; }
+  });
   ipcMain.handle('get-backup-profiles', () => backupManager.getAllProfiles());
   ipcMain.handle('create-backup-profile', (e, data) => backupManager.createProfile(data));
   ipcMain.handle('update-backup-profile', (e, data) => backupManager.updateProfile(data));
