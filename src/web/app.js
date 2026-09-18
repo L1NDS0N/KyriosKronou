@@ -43,8 +43,18 @@
   }
 
   // ─── API ───
+  //
+  // O token CSRF chega no /api/me e acompanha toda escrita: o servidor recusa
+  // POST/PUT/DELETE sem ele, justamente para que outro site nao consiga fazer o
+  // navegador de quem esta logado disparar uma acao aqui.
+  let csrf = null;
+
   async function api(path, options) {
-    const res = await fetch(path, Object.assign({ credentials: 'same-origin' }, options || {}));
+    const opts = Object.assign({ credentials: 'same-origin' }, options || {});
+    if (opts.method && opts.method !== 'GET' && csrf) {
+      opts.headers = Object.assign({ 'X-CSRF-Token': csrf }, opts.headers || {});
+    }
+    const res = await fetch(path, opts);
     if (res.status === 401) { location.href = '/login?notice=expired'; throw new Error('unauthenticated'); }
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.message || body.error || ('HTTP ' + res.status));
@@ -397,6 +407,7 @@
     initCharts();
     try {
       const me = await api('/api/me');
+      csrf = me.csrfToken || null;
       $('user-name').textContent = me.name || me.login;
       $('user-login').textContent = '@' + me.login;
       if (me.avatar) $('user-avatar').src = me.avatar;

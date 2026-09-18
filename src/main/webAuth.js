@@ -320,13 +320,16 @@ class WebAuth {
     return sid;
   }
 
+  /** Secure so navegador nenhum mande o cookie em claro - e so quando ha TLS. */
+  get cookieSecure() { return !!this.config.getSetting('WebHttps', false); }
+
   setSessionCookie(res, sid) {
     res.setHeader('Set-Cookie',
-      `${SESSION_COOKIE}=${this.signCookie(sid)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`);
+      `${SESSION_COOKIE}=${this.signCookie(sid)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}${this.cookieSecure ? '; Secure' : ''}`);
   }
 
   clearSessionCookie(res) {
-    res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+    res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);
   }
 
   readSessionCookie(req) {

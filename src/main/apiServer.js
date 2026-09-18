@@ -14,9 +14,13 @@ const fs = require('fs');
 
 const WebAuth = require('./webAuth');
 const SystemMetrics = require('./systemMetrics');
+const security = require('./webSecurity');
 
 // Paths that must work before anyone is signed in.
-const PUBLIC_PATHS = new Set(['/login', '/style.css', '/api/health', '/favicon.ico']);
+const PUBLIC_PATHS = new Set([
+  '/login', '/login.js', '/style.css', '/api/health', '/favicon.ico',
+  '/assets/logo.png', '/assets/bg.png',
+]);
 
 class ApiServer {
   constructor(taskManager, config, logger, serviceManager, wrapperGenerator, backupManager) {
@@ -37,6 +41,14 @@ class ApiServer {
       intervalMs: config.getSetting('MetricsIntervalMs', SystemMetrics.DEFAULT_INTERVAL_MS),
     });
     this.sseClients = new Set();
+
+    // Tetos por IP. O de autenticação é apertado de propósito: é o único
+    // endpoint que um desconhecido alcança.
+    this.authLimiter = new security.RateLimiter(
+      config.getSetting('WebAuthRateLimit', 20), 5 * 60 * 1000);
+    this.apiLimiter = new security.RateLimiter(
+      config.getSetting('WebApiRateLimit', 600), 60 * 1000);
+
     // In-flight device-flow attempts: handle -> { deviceCode }. The device code
     // stays server-side; the browser only ever holds an opaque handle.
     this.deviceFlows = new Map();
@@ -90,10 +102,16 @@ class ApiServer {
   }
 
   setupMiddleware() {
-    this.app.set('trust proxy', true);
+    // trust proxy só quando há proxy declarado: com ele ligado sem proxy, o
+    // X-Forwarded-For do atacante vira o req.ip e ele escapa do limitador.
+    this.app.set('trust proxy', !!this.config.getSetting('WebTrustProxy', false));
+    this.app.disable('x-powered-by');
+    this.app.use(security.securityHeaders({ https: !!this.config.getSetting('WebHttps', false) }));
     this.app.use(cors({ origin: false, credentials: true }));
-    this.app.use(express.json({ limit: '10mb' }));
-    this.app.use(express.urlencoded({ extended: true }));
+    // 10MB era o limite de tudo; só o upload de script precisa de corpo grande,
+    // e ele tem a própria rota com o próprio limite.
+    this.app.use(express.json({ limit: '1mb' }));
+    this.app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
     // Request logging
     this.app.use((req, res, next) => {
@@ -106,6 +124,20 @@ class ApiServer {
       next();
     });
 
+    // ─── Rate limiting ───
+    // O login é o alvo óbvio; o resto da API leva um teto generoso só para que
+    // um script solto não consiga martelar o agendador.
+    this.app.use((req, res, next) => {
+      const key = this._clientKey(req);
+      const limiter = req.path.startsWith('/auth/') ? this.authLimiter : this.apiLimiter;
+      const verdict = limiter.check(key);
+      if (verdict.ok) return next();
+
+      res.setHeader('Retry-After', String(verdict.retryAfter));
+      this.logger.log('WARN', `Rate limit hit by ${key} on ${req.method} ${req.path}`);
+      return res.status(429).json({ error: 'Too many requests', retryAfter: verdict.retryAfter });
+    });
+
     // ─── Authentication gate ───
     this.app.use((req, res, next) => {
       const routePath = req.path;
@@ -113,8 +145,9 @@ class ApiServer {
 
       // A machine-to-machine caller may still use the API key, so existing
       // integrations keep working without a browser.
-      if (this.apiKey && req.headers['x-api-key'] === this.apiKey) {
+      if (this.apiKey && security.safeEqual(req.headers['x-api-key'], this.apiKey)) {
         req.kyriosUser = { login: 'api-key', id: 0, name: 'API key client' };
+        req.kyriosViaApiKey = true;
         return next();
       }
 
@@ -126,6 +159,34 @@ class ApiServer {
       }
       return res.redirect('/login');
     });
+
+    // ─── CSRF ───
+    //
+    // Depois da autenticação: só faz sentido para quem tem sessão de cookie.
+    // Um cliente com X-API-Key não é vulnerável a CSRF - o navegador de uma
+    // vítima não anexa a chave sozinho, como faz com o cookie.
+    this.app.use((req, res, next) => {
+      if (security.SAFE_METHODS.has(req.method)) return next();
+      if (req.kyriosViaApiKey) return next();
+      if (!req.kyriosUser) return next(); // rotas públicas de login têm o próprio limite
+
+      const origem = security.sameOrigin(req);
+      if (origem === false) {
+        this.logger.log('WARN', `Cross-origin write refused: ${req.method} ${req.path} from ${req.headers.origin || req.headers.referer}`);
+        return res.status(403).json({ error: 'Cross-origin request refused' });
+      }
+
+      if (!security.csrfValid(this.auth.secret, req.kyriosUser.sid, req.get('X-CSRF-Token'))) {
+        this.logger.log('WARN', `Missing or invalid CSRF token: ${req.method} ${req.path} (${req.kyriosUser.login})`);
+        return res.status(403).json({ error: 'Invalid CSRF token', message: 'Reload the page and try again.' });
+      }
+      next();
+    });
+  }
+
+  /** Chave do limitador: o IP, que é o que temos antes de haver sessão. */
+  _clientKey(req) {
+    return req.ip || (req.socket && req.socket.remoteAddress) || 'unknown';
   }
 
   setupRoutes() {
@@ -282,12 +343,18 @@ class ApiServer {
   _webRoutes() {
     this.app.get('/style.css', (req, res) => this._sendAsset(res, 'style.css', 'css'));
     this.app.get('/app.js', (req, res) => this._sendAsset(res, 'app.js', 'application/javascript'));
+    this.app.get('/login.js', (req, res) => this._sendAsset(res, 'login.js', 'application/javascript'));
     this.app.get('/', (req, res) => this._sendAsset(res, 'index.html', 'html'));
     this.app.get('/dashboard', (req, res) => res.redirect('/'));
 
     this.app.get('/api/me', (req, res) => {
       const u = req.kyriosUser;
-      res.json({ login: u.login, id: u.id, name: u.name, avatar: u.avatar || '' });
+      res.json({
+        login: u.login, id: u.id, name: u.name, avatar: u.avatar || '',
+        // O token acompanha o /api/me porque é a primeira chamada da página:
+        // uma ida a menos antes de poder escrever qualquer coisa.
+        csrfToken: u.sid ? security.csrfToken(this.auth.secret, u.sid) : null,
+      });
     });
   }
 
