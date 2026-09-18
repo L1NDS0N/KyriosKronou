@@ -118,3 +118,33 @@ describe('i18n: the renderer does not hardcode user-visible text', () => {
     expect([...missing], `keys used but never defined: ${[...missing].join(', ')}`).to.deep.equal([]);
   });
 });
+
+describe('i18n: higiene do arquivo', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'i18n.js'), 'utf8');
+
+  const LINHAS = (texto) => texto.split(/\r?\n/);
+
+  // Uma edicao em massa ja colapsou ~80 entradas numa linha unica atras de um
+  // "// Backup Page": 4KB de traducao comentada, viva so na aparencia.
+  it('nao tem bloco de chaves escondido dentro de um comentario', () => {
+    const comentadas = LINHAS(src).filter(l => /^\s*\/\//.test(l) && /'[a-zA-Z]+\.[a-zA-Z0-9]+':/.test(l));
+    expect(comentadas.map(l => l.slice(0, 60)), 'ha traducao comentada').to.deep.equal([]);
+  });
+
+  it('nao tem linha gigante, que esconde o que foi mexido', () => {
+    const gigantes = LINHAS(src).map((l, i) => [i + 1, l.length]).filter(([, n]) => n > 400);
+    expect(gigantes, 'linha longa demais para revisar num diff').to.deep.equal([]);
+  });
+
+  // Num objeto literal a ultima definicao vence calada: a tela mostra um texto
+  // e o arquivo parece dizer outro.
+  it('nao define a mesma chave duas vezes no mesmo idioma', () => {
+    const blocos = [...src.matchAll(/^ {2}(?:'?[a-zA-Z-]+'?):\s*\{/gm)].map(m => m.index);
+    for (let i = 0; i < blocos.length; i++) {
+      const corpo = src.slice(blocos[i], i + 1 < blocos.length ? blocos[i + 1] : src.length);
+      const chaves = [...corpo.matchAll(/^\s*'([a-zA-Z]+\.[a-zA-Z0-9]+)':/gm)].map(m => m[1]);
+      const repetidas = chaves.filter((k, idx) => chaves.indexOf(k) !== idx);
+      expect([...new Set(repetidas)], 'chave repetida no mesmo dicionario').to.deep.equal([]);
+    }
+  });
+});

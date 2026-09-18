@@ -5,13 +5,10 @@ const translations = {
   en: {
     // Navigation
     'nav.dashboard': 'Dashboard',
-    'nav.tasks': 'Scheduled Tasks',
     'nav.services': 'Services',
     'nav.history': 'History',
     'nav.logs': 'Logs',
     'nav.settings': 'Settings',
-    'nav.backups': 'Backups',
-    'nav.tasks': 'Tasks',
     'backup.title': 'MySQL Backup Profiles',
     'backup.newProfile': 'New Profile',
     'backup.refresh': 'Refresh',
@@ -90,8 +87,8 @@ const translations = {
     'service.scriptSaved': 'Script saved',
     'service.loadingScript': 'Loading script...',
     'service.couldNotLoad': 'Could not load script',
-'nav.backups': 'Backups',    'nav.tasks': 'Tasks',    
-    // Backup Page    'backup.title': 'MySQL Backup Profiles',    'backup.newProfile': 'New Profile',    'backup.refresh': 'Refresh',    'backup.mysqldump': 'mysqldump',    'backup.found': 'mysqldump found',    'backup.notFound': 'mysqldump not found',    'backup.configure': 'Configure',    'backup.setupTitle': 'MySQL Driver Setup',    'backup.setupDesc': 'mysqldump is required for MySQL backups. Configure it below.',    'backup.autoDetect': 'Auto-detect',    'backup.autoDetectDesc': 'Scan system PATH, Program Files, XAMPP, WampServer, Laragon, MariaDB, Docker, and environment variables.',    'backup.scanAgain': 'Scan Again',    'backup.setManually': 'Set Path Manually',    'backup.setManuallyDesc': 'Point to mysqldump.exe on your system.',    'backup.setPath': 'Set',    'backup.downloadTools': 'Download MySQL Tools',    'backup.downloadDesc': 'Download MySQL Server binaries (includes mysqldump) from official source.',    'backup.downloadBtn': 'Download (~450 MB)',    'backup.close': 'Close',    'backup.editProfile': 'Edit Backup Profile',    'backup.createProfile': 'New Backup Profile',    'backup.profileName': 'Profile Name',    'backup.connection': 'Connection',    'backup.host': 'Host',    'backup.port': 'Port',    'backup.user': 'User',    'backup.password': 'Password',    'backup.testConnection': 'Test Connection',    'backup.databases': 'Databases',    'backup.loadDatabases': 'Load Databases',    'backup.allDatabases': 'All databases will be backed up',    'backup.selectDbs': 'Click to select. If none selected, ALL databases will be backed up.',    'backup.backupSettings': 'Backup Settings',    'backup.destination': 'Destination',    'backup.destinationDesc': 'Where to save backup files.',    'backup.naming': 'File Naming',    'backup.namingPattern': 'File naming pattern.',    'backup.compression': 'Compression',    'backup.none': 'None (faster)',    'backup.zip': 'ZIP',    'backup.7z': '7-Zip (smaller)',    'backup.level': 'Level',    'backup.mysqlOptions': 'mysqldump Options',    'backup.advancedArgs': 'Advanced: custom args',    'backup.localStorage': 'Local Storage',    'backup.keepLocal': 'Keep backup files locally',    'backup.autoDelete': 'Auto-delete local backups after (days)',    'backup.uploadTargets': 'Upload Targets',    'backup.uploadDesc': 'Send backup files to remote servers after creation. Optional.',    'backup.ftp': 'FTP',    'backup.sftp': 'SFTP',    'backup.smb': 'SMB/NAS',    'backup.schedule': 'Schedule',    'backup.enableProfile': 'Enable this backup profile',    'backup.summary': 'Summary',    'backup.saveChanges': 'Save Changes',    'backup.createBtn': 'Create Profile',    'backup.run': 'Run',    'backup.edit': 'Edit',    'backup.noProfiles': 'No backup profiles',    'backup.noProfilesDesc': 'Create a profile to schedule MySQL backups with compression and remote upload.',    // MySQL Options    'mysql.singleTransaction': 'Single Transaction',    'mysql.singleTransactionDesc': 'InnoDB consistency without locking',    'mysql.routines': 'Routines',    'mysql.routinesDesc': 'Stored procedures & functions',    'mysql.triggers': 'Triggers',    'mysql.triggersDesc': 'Backup trigger definitions',    'mysql.events': 'Events',    'mysql.eventsDesc': 'Scheduled event definitions',    'mysql.lockTables': 'Lock Tables',    'mysql.lockTablesDesc': 'Read lock during dump (MyISAM)',    'mysql.addDropTable': 'Add DROP TABLE',    'mysql.addDropTableDesc': 'Include DROP before CREATE',    'mysql.createDb': 'Create Database',    'mysql.createDbDesc': 'Include CREATE DATABASE statement',    'mysql.compressProtocol': 'Compress Protocol',    'mysql.compressProtocolDesc': 'Compress client-server traffic',    // Service Edit Script    'service.editScript': 'Edit Script',    'service.saveRestart': 'Save & Restart',    'service.scriptSaved': 'Script saved',    'service.loadingScript': 'Loading script...',    'service.couldNotLoad': 'Could not load script',    'service.scriptNotFound': 'Script not found',    'service.noAppPath': 'No application path'
+    'nav.backups': 'Backups',
+    'nav.tasks': 'Tasks',
 
     // Dashboard
     'dashboard.title': 'Dashboard',
@@ -333,7 +330,6 @@ const translations = {
 
     // Cron descriptions (partial)
     'cron.everyMinute': 'Every minute',
-    'cron.everyHour': 'Every hour',
     'cron.daily': 'Daily',
     'cron.weekly': 'Weekly',
     'cron.monthly': 'Monthly',
@@ -629,7 +625,6 @@ const translations = {
   'pt-BR': {
     // Navigation
     'nav.dashboard': 'Painel',
-    'nav.tasks': 'Tarefas Agendadas',
     'nav.services': 'Serviços',
     'nav.history': 'Histórico',
     'nav.logs': 'Logs',
@@ -955,7 +950,6 @@ const translations = {
 
     // Cron
     'cron.everyMinute': 'A cada minuto',
-    'cron.everyHour': 'A cada hora',
     'cron.daily': 'Diário',
     'cron.weekly': 'Semanal',
     'cron.monthly': 'Mensal',

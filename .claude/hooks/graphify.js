@@ -199,7 +199,9 @@ const i18nSrc = read(path.join(ROOT, 'src', 'renderer', 'i18n.js'));
 const definidas = {};
 for (const m of i18nSrc.matchAll(/^\s*'([a-zA-Z]+\.[a-zA-Z0-9]+)':/gm)) definidas[m[1]] = (definidas[m[1]] || 0) + 1;
 const usadas = uniq(rendererFiles.concat([path.join(ROOT, 'src', 'renderer', 'index.html')])
-  .flatMap((f) => [...read(f).matchAll(/(?:i18n\.t\('|data-i18n=")([a-zA-Z]+\.[a-zA-Z0-9]+)/g)].map((m) => m[1])));
+  // Varias telas usam o atalho T('chave'); sem ele o relatorio acusa centenas
+  // de chaves orfas que na verdade estao em uso.
+  .flatMap((f) => [...read(f).matchAll(/(?:i18n\.t\('|data-i18n="|T\(')([a-zA-Z]+\.[a-zA-Z0-9]+)/g)].map((m) => m[1])));
 const i18nFaltando = usadas.filter((k) => !definidas[k]);
 const i18nSoUmIdioma = Object.keys(definidas).filter((k) => definidas[k] < 2);
 const i18nOrfas = Object.keys(definidas).filter((k) => !usadas.includes(k));
