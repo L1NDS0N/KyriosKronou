@@ -19,7 +19,7 @@ const security = require('./webSecurity');
 // Paths that must work before anyone is signed in.
 const PUBLIC_PATHS = new Set([
   '/login', '/login.js', '/style.css', '/api/health', '/favicon.ico',
-  '/assets/logo.png', '/assets/bg.png',
+  '/assets/logo.png', '/assets/logo-24.png', '/assets/bg.png',
 ]);
 
 class ApiServer {
@@ -350,11 +350,51 @@ class ApiServer {
     });
   }
 
+  /**
+   * Imagens da marca. Ficam em src/renderer/assets, que e onde o app desktop ja
+   * as tem - duplica-las em src/web faria as duas copias divergirem na proxima
+   * troca de logo.
+   *
+   * A lista e fechada: o nome vem da URL, e servir "o que o nome pedir" a
+   * partir de uma pasta e como se le arquivo arbitrario do disco.
+   */
+  _brandAssets() {
+    const dirs = [
+      path.join(__dirname, '..', 'renderer', 'assets'),
+      path.join(process.resourcesPath || '', 'app.asar', 'src', 'renderer', 'assets'),
+      path.join(process.resourcesPath || '', 'app', 'src', 'renderer', 'assets'),
+    ];
+    const ARQUIVOS = {
+      '/favicon.ico': { file: 'favicon-32.png', type: 'image/png' },
+      '/assets/logo.png': { file: 'fav.png', type: 'image/png' },
+      '/assets/logo-24.png': { file: 'logo-24.png', type: 'image/png' },
+      '/assets/bg.png': { file: 'bg-render.png', type: 'image/png' },
+    };
+
+    for (const [rota, info] of Object.entries(ARQUIVOS)) {
+      this.app.get(rota, (req, res) => {
+        for (const dir of dirs) {
+          const full = path.join(dir, info.file);
+          try {
+            if (fs.existsSync(full)) {
+              res.type(info.type);
+              // A marca nao muda entre deploys; e a unica coisa aqui que vale cache.
+              res.setHeader('Cache-Control', 'public, max-age=86400');
+              return res.send(fs.readFileSync(full));
+            }
+          } catch (e) {}
+        }
+        res.status(404).end();
+      });
+    }
+  }
+
   // ─── Static web interface ───
   _webRoutes() {
     this.app.get('/style.css', (req, res) => this._sendAsset(res, 'style.css', 'css'));
     this.app.get('/app.js', (req, res) => this._sendAsset(res, 'app.js', 'application/javascript'));
     this.app.get('/login.js', (req, res) => this._sendAsset(res, 'login.js', 'application/javascript'));
+    this._brandAssets();
     this.app.get('/', (req, res) => this._sendAsset(res, 'index.html', 'html'));
     this.app.get('/dashboard', (req, res) => res.redirect('/'));
 
