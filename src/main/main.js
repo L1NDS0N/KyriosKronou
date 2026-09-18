@@ -12,6 +12,7 @@ const NssmInstaller = require('./nssmInstaller');
 const WrapperGenerator = require('./wrapperGenerator');
 const ApiServer = require('./apiServer');
 const BackupManager = require('./backupManager');
+const SyncManager = require('./sync/syncManager');
 const KyrionService = require('./kyrionService');
 const paths = require('./paths');
 const { SchedulerCore, ROLE_GUI, readOwner } = require('./schedulerCore');
@@ -46,6 +47,7 @@ let runs;
 let wrapperGenerator;
 let apiServer;
 let backupManager;
+let syncManager;
 let isQuitting = false;
 
 // ─── Push Notifications ───
@@ -284,6 +286,7 @@ function initComponents() {
   kyrionService = new KyrionService(logger, serviceManager);
   wrapperGenerator = new WrapperGenerator(config, logger);
   backupManager = new BackupManager(config, logger, runs);
+  syncManager = new SyncManager(config, logger, runs);
 
   if (migration.migrated) {
     logger.log('INFO', `Migrated ${migration.copied} file(s) from ${migration.sources.join(', ')} to ${paths.dataDir()}`);
@@ -320,7 +323,7 @@ function syncWebInterface() {
 // never fire twice.
 function startScheduler() {
   scheduler = new SchedulerCore(
-    { taskManager, backupManager, cronParser, logger },
+    { taskManager, backupManager, syncManager, cronParser, logger },
     ROLE_GUI,
     {
       onTaskExecuted: (task, result) => {
@@ -329,6 +332,9 @@ function startScheduler() {
           mainWindow.webContents.send('task-executed', result);
           mainWindow.webContents.send('data-updated');
         }
+        // Syncs attached to this task run after it finishes (success by
+        // default) - the same hook the service scheduler uses.
+        if (syncManager) syncManager.maybeTriggerForTask(result);
       },
       onBackupExecuted: (profile, result) => {
         sendNotification(
@@ -336,6 +342,14 @@ function startScheduler() {
           `${profile.Name}
 ${result && result.success ? 'Backup successful' : 'Backup failed'}
 Duration: ${(result && result.duration) || '-'}`,
+          result && result.success ? 'success' : 'error'
+        );
+        if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('data-updated');
+      },
+      onSyncExecuted: (profile, result) => {
+        sendNotification(
+          result && result.success ? '✅ Sync Completed' : '❌ Sync Failed',
+          `${profile.Name}\n${result && result.success ? 'Sync successful' : 'Sync failed'}\nDuration: ${(result && result.duration) || '-'}`,
           result && result.success ? 'success' : 'error'
         );
         if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('data-updated');
@@ -844,6 +858,31 @@ function registerIPC() {
     return { success: false, message: 'Cancelled' };
   });
   ipcMain.handle('check-mysqldump', () => backupManager.getStatus());
+
+  // ─── Sync (folder synchronization with old-content retention) ───
+  ipcMain.handle('get-sync-profiles', () => syncManager.getAllProfiles());
+  ipcMain.handle('create-sync-profile', (e, data) => syncManager.createProfile(data));
+  ipcMain.handle('update-sync-profile', (e, data) => syncManager.updateProfile(data));
+  ipcMain.handle('delete-sync-profile', (e, id) => syncManager.deleteProfile(id));
+  ipcMain.handle('run-sync', async (e, profileId) => {
+    try {
+      return await syncManager.executeSync(profileId);
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  });
+  ipcMain.handle('get-sync-engines', () => require('./sync/engines').list());
+  ipcMain.handle('analyze-sync-folder', (e, dir) => syncManager.analyzeFolder(dir));
+  ipcMain.handle('preview-sync-retention', (e, dir, retentionCfg) => syncManager.previewRetention(dir, retentionCfg));
+  ipcMain.handle('get-sync-history', (e, profileId) => ({ history: syncManager.getHistory(profileId), stats: syncManager.getHistoryStats(profileId) }));
+  ipcMain.handle('test-sync-connection', async (e, engineId, cfg) => {
+    try {
+      const engine = require('./sync/engines').get(engineId);
+      return await engine.testConnection(cfg);
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  });
 
   ipcMain.handle('test-ftp-connection', async (e, config) => {
     try {
