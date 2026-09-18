@@ -23,6 +23,9 @@ const ConfigManager = require('./configManager');
 const CronParser = require('./cronParser');
 const TaskManager = require('./taskManager');
 const BackupManager = require('./backupManager');
+const ServiceManager = require('./serviceManager');
+const WrapperGenerator = require('./wrapperGenerator');
+const RunRegistry = require('./runRegistry');
 const { SchedulerCore, ROLE_SERVICE, releaseOwnership } = require('./schedulerCore');
 const ApiServer = require('./apiServer');
 
@@ -33,8 +36,15 @@ function bootstrap() {
   const logger = new Logger(paths.logsDir());
   const config = new ConfigManager(paths.configDir(), 'default');
   const cronParser = new CronParser();
-  const taskManager = new TaskManager(config, logger, cronParser);
-  const backupManager = new BackupManager(config, logger);
+  // O registro de execucoes vive aqui, e nao no app: quando o servidor esta
+  // sem ninguem logado e o servico que executa, e so ele sabe o que esta rodando.
+  const runs = new RunRegistry();
+  const taskManager = new TaskManager(config, logger, cronParser, runs);
+  const backupManager = new BackupManager(config, logger, runs);
+  // O painel web tambem administra servicos do Windows, e no servidor ele e a
+  // unica interface disponivel - passar null aqui deixaria metade dele morta.
+  const serviceManager = new ServiceManager(logger, config);
+  const wrapperGenerator = new WrapperGenerator(config, logger);
 
   logger.log('INFO', '=== Κύριος Χρόνος service scheduler starting ===');
   logger.log('INFO', `PID ${process.pid} | node ${process.version} | data ${paths.dataDir()}`);
@@ -56,7 +66,9 @@ function bootstrap() {
   // when it is most needed.
   let apiServer = null;
   if (config.getSetting('ApiEnabled', false)) {
-    apiServer = new ApiServer(taskManager, config, logger, null, null, backupManager);
+    apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator, backupManager, {
+      runRegistry: runs, cronParser,
+    });
     apiServer.start()
       .then((info) => logger.log('INFO', `Web interface listening on ${info.url} (bound to ${info.host})`))
       .catch((err) => logger.error('Web interface failed to start', err));
@@ -69,6 +81,7 @@ function bootstrap() {
     logger.audit('SERVICE_STOPPED', { targetType: 'service', before: { pid: process.pid } });
     try { scheduler.stop(); } catch (e) {}
     if (apiServer) { try { apiServer.stop(); } catch (e) {} }
+    try { runs.dispose(); } catch (e) {}
     try { fs.unlinkSync(pidFile); } catch (e) {}
     try { logger.flush(); } catch (e) {}
     process.exit(0);

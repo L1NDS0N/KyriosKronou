@@ -23,7 +23,10 @@ const PUBLIC_PATHS = new Set([
 ]);
 
 class ApiServer {
-  constructor(taskManager, config, logger, serviceManager, wrapperGenerator, backupManager) {
+  constructor(taskManager, config, logger, serviceManager, wrapperGenerator, backupManager, extras) {
+    const opts = extras || {};
+    this.runRegistry = opts.runRegistry || (taskManager && taskManager.runs) || null;
+    this.cronParser = opts.cronParser || (taskManager && taskManager.cronParser) || null;
     this.taskManager = taskManager;
     this.config = config;
     this.logger = logger;
@@ -108,9 +111,14 @@ class ApiServer {
     this.app.disable('x-powered-by');
     this.app.use(security.securityHeaders({ https: !!this.config.getSetting('WebHttps', false) }));
     this.app.use(cors({ origin: false, credentials: true }));
-    // 10MB era o limite de tudo; só o upload de script precisa de corpo grande,
-    // e ele tem a própria rota com o próprio limite.
-    this.app.use(express.json({ limit: '1mb' }));
+    // 10MB era o limite de tudo; só o upload de script precisa de corpo grande.
+    // O parser global tem que sair da frente dele: rodando primeiro, rejeitaria
+    // o upload com 413 antes de a rota com o limite maior ser alcançada.
+    const jsonPadrao = express.json({ limit: '1mb' });
+    this.app.use((req, res, next) => {
+      if (req.path === '/api/scripts' && req.method === 'POST') return next();
+      jsonPadrao(req, res, next);
+    });
     this.app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
     // Request logging
@@ -195,6 +203,9 @@ class ApiServer {
     this._metricsRoutes();
     this._taskRoutes();
     this._backupRoutes();
+    this._serviceRoutes();
+    this._runRoutes();
+    this._scriptRoutes();
     this._miscRoutes();
   }
 
@@ -548,6 +559,88 @@ class ApiServer {
       res.json({ success: true, data: history, count: history.length });
     });
 
+    this.app.get('/api/backups/:id', (req, res) => {
+      if (!guard(res)) return;
+      const profile = this.backupManager.getProfile(req.params.id);
+      if (!profile) return res.status(404).json({ error: 'Backup profile not found' });
+      res.json({ success: true, data: Object.assign({}, profile, { Password: undefined }) });
+    });
+
+    this.app.post('/api/backups', (req, res) => {
+      if (!guard(res)) return;
+      const { Name } = req.body || {};
+      if (!Name) return res.status(400).json({ error: 'Name is required' });
+
+      const result = this.backupManager.createProfile(req.body);
+      if (result && result.success === false) return res.status(400).json({ error: result.message });
+      this._audit(req, 'BACKUP_PROFILE_CREATED_WEB', {
+        targetType: 'backup', target: (result && result.Id) || Name,
+        before: null, after: { Name, Host: req.body.Host, CronExpression: req.body.CronExpression },
+      });
+      res.status(201).json({ success: true, data: Object.assign({}, result, { Password: undefined }) });
+    });
+
+    this.app.put('/api/backups/:id', (req, res) => {
+      if (!guard(res)) return;
+      const existing = this.backupManager.getProfile(req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Backup profile not found' });
+
+      // A senha nunca sai daqui pela API, então o painel também não a devolve:
+      // um corpo sem Password significa "não mexa na senha", não "apague-a".
+      const data = Object.assign({}, existing, req.body, { Id: req.params.id });
+      if (req.body.Password === undefined || req.body.Password === '') data.Password = existing.Password;
+
+      const result = this.backupManager.updateProfile(data);
+      if (result && result.success === false) return res.status(400).json({ error: result.message });
+      this._audit(req, 'BACKUP_PROFILE_UPDATED_WEB', {
+        targetType: 'backup', target: req.params.id,
+        before: { Name: existing.Name, CronExpression: existing.CronExpression, Enabled: existing.Enabled },
+        after: { Name: data.Name, CronExpression: data.CronExpression, Enabled: data.Enabled },
+      });
+      res.json({ success: true, data: Object.assign({}, result, { Password: undefined }) });
+    });
+
+    this.app.delete('/api/backups/:id', (req, res) => {
+      if (!guard(res)) return;
+      const existing = this.backupManager.getProfile(req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Backup profile not found' });
+      this.backupManager.deleteProfile(req.params.id);
+      this._audit(req, 'BACKUP_PROFILE_DELETED_WEB', {
+        targetType: 'backup', target: req.params.id, before: { Name: existing.Name }, after: null,
+      });
+      res.json({ success: true, message: `Backup profile "${existing.Name}" deleted` });
+    });
+
+    // Testar conexão pede a senha, que é a única vez em que ela entra por aqui -
+    // e mesmo assim não é gravada nem devolvida.
+    this.app.post('/api/backups/test-connection', async (req, res) => {
+      if (!guard(res)) return;
+      const { profileId, Host, Port, User, Password } = req.body || {};
+      const alvo = profileId ? this.backupManager.getProfile(profileId) : { Host, Port, User, Password };
+      if (!alvo) return res.status(404).json({ error: 'Backup profile not found' });
+      try {
+        const result = await this.backupManager.testConnection(alvo);
+        this._audit(req, 'BACKUP_CONNECTION_TESTED_WEB', {
+          targetType: 'backup', target: profileId || Host, after: { success: !!(result && result.success) },
+        });
+        res.json({ success: true, data: result });
+      } catch (e) {
+        res.status(502).json({ error: e.message });
+      }
+    });
+
+    this.app.post('/api/backups/databases', async (req, res) => {
+      if (!guard(res)) return;
+      const { profileId, Host, Port, User, Password } = req.body || {};
+      const alvo = profileId ? this.backupManager.getProfile(profileId) : { Host, Port, User, Password };
+      if (!alvo) return res.status(404).json({ error: 'Backup profile not found' });
+      try {
+        res.json({ success: true, data: await this.backupManager.listDatabases(alvo) });
+      } catch (e) {
+        res.status(502).json({ error: e.message });
+      }
+    });
+
     this.app.post('/api/backups/:id/run', async (req, res) => {
       if (!guard(res)) return;
       const profile = this.backupManager.getProfile(req.params.id);
@@ -562,6 +655,188 @@ class ApiServer {
       } catch (e) {
         res.status(500).json({ error: e.message });
       }
+    });
+  }
+
+  // ─── Windows services ───
+  //
+  // O painel web administra serviços porque no servidor ele é a única interface
+  // disponível: quem fez logoff não tem como abrir o app desktop.
+  _serviceRoutes() {
+    const guard = (res) => {
+      if (!this.serviceManager) { res.status(503).json({ error: 'Service manager unavailable' }); return false; }
+      return true;
+    };
+
+    const ACOES = {
+      start: { metodo: 'startService', audit: 'SERVICE_STARTED_WEB' },
+      stop: { metodo: 'stopService', audit: 'SERVICE_STOPPED_WEB' },
+      restart: { metodo: 'restartService', audit: 'SERVICE_RESTARTED_WEB' },
+    };
+
+    this.app.post('/api/services/:name/:action', (req, res) => {
+      if (!guard(res)) return;
+      const acao = ACOES[req.params.action];
+      if (!acao) return res.status(400).json({ error: 'Unknown action' });
+
+      const nome = req.params.name;
+      // Só um serviço que o sistema realmente enxerga: sem isso o nome vira
+      // argumento de linha de comando para o NSSM.
+      const existe = (this.serviceManager.getAllServices() || []).some(s => s.Name === nome);
+      if (!existe) return res.status(404).json({ error: 'Service not found' });
+
+      const result = this.serviceManager[acao.metodo](nome);
+      this._audit(req, acao.audit, { targetType: 'service', target: nome, after: { action: req.params.action, success: result.success } });
+      if (!result.success) return res.status(500).json({ error: result.message });
+      res.json({ success: true, message: result.message });
+    });
+
+    this.app.delete('/api/services/:name', (req, res) => {
+      if (!guard(res)) return;
+      const nome = req.params.name;
+      const servico = (this.serviceManager.getAllServices() || []).find(s => s.Name === nome);
+      if (!servico) return res.status(404).json({ error: 'Service not found' });
+      // Remover um serviço que não é nosso desconfigura a máquina inteira.
+      if (!servico.IsManaged) {
+        return res.status(403).json({ error: 'Only services created by Kyrios Chronos can be removed from the web panel' });
+      }
+
+      const result = this.serviceManager.uninstallService(nome);
+      this._audit(req, 'SERVICE_REMOVED_WEB', { targetType: 'service', target: nome, before: { Name: nome }, after: null });
+      if (!result.success) return res.status(500).json({ error: result.message });
+      res.json({ success: true, message: result.message });
+    });
+  }
+
+  // ─── Execuções em andamento ───
+  _runRoutes() {
+    const guard = (res) => {
+      if (!this.runRegistry) { res.status(503).json({ error: 'Run registry unavailable' }); return false; }
+      return true;
+    };
+
+    this.app.get('/api/runs', (req, res) => {
+      if (!guard(res)) return;
+      res.json({ success: true, data: this.runRegistry.active(), recent: this.runRegistry.recent() });
+    });
+
+    this.app.get('/api/runs/target/:targetId', (req, res) => {
+      if (!guard(res)) return;
+      res.json({ success: true, data: this.runRegistry.activeFor(req.params.targetId) });
+    });
+
+    // Depois de /target/: o Express casa na ordem de registro, e :id casaria
+    // com a palavra "target" primeiro.
+    this.app.get('/api/runs/:id', (req, res) => {
+      if (!guard(res)) return;
+      const sinceSeq = parseInt(req.query.since, 10) || 0;
+      const detail = this.runRegistry.detail(req.params.id, sinceSeq);
+      if (!detail) return res.status(404).json({ error: 'Run not found' });
+      res.json({ success: true, data: detail });
+    });
+  }
+
+  // ─── Scripts gerenciados ───
+  //
+  // O painel envia arquivos de script para uma pasta que o sistema administra.
+  // Tudo aqui é sobre não deixar o navegador escolher onde grava: o nome passa
+  // por safeFileName, o caminho por safeJoin e a extensão tem lista fechada -
+  // o que for gravado aqui o agendador executa depois.
+  _scriptRoutes() {
+    const raiz = () => {
+      const dir = path.join(this.config.configDir, '..', 'scripts');
+      try { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); } catch (e) {}
+      return dir;
+    };
+
+    const MAX_BYTES = 8 * 1024 * 1024;
+
+    this.app.get('/api/scripts', (req, res) => {
+      const dir = raiz();
+      let arquivos = [];
+      try {
+        arquivos = fs.readdirSync(dir)
+          .filter(n => security.ALLOWED_SCRIPT_EXT.has(path.extname(n).toLowerCase()))
+          .map(n => {
+            const st = fs.statSync(path.join(dir, n));
+            return { name: n, size: st.size, modified: st.mtime.toISOString(), path: path.join(dir, n) };
+          })
+          .sort((a, b) => b.modified.localeCompare(a.modified));
+      } catch (e) {}
+      res.json({ success: true, data: arquivos, count: arquivos.length, dir });
+    });
+
+    this.app.get('/api/scripts/:name', (req, res) => {
+      const nome = security.safeFileName(req.params.name);
+      if (!nome) return res.status(400).json({ error: 'Invalid file name' });
+      const full = security.safeJoin(raiz(), nome);
+      if (!full || !fs.existsSync(full)) return res.status(404).json({ error: 'Script not found' });
+      res.json({ success: true, data: { name: nome, path: full, content: fs.readFileSync(full, 'utf8') } });
+    });
+
+    // O corpo vem em base64 num JSON: evita uma dependência de multipart e
+    // deixa o limite de tamanho explícito nesta rota, em vez de afrouxar o
+    // limite global por causa de uma só.
+    this.app.post('/api/scripts', express.json({ limit: '12mb' }), (req, res) => {
+      const nome = security.safeFileName((req.body || {}).name);
+      if (!nome) {
+        return res.status(400).json({
+          error: 'Invalid file name',
+          message: 'Use a plain file name with one of these extensions: ' + [...security.ALLOWED_SCRIPT_EXT].join(', '),
+        });
+      }
+
+      const bruto = (req.body || {}).contentBase64;
+      if (typeof bruto !== 'string') return res.status(400).json({ error: 'contentBase64 is required' });
+
+      let buffer;
+      try { buffer = Buffer.from(bruto, 'base64'); }
+      catch (e) { return res.status(400).json({ error: 'Malformed base64 content' }); }
+      if (buffer.length > MAX_BYTES) return res.status(413).json({ error: 'Script is too large', maxBytes: MAX_BYTES });
+
+      const full = security.safeJoin(raiz(), nome);
+      if (!full) return res.status(400).json({ error: 'Invalid file name' });
+
+      const existia = fs.existsSync(full);
+      if (existia && req.body.overwrite !== true) {
+        return res.status(409).json({ error: 'A script with that name already exists', name: nome });
+      }
+
+      try {
+        fs.writeFileSync(full, buffer);
+      } catch (e) {
+        this.logger.error('Script upload failed', e, { name: nome });
+        return res.status(500).json({ error: e.message });
+      }
+
+      this._audit(req, existia ? 'SCRIPT_REPLACED_WEB' : 'SCRIPT_UPLOADED_WEB', {
+        targetType: 'script', target: nome,
+        before: existia ? { name: nome } : null,
+        after: { name: nome, bytes: buffer.length },
+      });
+      this.logger.log('INFO', `Script ${existia ? 'replaced' : 'uploaded'} via web: ${nome} (${buffer.length} bytes)`);
+      res.status(existia ? 200 : 201).json({ success: true, data: { name: nome, path: full, size: buffer.length } });
+    });
+
+    this.app.delete('/api/scripts/:name', (req, res) => {
+      const nome = security.safeFileName(req.params.name);
+      if (!nome) return res.status(400).json({ error: 'Invalid file name' });
+      const full = security.safeJoin(raiz(), nome);
+      if (!full || !fs.existsSync(full)) return res.status(404).json({ error: 'Script not found' });
+
+      // Um script apagado por baixo de uma tarefa agendada vira falha silenciosa
+      // na próxima execução, então o painel avisa quem usa.
+      const emUso = this.taskManager.getAllTasks().filter(t => (t.ScriptPath || '').toLowerCase() === full.toLowerCase());
+      if (emUso.length && req.query.force !== 'true') {
+        return res.status(409).json({
+          error: 'Script is in use',
+          tasks: emUso.map(t => ({ Id: t.Id, Name: t.Name })),
+        });
+      }
+
+      fs.unlinkSync(full);
+      this._audit(req, 'SCRIPT_DELETED_WEB', { targetType: 'script', target: nome, before: { name: nome }, after: null });
+      res.json({ success: true, message: `Script "${nome}" deleted` });
     });
   }
 
@@ -592,6 +867,45 @@ class ApiServer {
       });
     });
 
+    this.app.get('/api/calendar', (req, res) => {
+      try {
+        const calendar = require('./calendarData');
+        const from = new Date(req.query.from || Date.now() - 7 * 86400000);
+        const to = new Date(req.query.to || Date.now() + 7 * 86400000);
+        let backupHistory = [];
+        try { backupHistory = (this.backupManager && this.backupManager.getHistory ? this.backupManager.getHistory() : []) || []; } catch (e) {}
+
+        res.json({ success: true, data: calendar.build(this.cronParser, {
+          tasks: this.taskManager.getAllTasks(),
+          profiles: this.backupManager ? this.backupManager.getAllProfiles() : [],
+          taskHistory: this.taskManager.history || [],
+          backupHistory,
+        }, { from, to }, {}) });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    this.app.post('/api/schedule/conflicts', (req, res) => {
+      try {
+        const advisor = require('./scheduleAdvisor');
+        const { expression, excludeId } = req.body || {};
+        if (!expression) return res.status(400).json({ error: 'expression is required' });
+
+        const agenda = advisor.collectSchedules(
+          this.taskManager.getAllTasks(),
+          this.backupManager ? this.backupManager.getAllProfiles() : []
+        );
+        const conflicts = advisor.findConflicts(this.cronParser, expression, agenda, { excludeId });
+        const suggestion = conflicts.length
+          ? advisor.suggestFreeSlot(this.cronParser, expression, agenda, { excludeId })
+          : null;
+        res.json({ success: true, data: { conflicts, suggestion, totalScheduled: agenda.length } });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+
     // API reference page, kept from the previous server.
     this.app.get('/docs', (req, res) => res.type('html').send(this.getDocsHTML()));
 
@@ -616,6 +930,18 @@ class ApiServer {
     this.app.use((req, res) => {
       if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
       res.redirect('/');
+    });
+
+    // Sem isto o express responde uma página de erro com o stack trace dentro -
+    // que é exatamente o tipo de coisa que não se entrega a quem está sondando.
+    this.app.use((err, req, res, next) => {
+      const status = err.status || err.statusCode || 500;
+      if (status >= 500) this.logger.error(`Unhandled error on ${req.method} ${req.path}`, err);
+      else this.logger.log('WARN', `${req.method} ${req.path} refused: ${err.message}`);
+      if (res.headersSent) return next(err);
+      res.status(status).json({
+        error: status === 413 ? 'Payload too large' : (status < 500 ? err.message : 'Internal error'),
+      });
     });
   }
 
