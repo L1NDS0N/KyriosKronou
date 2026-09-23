@@ -72,6 +72,18 @@ contextBridge.exposeInMainWorld('api', {
   downloadMysqldump: () => ipcRenderer.invoke('download-mysqldump'),
   setMysqldumpPath: (p) => ipcRenderer.invoke('set-mysqldump-path', p),
   getBackupHistory: (profileId) => ipcRenderer.invoke('get-backup-history', profileId),
+
+  // Sync (folder synchronization + old-content retention)
+  getSyncProfiles: () => ipcRenderer.invoke('get-sync-profiles'),
+  createSyncProfile: (data) => ipcRenderer.invoke('create-sync-profile', data),
+  updateSyncProfile: (data) => ipcRenderer.invoke('update-sync-profile', data),
+  deleteSyncProfile: (id) => ipcRenderer.invoke('delete-sync-profile', id),
+  runSync: (id) => ipcRenderer.invoke('run-sync', id),
+  getSyncEngines: () => ipcRenderer.invoke('get-sync-engines'),
+  analyzeSyncFolder: (dir) => ipcRenderer.invoke('analyze-sync-folder', dir),
+  previewSyncRetention: (dir, cfg) => ipcRenderer.invoke('preview-sync-retention', dir, cfg),
+  getSyncHistory: (profileId) => ipcRenderer.invoke('get-sync-history', profileId),
+  testSyncConnection: (engineId, cfg) => ipcRenderer.invoke('test-sync-connection', engineId, cfg),
   getBackupHistoryStats: (profileId) => ipcRenderer.invoke('get-backup-history-stats', profileId),
   deployBackupNssm: (profileId) => ipcRenderer.invoke('deploy-backup-nssm', profileId),
   undeployBackupNssm: (profileId) => ipcRenderer.invoke('undeploy-backup-nssm', profileId),

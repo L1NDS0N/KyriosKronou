@@ -215,7 +215,7 @@ class BackupPage {
     this.draft = {
       Name: 'MySQL Backup ' + (this.profiles.length + 1), Host: 'localhost', Port: 3306, User: 'root', Password: '',
       Databases: [], BackupPath: '', NamingPattern: '{database}_{date}_{time}',
-      Compression: 'zip', CompressionLevel: 5, ExtraArgs: '--single-transaction --routines --triggers --events',
+      Compression: 'none', CompressionLevel: 5, ExtraArgs: '--single-transaction --routines --triggers --events',
       UploadTargets: [], KeepLocal: true, KeepDays: 7, CronExpression: '0 2 * * *', Enabled: true
     };
     this._renderWizard();
@@ -376,7 +376,7 @@ class BackupPage {
       </div>
       <div class="ws-section">
         <div class="ws-label">${esc(i18n.t('summary.compression'))}</div>
-        <div class="ws-value">${d.Compression ? d.Compression.toUpperCase() : 'ZIP'} ${esc(i18n.t('summary.level'))} ${d.CompressionLevel || 5}</div>
+        <div class="ws-value">${d.Compression && d.Compression !== 'none' ? `${d.Compression.toUpperCase()} ${esc(i18n.t('summary.level'))} ${d.CompressionLevel || 5}` : esc(i18n.t('wizard.compressNone'))}</div>
       </div>
       <div class="ws-section">
         <div class="ws-label">${esc(i18n.t('summary.upload'))}</div>

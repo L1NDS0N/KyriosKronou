@@ -70,7 +70,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     const page = btn.dataset.page;
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById(`page-${page}`).classList.add('active');
-    const titleMap = { dashboard: 'dashboard.title', tasks: 'tasks.title', services: 'services.title', history: 'history.title', settings: 'settings.title', logs: 'logs.title', backup: 'Backups' };
+    const titleMap = { dashboard: 'dashboard.title', tasks: 'tasks.title', services: 'services.title', history: 'history.title', settings: 'settings.title', logs: 'logs.title', backup: 'nav.backups', sync: 'nav.sync' };
     document.getElementById('page-title').textContent = i18n.t(titleMap[page] || page);
     refreshCurrentPage();
     lucide.createIcons();
@@ -396,6 +396,7 @@ document.addEventListener('kyrios-runs-changed', () => {
   const page = active && active.dataset.page;
   if (page === 'tasks' && typeof renderTasks === 'function') renderTasks();
   if (page === 'backup' && window.backupPage) backupPage.render();
+  if (page === 'sync' && window.syncPage) syncPage.render();
 });
 
 function renderTasks() {
@@ -1835,6 +1836,7 @@ async function refreshCurrentPage() {
   else if (page === 'settings') await loadSettings();
   else if (page === 'logs') await refreshLogs();
   else if (page === 'backup') await backupPage.load();
+  else if (page === 'sync') await syncPage.load();
 }
 
 // Auto-refresh every 30s
@@ -1934,6 +1936,11 @@ async function showGitHubProfile() {
               <span><i data-lucide="calendar"></i>Joined ${new Date(user.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</span>
             </div>
           </div>
+        </div>
+        <div class="gh-actions">
+          <a class="gh-coffee-btn" href="https://www.buymeacoffee.com/lindsonfranca" target="_blank" rel="noopener">
+            <i data-lucide="coffee"></i> Buy me a coffee
+          </a>
         </div>
         <div class="gh-stats">
           <div class="gh-stat"><div class="gh-stat-value">${user.public_repos}</div><div class="gh-stat-label">Repos</div></div>

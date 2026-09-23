@@ -23,6 +23,7 @@ const ConfigManager = require('./configManager');
 const CronParser = require('./cronParser');
 const TaskManager = require('./taskManager');
 const BackupManager = require('./backupManager');
+const SyncManager = require('./sync/syncManager');
 const ServiceManager = require('./serviceManager');
 const WrapperGenerator = require('./wrapperGenerator');
 const RunRegistry = require('./runRegistry');
@@ -45,10 +46,11 @@ function bootstrap() {
   // unica interface disponivel - passar null aqui deixaria metade dele morta.
   const serviceManager = new ServiceManager(logger, config);
   const wrapperGenerator = new WrapperGenerator(config, logger);
+  const syncManager = new SyncManager(config, logger, null);
 
   logger.log('INFO', '=== Κύριος Χρόνος service scheduler starting ===');
   logger.log('INFO', `PID ${process.pid} | node ${process.version} | data ${paths.dataDir()}`);
-  logger.log('INFO', `Tasks loaded: ${taskManager.getAllTasks().length} | backup profiles: ${backupManager.getAllProfiles().length}`);
+  logger.log('INFO', `Tasks loaded: ${taskManager.getAllTasks().length} | backup profiles: ${backupManager.getAllProfiles().length} | sync profiles: ${syncManager.getAllProfiles().length}`);
   logger.audit('SERVICE_STARTED', { targetType: 'service', after: { pid: process.pid, dataDir: paths.dataDir() } });
 
   // Liveness marker for the GUI's "service health" panel.
@@ -56,7 +58,7 @@ function bootstrap() {
   try { fs.writeFileSync(pidFile, String(process.pid), 'utf8'); } catch (e) {}
 
   const scheduler = new SchedulerCore(
-    { taskManager, backupManager, cronParser, logger },
+    { taskManager, backupManager, syncManager, cronParser, logger },
     ROLE_SERVICE
   ).start();
 

@@ -756,6 +756,9 @@ kbd {
 .gh-info .gh-meta { display: flex; gap: 12px; margin-top: 8px; font-size: 11px; color: var(--text3); flex-wrap: wrap; }
 .gh-info .gh-meta span, .gh-info .gh-meta a { display: flex; align-items: center; gap: 4px; }
 .gh-info .gh-meta i { width: 13px; height: 13px; }
+.gh-actions { display: flex; justify-content: center; margin: 14px 0; }
+.gh-coffee-btn { display: inline-flex; align-items: center; gap: 8px; padding: 9px 18px; border-radius: 10px; background: #FFDD00; color: #0D0C22; font-weight: 700; font-size: 13px; text-decoration: none; transition: transform .15s ease, box-shadow .15s ease; }
+.gh-coffee-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(255, 221, 0, .35); }
 .gh-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .gh-stat {
   background: var(--glass); border: 1px solid var(--glass-border); border-radius: 10px;
@@ -1827,6 +1830,19 @@ input[type="file"]::file-selector-button:hover { background: var(--glass3); colo
 .log-actor { font-size: 12px; color: var(--text2); }
 .log-ip { font-size: 10.5px; color: var(--text3); font-family: var(--mono); }
 .log-meta.expanded { max-height: 400px; overflow: auto; color: var(--text2); }
+
+/* ═══════════════════════════════════════════════════════════
+   Sync (folder synchronization + retention)
+   Reuses backup-profile-* card classes; only the specifics live here.
+   ═══════════════════════════════════════════════════════════ */
+.sync-profile-card { margin-bottom: 10px; padding: 16px; transition: all .2s; cursor: pointer; }
+.sync-profile-card.disabled { opacity: .6; }
+.sync-profile-card:hover { transform: translateY(-1px); }
+.sync-profile-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.sync-profile-info { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sync-profile-name { margin: 0; font-size: 15px; font-weight: 600; }
+.sync-profile-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sync-profile-details { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
 
 @media (max-width: 720px) {
   .logs-count { margin-left: 0; width: 100%; }

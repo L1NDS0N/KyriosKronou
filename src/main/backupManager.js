@@ -56,7 +56,7 @@ class BackupManager {
       // Backup options
       BackupPath: data.BackupPath || path.join(process.env.USERPROFILE || '', 'KyrionBackups'),
       NamingPattern: data.NamingPattern || '{database}_{date}_{time}',
-      Compression: data.Compression || 'zip', // none, zip, 7z
+      Compression: data.Compression || 'none', // none, zip, 7z - off by default
       CompressionLevel: data.CompressionLevel || 5, // 1-9
       // Extra mysqldump args
       ExtraArgs: data.ExtraArgs || '--single-transaction --routines --triggers --events',
@@ -426,12 +426,23 @@ class BackupManager {
       return { success: false, database, message: 'O backup terminou sem erro, mas o arquivo não foi criado.', stdout: result.stdout || '', stderr: result.stderr || '' };
     }
 
-    // Compress
+    // Compress. The dump is an intermediate artifact: once the archive exists
+    // it is removed, so only the compressed file is kept on disk. If the
+    // compression itself fails, a half-written archive is deleted too so the
+    // folder is not left with a corrupt file that looks like a valid backup.
     if (profile.Compression && profile.Compression !== 'none' && fs.existsSync(dumpPath)) {
       try {
         await this.compressFile(dumpPath, finalPath, profile.Compression, profile.CompressionLevel);
-        try { fs.unlinkSync(dumpPath); } catch (e) {}
+        if (!fs.existsSync(finalPath)) {
+          throw new Error('archive was not created');
+        }
+        try { fs.unlinkSync(dumpPath); } catch (e) {
+          this.logger.log('WARN', `Could not remove the uncompressed dump ${path.basename(dumpPath)}: ${e.message}`);
+        }
       } catch (e) {
+        // Remove the half-written archive, but keep the dump: it is still the
+        // only good copy of the backup.
+        try { if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath); } catch (e2) {}
         return { success: false, database, message: `Compression failed: ${e.message}` };
       }
     }

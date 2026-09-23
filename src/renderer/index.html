@@ -56,6 +56,9 @@
         <button class="nav-btn" data-page="backup">
           <i data-lucide="hard-drive-download"></i><span data-i18n="nav.backups">Backups</span>
         </button>
+        <button class="nav-btn" data-page="sync">
+          <i data-lucide="folder-sync"></i><span data-i18n="nav.sync">Sync</span>
+        </button>
         <button class="nav-btn" data-page="services">
           <i data-lucide="server"></i><span data-i18n="nav.services">Services</span>
         </button>
@@ -295,6 +298,23 @@
             <i data-lucide="hard-drive-download" class="empty-icon"></i>
             <p>No backup profiles</p>
             <span>Create a profile to schedule MySQL backups with compression and remote upload.</span>
+          </div>
+        </section>
+
+        <!-- ═══ SYNC ═══ -->
+        <section id="page-sync" class="page">
+          <div class="page-toolbar">
+            <div class="toolbar-left"><span class="toolbar-info"><i data-lucide="folder-sync"></i> <span data-i18n="sync.title">Folder Sync Profiles</span></span></div>
+            <div class="toolbar-right">
+              <button class="btn-outline" id="btn-refresh-sync" title="Refresh"><i data-lucide="refresh-cw"></i></button>
+              <button class="btn-glow" onclick="syncPage.showCreateModal()"><i data-lucide="plus"></i><span data-i18n="sync.newProfile">New Profile</span></button>
+            </div>
+          </div>
+          <div id="sync-profiles-list"></div>
+          <div class="empty-state" id="sync-empty" style="display:none">
+            <i data-lucide="folder-sync" class="empty-icon"></i>
+            <p data-i18n="sync.noProfiles">No sync profiles</p>
+            <span data-i18n="sync.noProfilesDesc">Create a profile to mirror a folder and automatically delete old content.</span>
           </div>
         </section>
 
@@ -547,6 +567,7 @@
   <script src="quickAssist.js"></script>
   <script src="scriptEditor.js"></script>
   <script src="backupPage.js"></script>
+  <script src="syncPage.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -98,6 +98,7 @@ class SchedulerCore {
     this.pid = options.pid || process.pid;
     this.taskManager = deps.taskManager;
     this.backupManager = deps.backupManager;
+    this.syncManager = deps.syncManager || null;
     this.cronParser = deps.cronParser;
     this.logger = deps.logger;
     this.role = role;
@@ -148,6 +149,7 @@ class SchedulerCore {
   reload() {
     try { if (this.taskManager.loadData) this.taskManager.loadData(); } catch (e) {}
     try { if (this.backupManager && this.backupManager.reload) this.backupManager.reload(); } catch (e) {}
+    try { if (this.syncManager && this.syncManager.reload) this.syncManager.reload(); } catch (e) {}
   }
 
   _guard(key) {
@@ -173,6 +175,7 @@ class SchedulerCore {
       this.reload();
       this.runDueTasks();
       this.runDueBackups();
+      this.runDueSyncs();
     } catch (err) {
       this.logger.error(`[${this.role}] Scheduler tick error`, err);
     }
@@ -217,6 +220,31 @@ class SchedulerCore {
           if (this.hooks.onBackupExecuted) this.hooks.onBackupExecuted(profile, result);
         })
         .catch((err) => this.logger.error(`[${this.role}] Backup failed: ${profile.Name}`, err))
+        .finally(() => this.running.delete(key));
+    }
+  }
+
+  /** Sync profiles on a cron: same guard rules, one engine per destination. */
+  runDueSyncs() {
+    if (!this.syncManager) return;
+    let due;
+    try { due = this.syncManager.getDueProfiles(); } catch (e) { return; }
+    if (!Array.isArray(due)) return;
+    const now = Date.now();
+
+    for (const profile of due) {
+      if (!this.cronParser.shouldRunNow(profile.CronExpression)) continue;
+      if (profile.LastRun && (now - new Date(profile.LastRun).getTime()) < 55000) continue;
+
+      const key = `sync:${profile.Id}`;
+      if (!this._guard(key)) continue;
+      this.logger.log('INFO', `[${this.role}] Executing sync: ${profile.Name}`);
+      Promise.resolve(this.syncManager.executeSync(profile.Id))
+        .then((result) => {
+          this.logger.log('INFO', `[${this.role}] Sync ${profile.Name}: ${result && result.success ? 'completed' : 'failed'} ${(result && result.duration) || ''}`);
+          if (this.hooks.onSyncExecuted) this.hooks.onSyncExecuted(profile, result);
+        })
+        .catch((err) => this.logger.error(`[${this.role}] Sync failed: ${profile.Name}`, err))
         .finally(() => this.running.delete(key));
     }
   }
