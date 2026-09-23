@@ -6,4 +6,6 @@ build/
 .DS_Store
 Thumbs.db
 .freebuff/project-id
-/graphify-out
+
+# Grafo do codigo, regenerado sob demanda
+graphify-out/

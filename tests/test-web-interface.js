@@ -163,12 +163,25 @@ describe('Web access: sessions', () => {
     expect(auth.authenticate({ headers: {} })).to.equal(null);
   });
 
-  it('keeps the cookie HttpOnly and SameSite', () => {
+  // Strict, nao Lax: Lax ainda acompanha navegacao de topo vinda de outro site,
+  // e uma dessas basta para disparar uma acao no agendador.
+  it('keeps the cookie HttpOnly and SameSite=Strict', () => {
     const headers = {};
     const res = { setHeader: (k, v) => { headers[k] = v; } };
     auth.setSessionCookie(res, auth.createSession(user, '1.1.1.1'));
     expect(headers['Set-Cookie']).to.include('HttpOnly');
-    expect(headers['Set-Cookie']).to.include('SameSite=Lax');
+    expect(headers['Set-Cookie']).to.include('SameSite=Strict');
+  });
+
+  it('marks the cookie Secure once TLS is configured', () => {
+    const headers = {};
+    const res = { setHeader: (k, v) => { headers[k] = v; } };
+    auth.setSessionCookie(res, auth.createSession(user, '1.1.1.1'));
+    expect(headers['Set-Cookie']).to.not.include('Secure');
+
+    config.setSetting('WebHttps', true);
+    auth.setSessionCookie(res, auth.createSession(user, '1.1.1.1'));
+    expect(headers['Set-Cookie']).to.include('Secure');
   });
 });
 

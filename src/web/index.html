@@ -4,15 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Κύριος Χρόνος</title>
+<link rel="icon" type="image/png" href="/favicon.ico">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<div class="bg-effects"><div class="moon"></div><div class="dot-field"></div></div>
+<!-- A marca ao fundo, a mesma imagem que o app desktop usa. -->
+<div class="bg-effects"><div class="moon"></div><div class="dot-field"></div><div class="bg-logo"></div></div>
 
 <div class="shell">
   <aside class="sidebar">
     <div class="brand">
-      <div class="brand-mark"></div>
+      <img class="brand-mark" src="/assets/logo-24.png" alt="">
       <div class="brand-name">Κύριος Χρόνος</div>
     </div>
 
@@ -27,6 +29,14 @@
     <div class="nav-item" data-page="backups">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>
       Backups
+    </div>
+    <div class="nav-item" data-page="services">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>
+      Serviços
+    </div>
+    <div class="nav-item" data-page="scripts">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M9 13l2 2-2 2"/></svg>
+      Scripts
     </div>
     <div class="nav-item" data-page="history">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3v6h6"/><path d="M3.5 9a9 9 0 1 0 2.1-3.4L3 9"/><path d="M12 8v4l3 2"/></svg>
@@ -124,7 +134,10 @@
     <section class="page" id="page-tasks">
       <div class="page-head">
         <div><div class="page-title">Tarefas</div><div class="page-sub" id="tasks-sub">—</div></div>
-        <button class="btn-ghost" id="btn-reload-tasks">Atualizar</button>
+        <div class="row-gap">
+          <button class="btn-primary" id="btn-new-task">Nova tarefa</button>
+          <button class="btn-ghost" id="btn-reload-tasks">Atualizar</button>
+        </div>
       </div>
       <div class="glass-card">
         <table class="tbl">
@@ -138,12 +151,51 @@
     <section class="page" id="page-backups">
       <div class="page-head">
         <div><div class="page-title">Perfis de backup</div><div class="page-sub" id="backups-sub">—</div></div>
-        <button class="btn-ghost" id="btn-reload-backups">Atualizar</button>
+        <div class="row-gap">
+          <button class="btn-primary" id="btn-new-backup">Novo perfil</button>
+          <button class="btn-ghost" id="btn-reload-backups">Atualizar</button>
+        </div>
       </div>
       <div class="glass-card">
         <table class="tbl">
           <thead><tr><th>Perfil</th><th>Servidor</th><th>Bancos</th><th>Cron</th><th>Último</th><th></th></tr></thead>
           <tbody id="backups-body"><tr><td colspan="6" class="tbl-loading">carregando</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ═══ SERVIÇOS ═══ -->
+    <section class="page" id="page-services">
+      <div class="page-head">
+        <div><div class="page-title">Serviços do Windows</div><div class="page-sub" id="services-sub">—</div></div>
+        <button class="btn-ghost" id="btn-reload-services">Atualizar</button>
+      </div>
+      <div class="glass-card">
+        <table class="tbl">
+          <thead><tr><th>Nome</th><th>Estado</th><th>Aplicação</th><th>Inicialização</th><th></th></tr></thead>
+          <tbody id="services-body"><tr><td colspan="5" class="tbl-loading">carregando</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ═══ SCRIPTS ═══ -->
+    <section class="page" id="page-scripts">
+      <div class="page-head">
+        <div><div class="page-title">Scripts</div><div class="page-sub" id="scripts-sub">—</div></div>
+        <button class="btn-ghost" id="btn-reload-scripts">Atualizar</button>
+      </div>
+
+      <div class="drop-zone" id="drop-zone">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 16V4"/><path d="M8 8l4-4 4 4"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+        <div class="drop-title">Arraste um arquivo aqui, ou clique para escolher</div>
+        <div class="drop-sub">.ps1 .bat .cmd .sh .py .js .vbs .sql .txt — até 8 MB</div>
+        <input type="file" id="script-file" multiple hidden>
+      </div>
+
+      <div class="glass-card">
+        <table class="tbl">
+          <thead><tr><th>Arquivo</th><th>Tamanho</th><th>Modificado</th><th></th></tr></thead>
+          <tbody id="scripts-body"><tr><td colspan="4" class="tbl-loading">carregando</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -173,6 +225,18 @@
   </main>
 </div>
 
+<!-- Rodape fixo: o monitor e o que esta rodando, visiveis em qualquer tela. -->
+<footer class="footbar">
+  <div class="foot-metrics">
+    <span class="foot-item"><i>CPU</i><b id="foot-cpu">—</b></span>
+    <span class="foot-item"><i>MEM</i><b id="foot-mem">—</b></span>
+    <span class="foot-item"><i>DISCO</i><b id="foot-disk">—</b></span>
+    <span class="foot-item"><i>REDE</i><b id="foot-net">—</b></span>
+  </div>
+  <div class="foot-runs" id="footer-runs"><span class="idle">nada em execução</span></div>
+</footer>
+
+<div class="modal-host" id="modal-host"></div>
 <div class="toast-host" id="toasts"></div>
 <script src="/app.js"></script>
 </body>
