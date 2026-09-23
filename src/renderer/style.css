@@ -756,6 +756,9 @@ kbd {
 .gh-info .gh-meta { display: flex; gap: 12px; margin-top: 8px; font-size: 11px; color: var(--text3); flex-wrap: wrap; }
 .gh-info .gh-meta span, .gh-info .gh-meta a { display: flex; align-items: center; gap: 4px; }
 .gh-info .gh-meta i { width: 13px; height: 13px; }
+.gh-actions { display: flex; justify-content: center; margin: 14px 0; }
+.gh-coffee-btn { display: inline-flex; align-items: center; gap: 8px; padding: 9px 18px; border-radius: 10px; background: #FFDD00; color: #0D0C22; font-weight: 700; font-size: 13px; text-decoration: none; transition: transform .15s ease, box-shadow .15s ease; }
+.gh-coffee-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(255, 221, 0, .35); }
 .gh-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .gh-stat {
   background: var(--glass); border: 1px solid var(--glass-border); border-radius: 10px;

@@ -1937,6 +1937,11 @@ async function showGitHubProfile() {
             </div>
           </div>
         </div>
+        <div class="gh-actions">
+          <a class="gh-coffee-btn" href="https://www.buymeacoffee.com/lindsonfranca" target="_blank" rel="noopener">
+            <i data-lucide="coffee"></i> Buy me a coffee
+          </a>
+        </div>
         <div class="gh-stats">
           <div class="gh-stat"><div class="gh-stat-value">${user.public_repos}</div><div class="gh-stat-label">Repos</div></div>
           <div class="gh-stat"><div class="gh-stat-value">${user.followers}</div><div class="gh-stat-label">Followers</div></div>
