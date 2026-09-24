@@ -198,3 +198,70 @@ describe('retention: planDeletion', () => {
     expect(retention.planDeletion([], c, { now: NOW }).delete).to.deep.equal([]);
   });
 });
+
+// ─── Metadata-based analysis (toggle useMetadata) ───
+describe('retention: analyze with metadata dates', () => {
+  it('counts files dated only by mtime when useMetadata is on', () => {
+    const dir = tmpDir('meta');
+    // No dates in any name; ages live in the mtimes.
+    writeAged(dir, 'dump.sql', 2);
+    writeAged(dir, 'dump-old.sql', 40);
+    writeAged(dir, 'ancient.log', 200);
+
+    const off = retention.analyze(dir, { useMetadata: false });
+    expect(off.withDates).to.equal(0);
+    expect(off.folderPattern).to.equal('flat');
+
+    const on = retention.analyze(dir, { useMetadata: true });
+    expect(on.withDates).to.equal(3);
+    expect(on.fromMetadata).to.equal(3);
+    // 200d vs 2d gaps -> median gap well above daily; still "dated".
+    expect(on.folderPattern).to.equal('dated-files');
+    expect(on.suggested.Enabled).to.equal(true);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('names win over metadata per file when both are enabled', () => {
+    const dir = tmpDir('both');
+    // Name says 2020-01-01 but the mtime is fresh (a restored file).
+    const full = writeAged(dir, '2020-01-01/dump.sql', 1);
+    const r = retention.analyze(dir, { useNames: true, useMetadata: true });
+    expect(r.withDates).to.equal(1);
+    expect(r.fromMetadata).to.equal(0);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+// ─── Monthly rule (annual history) ───
+describe('retention: monthly rule in planDeletion', () => {
+  const now = Date.now();
+  const day = 24 * 3600 * 1000;
+  const compiled = retention.compile({ Enabled: true, ByMonthly: true, MonthlyKeepMonths: 12, MinKeep: 0 });
+
+  function f(rel, mtimeMs) { return { rel, size: 10, mtimeMs }; }
+
+  it('keeps the newest snapshot of each month and condemns the rest', () => {
+    const files = [
+      f('2026-01-05/dump.sql', now - 250 * day),
+      f('2026-01-20/dump.sql', now - 240 * day), // newer in Jan: survives
+      f('2026-02-10/dump.sql', now - 220 * day), // only Feb: survives
+      f('2026-02-01/dump.sql', now - 230 * day), // older in Feb: doomed
+    ];
+    const plan = retention.planDeletion(files, compiled, { now });
+    const doomed = plan.delete.map(d => d.rel);
+    expect(doomed).to.include('2026-02-01/dump.sql');
+    expect(doomed).to.include('2026-01-05/dump.sql');
+    expect(doomed).to.not.include('2026-01-20/dump.sql');
+    expect(doomed).to.not.include('2026-02-10/dump.sql');
+    expect(plan.delete[0].reason).to.equal('monthly');
+  });
+
+  it('never touches snapshots without a readable date', () => {
+    const files = [
+      f('undated/dump.sql', now - 300 * day),
+      f('plain.txt', now - 300 * day),
+    ];
+    const plan = retention.planDeletion(files, compiled, { now });
+    expect(plan.delete).to.have.lengthOf(0);
+  });
+});

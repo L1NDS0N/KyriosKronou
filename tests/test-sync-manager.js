@@ -455,3 +455,51 @@ describe('SyncManager: previewSyncPlan (dry-run simulator)', () => {
     fs.utimesSync(path.join(oldDir, 'old.sql'), t, t);
   }
 });
+
+// ─── Standalone retention runner (Retention screen engine) ───
+describe('SyncManager: runRetentionNow', () => {
+  let mgr, dir;
+  beforeEach(() => { mgr = newManager(); dir = tmpDir('retenow'); });
+  afterEach(() => {
+    mgr.config.dispose();
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {}
+  });
+
+  it('deletes old dated snapshots and frees space, with audit trail', () => {
+    const oldDir = path.join(dir, '2020-06-01');
+    fs.mkdirSync(oldDir, { recursive: true });
+    fs.writeFileSync(path.join(oldDir, 'dump.sql'), 'x'.repeat(1000));
+    const t = new Date(Date.now() - 400 * 24 * 3600 * 1000);
+    fs.utimesSync(path.join(oldDir, 'dump.sql'), t, t);
+    write(dir, '2026-09-01/fresh.sql', 'new');
+
+    return mgr.runRetentionNow(dir, { Enabled: true, ByAge: true, KeepDays: 365, ByCount: false, BySize: false, MinKeep: 0 }).then(r => {
+      expect(r.ok).to.equal(true);
+      expect(r.deleted).to.equal(1);
+      expect(r.freed).to.equal(1000);
+      expect(mgr.logger.audits.includes('RETENTION_FILE_DELETED')).to.equal(true);
+      // Empty dated folder pruned by the local engine.
+      expect(fs.existsSync(oldDir)).to.equal(false);
+      expect(fs.existsSync(path.join(dir, '2026-09-01', 'fresh.sql'))).to.equal(true);
+    });
+  });
+
+  it('refuses policies without criteria instead of deleting anything', () => {
+    return mgr.runRetentionNow(dir, { Enabled: true }).then(r => {
+      expect(r.ok).to.equal(false);
+      expect(r.error).to.be.a('string');
+      expect(fs.readdirSync(dir)).to.have.lengthOf(0);
+    });
+  });
+
+  it('returns ok with zero deletions on an empty/missing folder', () => {
+    return Promise.all([
+      mgr.runRetentionNow(dir, { Enabled: true, ByAge: true, KeepDays: 1, MinKeep: 0 }),
+      mgr.runRetentionNow('', null),
+    ]).then(([empty, missing]) => {
+      expect(empty.ok).to.equal(true);
+      expect(empty.deleted).to.equal(0);
+      expect(missing.ok).to.equal(false);
+    });
+  });
+});

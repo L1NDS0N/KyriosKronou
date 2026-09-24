@@ -100,6 +100,11 @@ function scanDest(dir) {
 function analyze(dir, options = {}) {
   const scanner = options.scanner || scanDest;
   const now = options.now || Date.now();
+  // Date source toggle: file NAMES (default) and/or file METADATA (mtime).
+  // Names beat metadata per file: a name that parses is a human's snapshot
+  // label, the mtime is whatever the copy/transfer stamped.
+  const useNames = options.useNames !== false;
+  const useMetadata = options.useMetadata === true;
   const files = scanner(dir);
 
   if (!files.length) {
@@ -116,18 +121,32 @@ function analyze(dir, options = {}) {
   // 'backup-20260922.zip' -> the file name itself.
   let withDates = 0;
   let fromFolders = 0;
+  let fromMetadata = 0;
   const dates = [];
 
   for (const f of files) {
-    const parts = f.rel.split('/');
-    for (let i = 0; i < parts.length; i++) {
-      const d = parseDateFromName(parts[i]);
-      if (!d) continue;
-      withDates++;
-      if (i < parts.length - 1) fromFolders++;
-      dates.push(d.getTime());
-      break;
+    let date = null;
+    let inFolder = false;
+    if (useNames) {
+      const parts = f.rel.split('/');
+      for (let i = 0; i < parts.length; i++) {
+        const d = parseDateFromName(parts[i]);
+        if (!d) continue;
+        date = d;
+        inFolder = i < parts.length - 1;
+        break;
+      }
     }
+    // Metadata fallback: the mtime is the snapshot date when the name says
+    // nothing. The age rule already trusts mtimes, so the analysis does too.
+    if (!date && useMetadata && f.mtimeMs) {
+      date = new Date(f.mtimeMs);
+      fromMetadata++;
+    }
+    if (!date) continue;
+    withDates++;
+    if (inFolder) fromFolders++;
+    dates.push(date.getTime());
   }
 
   // Median gap between consecutive dated snapshots suggests how often
@@ -154,6 +173,7 @@ function analyze(dir, options = {}) {
     totalFiles: files.length,
     totalBytes,
     withDates,
+    fromMetadata,
     dateIsh: Math.round(dateIsh * 100) / 100,
     folderPattern,
     medianGapDays,
@@ -173,6 +193,7 @@ function _suggest({ dateIsh, medianGapDays, totalFiles }) {
     ByAge: false, KeepDays: 30,
     ByCount: false, KeepCount: 10,
     BySize: false, FreeGb: 0,
+    ByMonthly: false,
     MinKeep: 3,
   };
   if (!totalFiles) return s;
@@ -201,7 +222,7 @@ function _suggest({ dateIsh, medianGapDays, totalFiles }) {
  * configs that cannot do anything (so a typo never empties a destination).
  *
  * @param {object} cfg - { Enabled, ByAge, KeepDays, ByCount, KeepCount,
- *                        BySize, FreeGb, MinKeep }
+ *                        BySize, FreeGb, ByMonthly, MinKeep }
  * @returns { ok, rules: [...], minKeep, error? }
  */
 function compile(cfg) {
@@ -220,6 +241,11 @@ function compile(cfg) {
   const freeGb = parseFloat(c.FreeGb);
   if (c.BySize && freeGb > 0) {
     rules.push({ type: 'size', freeBytes: freeGb * 1024 * 1024 * 1024 });
+  }
+  // Monthly rule: one snapshot per month is kept - the annual history. It
+  // composes with the other rules like age does.
+  if (c.ByMonthly && c.MonthlyKeepMonths > 0) {
+    rules.push({ type: 'monthly' });
   }
 
   if (!rules.length) {
@@ -277,6 +303,40 @@ function planDeletion(files, compiled, hooks = {}) {
       for (const unit of ordered.slice(rule.keep)) {
         for (const f of unit.files) {
           if (!doomed.has(f.rel)) doomed.set(f.rel, { reason: 'count', detail: `>${rule.keep}` });
+        }
+      }
+    } else if (rule.type === 'monthly') {
+      // Annual history, one snapshot per month. A snapshot is the same unit
+      // as the count rule: a top-level dated folder, or the file itself. For
+      // each month (YYYY-MM), the NEWEST unit inside it survives; everything
+      // else in that month is old history. Units whose date is unknown are
+      // never touched.
+      const units = new Map(); // key -> { newest, month, files: [] }
+      for (const f of files) {
+        const parts = f.rel.split('/');
+        const key = parts.length > 1 ? parts[0] : '\u0000file:' + f.rel;
+        let unit = units.get(key);
+        if (!unit) { unit = { newest: 0, month: null, files: [] }; units.set(key, unit); }
+        unit.files.push(f);
+        if ((f.mtimeMs || 0) > unit.newest) unit.newest = f.mtimeMs || 0;
+        if (!unit.month) {
+          let label = parts.length > 1 ? parts[0] : f.rel;
+          const d = parseDateFromName(label);
+          if (d) unit.month = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+        }
+      }
+      const newestByMonth = new Map(); // 'YYYY-MM' -> newest mtime
+      for (const unit of units.values()) {
+        if (!unit.month) continue;
+        const cur = newestByMonth.get(unit.month) || 0;
+        if (unit.newest > cur) newestByMonth.set(unit.month, unit.newest);
+      }
+      for (const unit of units.values()) {
+        if (!unit.month) continue; // undated: never condemned by month rule
+        if (unit.newest < (newestByMonth.get(unit.month) || 0)) {
+          for (const f of unit.files) {
+            if (!doomed.has(f.rel)) doomed.set(f.rel, { reason: 'monthly', detail: unit.month });
+          }
         }
       }
     } else if (rule.type === 'size') {

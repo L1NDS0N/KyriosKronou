@@ -25,6 +25,9 @@ function normalizeRetention(raw) {
     KeepCount: parseInt(r.KeepCount, 10) || 10,
     BySize: r.BySize === true,
     FreeGb: parseFloat(r.FreeGb) || 0,
+    // Annual history: keep one snapshot per month for N months.
+    ByMonthly: r.ByMonthly === true,
+    MonthlyKeepMonths: parseInt(r.MonthlyKeepMonths, 10) || 12,
     MinKeep: r.MinKeep === undefined ? 3 : Math.max(0, parseInt(r.MinKeep, 10) || 0),
   };
 }
@@ -355,12 +358,77 @@ class SyncManager {
    * Analyze a folder's content pattern and propose a retention policy.
    * Powers the wizard's "identify the pattern" step - read-only, never
    * deletes anything.
+   *
+   * @param {string} dir - folder to inspect
+   * @param {object} [options] - { useNames: true, useMetadata: false }
+   *   the toggles choose WHERE the dates come from: file names, file
+   *   metadata (mtime), or both (names win per file).
    */
-  analyzeFolder(dir) {
+  analyzeFolder(dir, options = {}) {
     if (!dir) return { ok: false, error: 'Pasta não informada' };
     const resolved = path.resolve(dir);
     if (!fs.existsSync(resolved)) return { ok: false, error: `Pasta não encontrada: ${dir}` };
-    return retention.analyze(resolved);
+    return retention.analyze(resolved, {
+      useNames: options.useNames !== false,
+      useMetadata: options.useMetadata === true,
+    });
+  }
+
+  /**
+   * One-shot retention over a plain local folder: compile the policy, list
+   * the folder, delete what the rules condemn. This is the engine behind the
+   * dedicated Retention screen - it does NOT need a sync profile, it only
+   * needs a folder and rules. Every deletion is audited.
+   *
+   * @param {string} dir - absolute folder path
+   * @param {object} retentionCfg - same shape as a profile's Retention block
+   * @param {object} [hooks] - { now } injection for tests
+   */
+  async runRetentionNow(dir, retentionCfg, hooks = {}) {
+    if (!dir) return { ok: false, deleted: 0, error: 'Pasta não informada' };
+    const resolved = path.resolve(dir);
+    if (!fs.existsSync(resolved)) return { ok: false, deleted: 0, error: `Pasta não encontrada: ${dir}` };
+
+    const cfg = normalizeRetention(retentionCfg);
+    const compiled = retention.compile(cfg);
+    if (!compiled.ok) return { ok: false, deleted: 0, error: compiled.error };
+
+    const files = retention.scanDest(resolved);
+    if (!files.length) return { ok: true, deleted: 0, freed: 0, planned: 0 };
+
+    const plan = retention.planDeletion(files, compiled, { now: hooks.now });
+    if (!plan.ok) return { ok: false, deleted: 0, error: plan.error };
+    if (!plan.delete.length) return { ok: true, deleted: 0, freed: 0, planned: 0 };
+
+    // Local engine deleteFile also prunes the empty parent folders a dead
+    // snapshot would leave behind - exactly what a dated-folder archive wants.
+    // planDeletion reports rel/reason only; sizes come from the scan.
+    const sizeOf = new Map(files.map(f => [f.rel, f.size || 0]));
+    const engine = engines.get('local');
+    const dest = { path: resolved };
+    let deleted = 0;
+    let freed = 0;
+    const failures = [];
+    for (const item of plan.delete) {
+      const r = await engine.deleteFile(dest, item.rel);
+      if (r.success) {
+        deleted++;
+        freed += sizeOf.get(item.rel) || 0;
+        this.logger.audit('RETENTION_FILE_DELETED', {
+          targetType: 'retention', target: resolved,
+          before: { rel: item.rel, size: sizeOf.get(item.rel) || 0 },
+          after: { reason: item.reason, detail: item.detail || '' },
+        });
+      } else {
+        failures.push({ rel: item.rel, message: r.message || '?' });
+        this.logger.log('WARN', `Retention delete failed: ${item.rel}: ${r.message || '?'}`);
+      }
+    }
+    this.logger.audit('RETENTION_RUN', {
+      targetType: 'retention', target: resolved,
+      after: { deleted, freed, planned: plan.delete.length, failed: failures.length },
+    });
+    return { ok: true, deleted, freed, planned: plan.delete.length, failed: failures };
   }
 
   /**

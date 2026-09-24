@@ -70,7 +70,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     const page = btn.dataset.page;
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById(`page-${page}`).classList.add('active');
-    const titleMap = { dashboard: 'dashboard.title', tasks: 'tasks.title', services: 'services.title', history: 'history.title', settings: 'settings.title', logs: 'logs.title', backup: 'nav.backups', sync: 'nav.sync' };
+    const titleMap = { dashboard: 'dashboard.title', tasks: 'tasks.title', services: 'services.title', history: 'history.title', settings: 'settings.title', logs: 'logs.title', backup: 'nav.backups', sync: 'nav.sync', retention: 'nav.retention' };
     document.getElementById('page-title').textContent = i18n.t(titleMap[page] || page);
     refreshCurrentPage();
     lucide.createIcons();
@@ -1837,6 +1837,7 @@ async function refreshCurrentPage() {
   else if (page === 'logs') await refreshLogs();
   else if (page === 'backup') await backupPage.load();
   else if (page === 'sync') await syncPage.load();
+  else if (page === 'retention') await retentionPage.load();
 }
 
 // Auto-refresh every 30s

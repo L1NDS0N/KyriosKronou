@@ -872,8 +872,9 @@ function registerIPC() {
     }
   });
   ipcMain.handle('get-sync-engines', () => require('./sync/engines').list());
-  ipcMain.handle('analyze-sync-folder', (e, dir) => syncManager.analyzeFolder(dir));
+  ipcMain.handle('analyze-sync-folder', (e, dir, options) => syncManager.analyzeFolder(dir, options || {}));
   ipcMain.handle('preview-sync-retention', (e, dir, retentionCfg) => syncManager.previewRetention(dir, retentionCfg));
+  ipcMain.handle('run-retention-now', (e, dir, retentionCfg) => syncManager.runRetentionNow(dir, retentionCfg));
   ipcMain.handle('preview-sync-plan', async (e, draft) => {
     try { return await syncManager.previewSyncPlan(draft); }
     catch (err) { return { ok: false, error: err.message };
