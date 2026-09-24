@@ -784,6 +784,13 @@ kbd {
 .ret-file-table td { padding: 2px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .wizard-content { min-height: 280px; }
 .wizard-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+/* Save must remain reachable while a long retention analysis is scrolled. */
+.sync-wizard-nav {
+  position: sticky; bottom: -1px; z-index: 2;
+  background: var(--bg2, #17171f);
+  backdrop-filter: blur(10px);
+}
+.sync-wizard-actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
 .mysqldump-option { padding: 12px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 10px; background: rgba(0,0,0,.15); }
 .mysqldump-option h4 { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 4px; }
 .mysqldump-path { font-size: 11px; color: var(--text3); font-family: monospace; margin-left: 8px; word-break: break-all; }

@@ -55,13 +55,18 @@ class SyncPage {
     }
     if (empty) empty.style.display = 'none';
 
-    const statsMap = {};
-    for (const p of this.profiles) {
+    // Each card is independent: one slow or failing history lookup must not make
+    // the whole menu wait behind a serial chain of IPC calls.
+    const historyResults = await Promise.all(this.profiles.map(async p => {
       try {
         const r = await window.api.getSyncHistory(p.Id);
-        statsMap[p.Id] = (r && r.stats) || {};
-      } catch (e) { statsMap[p.Id] = {}; }
-    }
+        return (r && r.stats) || {};
+      } catch (e) {
+        return {};
+      }
+    }));
+    const statsMap = {};
+    this.profiles.forEach((p, index) => { statsMap[p.Id] = historyResults[index]; });
 
     list.innerHTML = this.profiles.map(p => {
       const st = statsMap[p.Id] || {};
@@ -87,9 +92,10 @@ class SyncPage {
             <label class="toggle-switch" style="margin-right:4px">
               <input type="checkbox" ${p.Enabled ? 'checked' : ''} onchange="syncPage.toggleEnabled('${p.Id}', this.checked)">
               <span class="toggle-slider"></span>
-            </label>
-            <button class="btn-glow btn-sm" onclick="syncPage.runProfile('${p.Id}')"><i data-lucide="play"></i> ${syncEsc(i18n.t('profile.run'))}</button>
-            <button class="btn-secondary-sm" onclick="syncPage.showHistory('${p.Id}')" title="${syncEsc(i18n.t('profile.history'))}"><i data-lucide="history"></i></button>
+            </label>             <button class="btn-glow btn-sm" onclick="syncPage.runProfile('${p.Id}')"><i data-lucide="play"></i> ${syncEsc(i18n.t('profile.run'))}</button>
+             <button class="btn-secondary-sm" data-sync-edit onclick="syncPage.editProfile('${p.Id}')" title="${syncEsc(i18n.t('profile.edit'))}" aria-label="${syncEsc(i18n.t('profile.edit'))}"><i data-lucide="pencil"></i></button>
+             <button class="btn-secondary-sm" onclick="syncPage.showHistory('${p.Id}')" title="${syncEsc(i18n.t('profile.history'))}"><i data-lucide="history"></i></button>
+
             <button class="btn-danger" onclick="syncPage.deleteProfile('${p.Id}','${syncEsc(p.Name)}')" title="${syncEsc(i18n.t('profile.delete'))}"><i data-lucide="trash-2"></i></button>
           </div>
         </div>
@@ -233,19 +239,19 @@ class SyncPage {
               </div>`).join('')}
           </div>
 
-          <div class="wizard-content" id="sync-wizard-content">${this._renderStep()}</div>
+          <div class="wizard-content" id="sync-wizard-content">${this._renderStep()}</div>           <div class="wizard-nav sync-wizard-nav">
+             <div>
+               ${this.currentStep > 0 ? `<button class="btn-outline" onclick="syncPage.prevStep()"><i data-lucide=\\"arrow-left\\"></i> ${syncEsc(i18n.t('wizard.back'))}</button>` : ''}
+             </div>
+             <div class="sync-wizard-actions">
+               <button class="btn-ghost" onclick="hideModal()">${syncEsc(i18n.t('taskModal.cancel'))}</button>
+               ${this.currentStep < steps.length - 1
+                 ? `<button class="btn-outline" onclick="syncPage.nextStep()">${syncEsc(i18n.t('wizard.next'))} <i data-lucide=\\"arrow-right\\"></i></button>`
+                 : ''}
+               <button class="btn-glow" data-sync-save onclick="syncPage.saveProfile()"><i data-lucide="save"></i><span data-sync-save-label>${syncEsc(i18n.t('sync.save'))}</span></button>
+             </div>
+           </div>
 
-          <div class="wizard-nav">
-            <div>
-              ${this.currentStep > 0 ? `<button class="btn-outline" onclick="syncPage.prevStep()"><i data-lucide=\\"arrow-left\\"></i> ${syncEsc(i18n.t('wizard.back'))}</button>` : ''}
-            </div>
-            <div style="display:flex;gap:8px">
-              <button class="btn-ghost" onclick="hideModal()">${syncEsc(i18n.t('taskModal.cancel'))}</button>
-              ${this.currentStep < steps.length - 1
-                ? `<button class="btn-outline" onclick="syncPage.nextStep()">${syncEsc(i18n.t('wizard.next'))} <i data-lucide=\\"arrow-right\\"></i></button>`
-                : `<button class="btn-glow" onclick="syncPage.saveProfile()"><i data-lucide=\\"save\\"></i> ${syncEsc(i18n.t(isEdit ? 'backup.saveChanges' : 'sync.createProfile'))}</button>`}
-            </div>
-          </div>
         </div>
         <div class="wizard-summary" id="sync-wizard-summary">${this._renderSummary()}</div>
       </div>
@@ -655,23 +661,39 @@ class SyncPage {
   }
 
   async saveProfile() {
+    if (this.saving) return;
     const d = this.draft;
     if (!d.Name || !d.Name.trim()) { showToast(i18n.t('sync.errName'), 'error'); return; }
     if (!d.SourcePath || !d.SourcePath.trim()) { showToast(i18n.t('sync.errSource'), 'error'); return; }
     if (!d.DestPath || !d.DestPath.trim()) { showToast(i18n.t('sync.errDest'), 'error'); return; }
 
-    const payload = { ...d, Name: d.Name.trim() };
-    const saved = this.editingId
-      ? await window.api.updateSyncProfile(payload)
-      : await window.api.createSyncProfile(payload);
+    const saveButton = document.querySelector('[data-sync-save]');
+    const saveLabel = document.querySelector('[data-sync-save-label]');
+    this.saving = true;
+    if (saveButton) saveButton.disabled = true;
+    if (saveLabel) saveLabel.textContent = i18n.t('sync.saving');
 
-    if (!saved || saved.success === false) {
-      showToast((saved && saved.message) || 'Error', 'error');
-      return;
+    try {
+      const payload = { ...d, Name: d.Name.trim() };
+      const saved = this.editingId
+        ? await window.api.updateSyncProfile(payload)
+        : await window.api.createSyncProfile(payload);
+
+      if (!saved || saved.success === false) {
+        showToast((saved && saved.message) || i18n.t('sync.saveFailed'), 'error');
+        return;
+      }
+      showToast(i18n.t(this.editingId ? 'sync.saved' : 'sync.created', { name: d.Name }), 'success');
+      hideModal();
+      await this.load();
+    } catch (error) {
+      showToast(error && error.message ? error.message : i18n.t('sync.saveFailed'), 'error');
+    } finally {
+      this.saving = false;
+      // On validation/API failure the modal is still open, so restore its action.
+      if (saveButton && saveButton.isConnected) saveButton.disabled = false;
+      if (saveLabel && saveLabel.isConnected) saveLabel.textContent = i18n.t('sync.save');
     }
-    showToast(i18n.t(this.editingId ? 'sync.saved' : 'sync.created', { name: d.Name }), 'success');
-    hideModal();
-    await this.load();
   }
 }
 

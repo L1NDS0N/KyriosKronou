@@ -1,0 +1,130 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="../../src/renderer/style.css">
+</head>
+<body>
+  <div class="page-toolbar">
+    <button id="btn-refresh-sync"></button>
+  </div>
+  <div id="sync-profiles-list"></div>
+  <div id="sync-empty" style="display:none"></div>
+  <div id="modal-overlay" class="hidden">
+    <div id="modal-content"><div id="modal-body"></div></div>
+  </div>
+
+  <script>
+    const translations = {
+      'sync.newProfileName': 'Folder Sync',
+      'sync.newTitle': 'New Sync Profile',
+      'sync.editTitle': 'Edit Sync Profile',
+      'sync.stepFolders': 'Folders',
+      'sync.stepRetention': 'Retention',
+      'sync.stepSchedule': 'Schedule',
+      'sync.tipFolders': 'Folders tip',
+      'sync.tipRetention': 'Retention tip',
+      'sync.tipSchedule': 'Schedule tip',
+      'summary.title': 'Summary',
+      'summary.name': 'Name',
+      'summary.schedule': 'Schedule',
+      'summary.status': 'Status',
+      'summary.enabled': 'Enabled',
+      'summary.disabled': 'Disabled',
+      'sync.origin': 'Source',
+      'sync.destination': 'Destination',
+      'sync.retentionOff': 'Off',
+      'sync.retentionTitle': 'Retention',
+      'sync.watchTitle': 'Watch',
+      'sync.watchEnabled': 'Enabled',
+      'sync.watchDisabled': 'Disabled',
+      'wizard.profileName': 'Profile name',
+      'wizard.host': 'Host',
+      'wizard.port': 'Port',
+      'wizard.user': 'User',
+      'wizard.password': 'Password',
+      'wizard.testConnection': 'Test connection',
+      'wizard.stepSchedule': 'Schedule',
+      'wizard.cronExpression': 'Cron',
+      'wizard.enableProfile': 'Enable profile',
+      'taskModal.cancel': 'Cancel',
+      'wizard.back': 'Back',
+      'wizard.next': 'Next',
+      'sync.save': 'Save',
+      'sync.created': 'Created',
+      'sync.saved': 'Saved',
+      'sync.errName': 'Enter a name',
+      'sync.errSource': 'Enter a source',
+      'sync.errDest': 'Enter a destination',
+      'cron.everyHour': 'Hourly',
+      'cron.daily2': 'Daily',
+      'cron.weekdays': 'Weekdays',
+      'cron.every15': 'Every 15',
+      'profile.run': 'Run',
+      'profile.history': 'History',
+      'profile.edit': 'Edit',
+      'profile.delete': 'Delete',
+      'profile.active': 'Active',
+      'profile.disabled': 'Disabled',
+      'sync.lastRun': 'Last run',
+      'sync.runsCount': 'runs',
+      'sync.copyMode': 'Copy mode',
+      'sync.mirrorLabel': 'Mirror',
+      'sync.mirrorHint': 'Mirror hint',
+      'sync.stepDescFolders': 'Folder step',
+      'sync.stepDescRetention': 'Retention step',
+      'sync.stepDescSchedule': 'Schedule step',
+      'sync.retentionEnable': 'Enable retention',
+      'sync.retentionEnableHint': 'Retention hint',
+      'sync.retentionEnabledHint': 'Enabled',
+      'sync.retentionDisabledHint': 'Disabled',
+      'sync.analyzeTitle': 'Analysis',
+      'sync.analyzeHint': 'Analyze hint',
+      'sync.retByAge': 'Age',
+      'sync.days': 'days',
+      'sync.retByCount': 'Count',
+      'sync.snapshots': 'snapshots',
+      'sync.retBySize': 'Size',
+      'sync.minKeep': 'Minimum keep',
+      'sync.minKeepHint': 'Minimum hint',
+      'sync.triggerHint': 'Trigger hint',
+      'sync.triggerTaskLabel': 'Trigger task',
+      'sync.triggerNone': 'None',
+      'sync.taskTriggerPrimary': 'Primary trigger',
+      'sync.watchHint': 'Watch hint',
+      'sync.watchDebounce': 'Debounce',
+      'sync.milliseconds': 'ms',
+      'sync.cronSecondary': 'Secondary',
+      'sync.wizardActions': 'Actions',
+      'sync.analyzeBtn': 'Analyze',
+      'sync.previewBtn': 'Preview',
+      'sync.simBtn': 'Simulate'
+    };
+    window.i18n = { t: (key) => translations[key] || key, currentLang: 'en' };
+    window.__toasts = [];
+    window.__saves = [];
+    window.showModal = (html, wide) => {
+      document.getElementById('modal-body').innerHTML = html;
+      document.getElementById('modal-overlay').classList.remove('hidden');
+      document.getElementById('modal-content').classList.toggle('wizard-wide', !!wide);
+    };
+    window.hideModal = () => document.getElementById('modal-overlay').classList.add('hidden');
+    window.showToast = (message, type) => window.__toasts.push({ message, type });
+    window.api = {
+      getSyncProfiles: async () => [],
+      getSyncEngines: async () => [{ id: 'local', label: 'Local', defaultPort: null }],
+      getTasks: async () => [],
+      getSyncHistory: async () => ({ stats: {} }),
+      createSyncProfile: async (profile) => {
+        window.__saves.push({ operation: 'create', profile: JSON.parse(JSON.stringify(profile)) });
+        return { success: true, Id: 'new-profile' };
+      },
+      updateSyncProfile: async (profile) => {
+        window.__saves.push({ operation: 'update', profile: JSON.parse(JSON.stringify(profile)) });
+        return { success: true };
+      }
+    };
+  </script>
+  <script src="../../src/renderer/syncPage.js"></script>
+</body>
+</html>
