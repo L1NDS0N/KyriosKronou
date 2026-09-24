@@ -42,6 +42,8 @@ class SyncManager {
     this.historyFile = path.join(config.configDir, 'sync-history.json');
     this.profiles = this.loadProfiles();
     this.history = this.loadHistory();
+    this.watchers = new Map();
+    this.onWatchExecuted = null;
     // Task run just finished -> run the syncs attached to it, if it succeeded.
     this.onTaskFinished = null;
   }
@@ -104,6 +106,10 @@ class SyncManager {
       // When to run
       CronExpression: data.CronExpression || '',
       Enabled: data.Enabled !== false,
+      // Optional local source watcher. It is independent from cron/task
+      // triggers, so a profile can react to a change immediately.
+      WatchEnabled: data.WatchEnabled === true,
+      WatchDebounceMs: Math.max(250, parseInt(data.WatchDebounceMs, 10) || 1500),
       // Run automatically after a task finishes successfully
       TriggerTaskId: data.TriggerTaskId || '',
       TriggerOnFailure: data.TriggerOnFailure === true, // default: only on success
@@ -145,14 +151,84 @@ class SyncManager {
     return [...this.profiles];
   }
 
+  // ─── Source watchers ───
+  // fs.watch is intentionally kept here, next to the profile execution code,
+  // so GUI and Windows-service schedulers share the exact same behaviour.
+  reconcileWatchers(shouldRun) {
+    if (!shouldRun) return this.stopWatchers();
+    const desired = this.profiles.filter(p => p.Enabled && p.WatchEnabled && p.SourcePath);
+    const desiredById = new Map(desired.map(p => [p.Id, p]));
+
+    for (const [id, entry] of this.watchers) {
+      const profile = desiredById.get(id);
+      if (!profile || entry.sourcePath !== profile.SourcePath) this._removeWatcher(id);
+    }
+    for (const profile of desired) {
+      if (this.watchers.has(profile.Id)) continue;
+      if (!fs.existsSync(profile.SourcePath)) {
+        this.logger.log('WARN', `Sync watcher skipped (source not found): ${profile.SourcePath}`);
+        continue;
+      }
+      try {
+        const watcher = fs.watch(profile.SourcePath, { recursive: true }, () => this._watchChanged(profile.Id));
+        watcher.on('error', (err) => {
+          this.logger.log('WARN', `Sync watcher error for ${profile.Name}: ${err.message}`);
+          this._removeWatcher(profile.Id);
+        });
+        this.watchers.set(profile.Id, { watcher, timer: null, profileId: profile.Id, sourcePath: profile.SourcePath });
+        this.logger.log('INFO', `Sync watcher enabled: ${profile.Name} (${profile.SourcePath})`);
+      } catch (e) {
+        this.logger.log('WARN', `Sync watcher unavailable for ${profile.Name}: ${e.message}`);
+      }
+    }
+  }
+
+  _removeWatcher(id) {
+    const entry = this.watchers && this.watchers.get(id);
+    if (!entry) return;
+    if (entry.timer) clearTimeout(entry.timer);
+    try { entry.watcher.close(); } catch (e) {}
+    if (this.watchers) this.watchers.delete(id);
+  }
+
+  stopWatchers() {
+    if (!this.watchers) return;
+    for (const id of [...this.watchers.keys()]) this._removeWatcher(id);
+  }
+
+  async _watchChanged(profileId) {
+    const entry = this.watchers && this.watchers.get(profileId);
+    const profile = this.getProfile(profileId);
+    if (!entry || !profile || !profile.Enabled || !profile.WatchEnabled) return;
+    if (entry.timer) clearTimeout(entry.timer);
+    const delay = Math.max(250, parseInt(profile.WatchDebounceMs, 10) || 1500);
+    entry.timer = setTimeout(async () => {
+      entry.timer = null;
+      if (!profile.Enabled || !profile.WatchEnabled) return;
+      if (entry.running) return;
+      entry.running = true;
+      try {
+        this.logger.log('INFO', `Sync watcher triggered: ${profile.Name}`);
+        const result = await this.executeSync(profileId, { triggeredBy: 'watch' });
+        if (this.onWatchExecuted) this.onWatchExecuted(profile, result);
+      } catch (e) {
+        this.logger.error(`Sync watcher failed: ${profile.Name}: ${e.message}`);
+      } finally {
+        entry.running = false;
+      }
+    }, delay);
+    if (entry.timer.unref) entry.timer.unref();
+  }
+
   /** Syncs attached to a task, with attachment direction and name for the UI. */
   getSyncsForTask(taskId) {
     return this.profiles.filter(p => p.TriggerTaskId === taskId);
   }
 
-  /** Enabled syncs not tied to a task trigger: the scheduler's workload. */
+  /** Enabled syncs with a cron expression. A task trigger is the primary
+   * trigger, but cron remains available as a secondary schedule. */
   getDueProfiles() {
-    return this.profiles.filter(p => p.Enabled && p.CronExpression && !p.TriggerTaskId);
+    return this.profiles.filter(p => p.Enabled && p.CronExpression);
   }
 
   // ─── History ───

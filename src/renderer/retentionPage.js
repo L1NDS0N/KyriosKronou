@@ -216,6 +216,8 @@ class RetentionPage {
   }
 
   _syncAdvanced() {
+    // The default/minimal mode has no advanced controls in the DOM.
+    if (!document.getElementById('ret-adv-age')) return;
     const c = this._getCfg();
     c.ByAge = document.getElementById('ret-adv-age').checked;
     c.KeepDays = parseInt(document.getElementById('ret-adv-days').value, 10) || 30;
@@ -250,6 +252,12 @@ class RetentionPage {
       this.preview = { ok: false, error: e.message };
     }
     this.render();
+    showModal(`
+      <h2><i data-lucide="flask-conical"></i> ${retEsc(i18n.t('retention.previewModalTitle'))}</h2>
+      <div class="retention-simulator-modal">${this._renderPreview()}</div>
+      <div class="modal-actions"><button class="btn-ghost" onclick="hideModal()">${retEsc(i18n.t('backup.close'))}</button></div>
+    `, true);
+    if (window.lucide) lucide.createIcons();
   }
 
   async applyNow() {

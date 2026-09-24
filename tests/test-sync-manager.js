@@ -323,12 +323,12 @@ describe('SyncManager: task triggers', () => {
     expect(results).to.deep.equal([]);
   });
 
-  it('excludes task-triggered syncs from the cron workload', () => {
+  it('keeps cron as a secondary schedule for task-triggered syncs', () => {
     mgr.createProfile({ Name: 'Por cron', SourcePath: src, DestPath: dst, CronExpression: '0 2 * * *' });
-    mgr.createProfile({ Name: 'Por task', SourcePath: src, DestPath: dst, TriggerTaskId: 't1' });
+    mgr.createProfile({ Name: 'Por task + cron', SourcePath: src, DestPath: dst, CronExpression: '0 3 * * *', TriggerTaskId: 't1' });
 
     const due = mgr.getDueProfiles();
-    expect(due.map(p => p.Name)).to.deep.equal(['Por cron']);
+    expect(due.map(p => p.Name)).to.deep.equal(['Por cron', 'Por task + cron']);
   });
 
   it('maybeTriggerForTask fires the hook only when a sync is attached', async () => {

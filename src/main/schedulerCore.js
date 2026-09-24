@@ -120,6 +120,7 @@ class SchedulerCore {
   stop() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    if (this.syncManager && this.syncManager.stopWatchers) this.syncManager.stopWatchers();
     releaseOwnership(this.pid);
     this.isOwner = false;
   }
@@ -169,10 +170,14 @@ class SchedulerCore {
       this.logger.error(`[${this.role}] Ownership check failed`, err);
       return;
     }
-    if (!owns) return; // another process is executing; stay passive
+    if (!owns) {
+      if (this.syncManager && this.syncManager.stopWatchers) this.syncManager.stopWatchers();
+      return; // another process is executing; stay passive
+    }
 
     try {
       this.reload();
+      if (this.syncManager && this.syncManager.reconcileWatchers) this.syncManager.reconcileWatchers(true);
       this.runDueTasks();
       this.runDueBackups();
       this.runDueSyncs();

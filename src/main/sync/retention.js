@@ -111,6 +111,7 @@ function analyze(dir, options = {}) {
     return {
       ok: true, totalFiles: 0, totalBytes: 0, withDates: 0, dateIsh: 0,
       folderPattern: 'flat', medianGapDays: null, label: 'empty',
+      understood: [], ignored: [], filesTruncated: false,
       suggested: _suggest({ totalFiles: 0, dateIsh: 0, medianGapDays: null }),
     };
   }
@@ -123,10 +124,16 @@ function analyze(dir, options = {}) {
   let fromFolders = 0;
   let fromMetadata = 0;
   const dates = [];
+  // Keep the evidence visible in the UI. A bounded sample prevents a folder
+  // with tens of thousands of files from bloating every analyzer response.
+  const FILE_SAMPLE_LIMIT = 500;
+  const understood = [];
+  const ignored = [];
 
   for (const f of files) {
     let date = null;
     let inFolder = false;
+    let source = null;
     if (useNames) {
       const parts = f.rel.split('/');
       for (let i = 0; i < parts.length; i++) {
@@ -134,6 +141,7 @@ function analyze(dir, options = {}) {
         if (!d) continue;
         date = d;
         inFolder = i < parts.length - 1;
+        source = inFolder ? 'folder-name' : 'file-name';
         break;
       }
     }
@@ -141,12 +149,19 @@ function analyze(dir, options = {}) {
     // nothing. The age rule already trusts mtimes, so the analysis does too.
     if (!date && useMetadata && f.mtimeMs) {
       date = new Date(f.mtimeMs);
+      source = 'metadata';
       fromMetadata++;
     }
-    if (!date) continue;
+    if (!date) {
+      if (ignored.length < FILE_SAMPLE_LIMIT) ignored.push({ rel: f.rel, reason: 'no-date' });
+      continue;
+    }
     withDates++;
     if (inFolder) fromFolders++;
     dates.push(date.getTime());
+    if (understood.length < FILE_SAMPLE_LIMIT) {
+      understood.push({ rel: f.rel, source, date: date.toISOString(), size: f.size || 0 });
+    }
   }
 
   // Median gap between consecutive dated snapshots suggests how often
@@ -178,6 +193,9 @@ function analyze(dir, options = {}) {
     folderPattern,
     medianGapDays,
     label: folderPattern,
+    understood,
+    ignored,
+    filesTruncated: understood.length < withDates || ignored.length < files.length,
     suggested,
   };
 }

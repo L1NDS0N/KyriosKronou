@@ -97,6 +97,7 @@ class SyncPage {
           <div class="backup-detail"><i data-lucide="folder-open"></i> <span>${syncEsc(p.SourcePath)}</span></div>
           <div class="backup-detail"><i data-lucide="hard-drive"></i> <span>${syncEsc(this._destLabel(p))}</span></div>
           ${p.CronExpression ? `<div class="backup-detail"><i data-lucide="clock"></i> <span>${syncEsc(p.CronExpression)}</span></div>` : ''}
+          ${p.WatchEnabled ? `<div class="backup-detail"><i data-lucide="eye"></i> <span>${syncEsc(i18n.t('sync.watchEnabled'))}</span></div>` : ''}
           ${p.LastRun ? `<div class="backup-detail"><i data-lucide="history"></i> <span>${syncEsc(i18n.t('sync.lastRun'))}: ${new Date(p.LastRun).toLocaleString()} — ${syncEsc(p.LastStatus || '?')}</span></div>` : ''}
           ${st.total > 0 ? `<div class="backup-detail"><i data-lucide="bar-chart"></i> <span>${st.total} ${syncEsc(i18n.t('sync.runsCount'))} · ${st.success} ok · ${st.failed} ✗</span></div>` : ''}
         </div>
@@ -183,10 +184,10 @@ class SyncPage {
       Name: i18n.t('sync.newProfileName') + ' ' + (this.profiles.length + 1),
       SourcePath: '', Engine: 'local', DestPath: '',
       Host: '', Port: null, User: '', Password: '',
-      Mode: 'incremental', Mirror: false, Excludes: [],
-      Retention: { Enabled: false, ByAge: false, KeepDays: 30, ByCount: false, KeepCount: 10, BySize: false, FreeGb: 0, MinKeep: 3 },
-      CronExpression: '0 3 * * *', Enabled: true,
-      TriggerTaskId: '', TriggerOnFailure: false,
+      Mode: 'incremental', Mirror: false, Excludes: [],       Retention: { Enabled: false, ByAge: false, KeepDays: 30, ByCount: false, KeepCount: 10, BySize: false, FreeGb: 0, MinKeep: 3 },
+       CronExpression: '0 3 * * *', Enabled: true,
+       WatchEnabled: false, WatchDebounceMs: 1500,
+       TriggerTaskId: '', TriggerOnFailure: false,
     };
     this._renderWizard();
   }
@@ -198,10 +199,11 @@ class SyncPage {
     this.currentStep = 0;
     this.analysis = null;
     this.retentionPreview = null;
-    this.simulation = null;
-    this.simTab = 'copy';
-    this.draft = JSON.parse(JSON.stringify(p));
-    if (!this.draft.Retention) {
+    this.simulation = null;     this.simTab = 'copy';
+     this.draft = JSON.parse(JSON.stringify(p));
+     this.draft.WatchEnabled = this.draft.WatchEnabled === true;
+     this.draft.WatchDebounceMs = this.draft.WatchDebounceMs || 1500;
+     if (!this.draft.Retention) {
       this.draft.Retention = { Enabled: false, ByAge: false, KeepDays: 30, ByCount: false, KeepCount: 10, BySize: false, FreeGb: 0, MinKeep: 3 };
     }
     this._renderWizard();
@@ -226,7 +228,7 @@ class SyncPage {
           <div class="wizard-tabs">
             ${steps.map((s, i) => `
               <div class="wizard-tab ${i === this.currentStep ? 'active' : ''} ${i < this.currentStep ? 'completed' : ''}" data-tip="${syncEsc(stepTips[i])}" onclick="syncPage.goStep(${i})">
-                <div class="wizard-tab-num">${i < this.currentStep ? '<i data-lucide=\\"check\\" style=\\"width:12px;height:12px\\"></i>' : (i + 1)}</div>
+                <div class="wizard-tab-num">${i + 1}</div>
                 <span class="wizard-tab-label">${syncEsc(s)}</span>
               </div>`).join('')}
           </div>
@@ -266,6 +268,13 @@ class SyncPage {
       <div class="ws-section"><div class="ws-label">${syncEsc(i18n.t('sync.destination'))}</div><div class="ws-value ws-mono" style="word-break:break-all">${syncEsc(dest)}</div></div>
       <div class="ws-section"><div class="ws-label">${syncEsc(i18n.t('sync.retentionTitle'))}</div><div class="ws-value">${syncEsc(retTxt)}</div></div>
       <div class="ws-section"><div class="ws-label">${syncEsc(i18n.t('summary.schedule'))}</div><div class="ws-value ws-mono">${syncEsc(d.CronExpression) || '—'}</div></div>
+      <div class="ws-section"><div class="ws-label">${syncEsc(i18n.t('sync.watchTitle'))}</div><div class="ws-value">${d.WatchEnabled ? syncEsc(i18n.t('sync.watchEnabled')) : syncEsc(i18n.t('sync.watchDisabled'))}</div></div>
+      ${r.Enabled ? `<div class="ws-section wizard-side-actions">
+        <div class="ws-label">${syncEsc(i18n.t('sync.wizardActions'))}</div>
+        <button class="btn-outline btn-sm" onclick="syncPage.runAnalysis()"><i data-lucide="search"></i> ${syncEsc(i18n.t('sync.analyzeBtn'))}</button>
+        <button class="btn-outline btn-sm" onclick="syncPage.refreshPreview()"><i data-lucide="eye"></i> ${syncEsc(i18n.t('sync.previewBtn'))}</button>
+        <button class="btn-glow btn-sm" onclick="syncPage.runSimulation()"><i data-lucide="flask-conical"></i> ${syncEsc(i18n.t('sync.simBtn'))}</button>
+      </div>` : ''}
       <div class="ws-section"><div class="ws-label">${syncEsc(i18n.t('summary.status'))}</div><div class="ws-value">${d.Enabled !== false ? `<span style="color:var(--green)">&#9679; ${syncEsc(i18n.t('summary.enabled'))}</span>` : `<span style="color:var(--red)">&#9679; ${syncEsc(i18n.t('summary.disabled'))}</span>`}</div></div>
     `;
   }
@@ -320,84 +329,62 @@ class SyncPage {
           <div class="form-section-title"><i data-lucide="copy"></i> ${syncEsc(i18n.t('sync.copyMode'))}</div>
           <label class="check-row"><input type="checkbox" id="sync-mirror" ${d.Mirror ? 'checked' : ''} onchange="syncPage.draft.Mirror=this.checked">
             <span>${syncEsc(i18n.t('sync.mirrorLabel'))}<span class="check-hint">${syncEsc(i18n.t('sync.mirrorHint'))}</span></span></label>
-        </div>
-      `;
+        </div>       `;
 
-      case 1: {
-        const r = d.Retention || {};
-        return `
-        <div class="form-hint" style="margin-bottom:12px">${syncEsc(i18n.t('sync.stepDescRetention'))}</div>
+       case 1: {
+         const r = d.Retention || {};
+         return `
+         <div class="form-hint" style="margin-bottom:12px">${syncEsc(i18n.t('sync.stepDescRetention'))}</div>
+         <div class="form-section">
+           <div class="form-section-title"><i data-lucide="scissors"></i> ${syncEsc(i18n.t('sync.retentionTitle'))}</div>
+           <label class="check-row" for="sync-ret-enabled">
+             <input type="checkbox" id="sync-ret-enabled" ${r.Enabled ? 'checked' : ''} onchange="syncPage._toggleRetention()">
+             <span>${syncEsc(i18n.t('sync.retentionEnable'))}<span class="check-hint">${syncEsc(i18n.t('sync.retentionEnableHint'))}</span></span>
+           </label>
+           <div class="form-hint retention-disabled-hint" style="margin-top:8px">${r.Enabled ? syncEsc(i18n.t('sync.retentionEnabledHint')) : syncEsc(i18n.t('sync.retentionDisabledHint'))}</div>
+         </div>
 
-        <div class="form-section">
-          <div class="form-section-title"><i data-lucide="search"></i> ${syncEsc(i18n.t('sync.analyzeTitle'))}</div>
-          <div class="form-hint" style="margin:0 0 10px">${syncEsc(i18n.t('sync.analyzeHint'))}</div>
-          <div style="display:flex;gap:8px;align-items:center">
-            <button class="btn-glow btn-sm" onclick="syncPage.runAnalysis()"><i data-lucide="wand-2"></i> ${syncEsc(i18n.t('sync.analyzeBtn'))}</button>
-            <span id="sync-analysis-status" style="font-size:12px"></span>
-          </div>
-          <div id="sync-analysis-result" style="margin-top:12px">${this._renderAnalysis()}</div>
-        </div>
+         ${r.Enabled ? `<div class="form-section retention-enabled-content">
+           <div class="form-section-title"><i data-lucide="search"></i> ${syncEsc(i18n.t('sync.analyzeTitle'))}</div>
+           <div class="form-hint" style="margin:0 0 10px">${syncEsc(i18n.t('sync.analyzeHint'))}</div>
+           <div id="sync-analysis-result" style="margin-top:12px">${this._renderAnalysis()}</div>
+           <label class="check-row"><input type="checkbox" id="sync-ret-age" ${r.ByAge ? 'checked' : ''} onchange="syncPage._syncRetention()">
+             <span>${syncEsc(i18n.t('sync.retByAge'))} <input type="number" class="form-input" id="sync-ret-days" value="${r.KeepDays || 30}" min="1" max="3650" style="width:80px;display:inline-block;padding:2px 6px" onchange="syncPage._syncRetention()"> ${syncEsc(i18n.t('sync.days'))}</span></label>
+           <label class="check-row"><input type="checkbox" id="sync-ret-count" ${r.ByCount ? 'checked' : ''} onchange="syncPage._syncRetention()">
+             <span>${syncEsc(i18n.t('sync.retByCount'))} <input type="number" class="form-input" id="sync-ret-count-n" value="${r.KeepCount || 10}" min="1" max="10000" style="width:80px;display:inline-block;padding:2px 6px" onchange="syncPage._syncRetention()"> ${syncEsc(i18n.t('sync.snapshots'))}</span></label>
+           <label class="check-row"><input type="checkbox" id="sync-ret-size" ${r.BySize ? 'checked' : ''} onchange="syncPage._syncRetention()">
+             <span>${syncEsc(i18n.t('sync.retBySize'))} <input type="number" class="form-input" id="sync-ret-gb" value="${r.FreeGb || 10}" min="1" max="100000" style="width:80px;display:inline-block;padding:2px 6px" onchange="syncPage._syncRetention()"> GB</span></label>
+           <div style="margin-top:10px"><label class="form-label">${syncEsc(i18n.t('sync.minKeep'))}</label><input type="number" class="form-input" id="sync-ret-minkeep" value="${r.MinKeep != null ? r.MinKeep : 3}" min="0" max="1000" style="width:100px" onchange="syncPage._syncRetention()"><div class="form-hint">${syncEsc(i18n.t('sync.minKeepHint'))}</div></div>
+           <div id="sync-retention-preview" style="margin-top:14px">${this._renderPreview()}</div>
+           <div id="sync-sim-result" style="margin-top:14px">${this._renderSimulation()}</div>
+         </div>` : ''}
+       `; }
 
-        <div class="form-section">
-          <div class="form-section-title"><i data-lucide="scissors"></i> ${syncEsc(i18n.t('sync.retentionTitle'))}</div>
-          <label class="check-row" for="sync-ret-enabled">
-            <input type="checkbox" id="sync-ret-enabled" ${r.Enabled ? 'checked' : ''} onchange="syncPage._syncRetention()">
-            <span>${syncEsc(i18n.t('sync.retentionEnable'))}<span class="check-hint">${syncEsc(i18n.t('sync.retentionEnableHint'))}</span></span>
-          </label>
-
-          <div id="sync-ret-rules" style="${r.Enabled ? '' : 'opacity:.4;pointer-events:none;'}margin-top:12px">
-            <label class="check-row"><input type="checkbox" id="sync-ret-age" ${r.ByAge ? 'checked' : ''} onchange="syncPage._syncRetention()">
-              <span>${syncEsc(i18n.t('sync.retByAge'))} <input type="number" class="form-input" id="sync-ret-days" value="${r.KeepDays || 30}" min="1" max="3650" style="width:80px;display:inline-block;padding:2px 6px" onchange="syncPage._syncRetention()"> ${syncEsc(i18n.t('sync.days'))}</span></label>
-            <label class="check-row"><input type="checkbox" id="sync-ret-count" ${r.ByCount ? 'checked' : ''} onchange="syncPage._syncRetention()">
-              <span>${syncEsc(i18n.t('sync.retByCount'))} <input type="number" class="form-input" id="sync-ret-count-n" value="${r.KeepCount || 10}" min="1" max="10000" style="width:80px;display:inline-block;padding:2px 6px" onchange="syncPage._syncRetention()"> ${syncEsc(i18n.t('sync.snapshots'))}</span></label>
-            <label class="check-row"><input type="checkbox" id="sync-ret-size" ${r.BySize ? 'checked' : ''} onchange="syncPage._syncRetention()">
-              <span>${syncEsc(i18n.t('sync.retBySize'))} <input type="number" class="form-input" id="sync-ret-gb" value="${r.FreeGb || 10}" min="1" max="100000" style="width:80px;display:inline-block;padding:2px 6px" onchange="syncPage._syncRetention()"> GB</span></label>
-
-            <div style="margin-top:10px">
-              <label class="form-label">${syncEsc(i18n.t('sync.minKeep'))}</label>
-              <input type="number" class="form-input" id="sync-ret-minkeep" value="${r.MinKeep != null ? r.MinKeep : 3}" min="0" max="1000" style="width:100px" onchange="syncPage._syncRetention()">
-              <div class="form-hint">${syncEsc(i18n.t('sync.minKeepHint'))}</div>
-            </div>
-
-            <div style="margin-top:14px;display:flex;gap:8px;align-items:center">
-              <button class="btn-outline btn-sm" onclick="syncPage.refreshPreview()"><i data-lucide="eye"></i> ${syncEsc(i18n.t('sync.previewBtn'))}</button>
-              <span id="sync-preview-status" style="font-size:12px"></span>
-            </div>
-            <div id="sync-retention-preview" style="margin-top:10px">${this._renderPreview()}</div>
-          </div>
-        </div>
-
-        <div class="form-section">
-          <div class="form-section-title"><i data-lucide="flask-conical"></i> ${syncEsc(i18n.t('sync.simTitle'))}</div>
-          <div class="form-hint" style="margin:0 0 10px">${syncEsc(i18n.t('sync.simHint'))}</div>
-          <div style="display:flex;gap:8px;align-items:center">
-            <button class="btn-glow btn-sm" onclick="syncPage.runSimulation()"><i data-lucide="play"></i> ${syncEsc(i18n.t('sync.simBtn'))}</button>
-            <span id="sync-sim-status" style="font-size:12px"></span>
-          </div>
-          <div id="sync-sim-result" style="margin-top:12px">${this._renderSimulation()}</div>
-        </div>
-      `; }
-
-      case 2: return `
+       case 2: return `
         <div class="form-hint" style="margin-bottom:12px">${syncEsc(i18n.t('sync.stepDescSchedule'))}</div>
-        <div class="form-section">
-          <div class="form-section-title"><i data-lucide="clock"></i> ${syncEsc(i18n.t('wizard.stepSchedule'))}</div>
-          <label class="form-label">${syncEsc(i18n.t('wizard.cronExpression'))}</label>
-          <input type="text" class="form-input mono" id="sync-cron" value="${syncEsc(d.CronExpression)}" placeholder="0 3 * * *" style="margin-bottom:6px" oninput="syncPage.draft.CronExpression=this.value; syncPage._updateSummary()">
+        <div class="form-section">           <div class="form-section-title"><i data-lucide="clock"></i> ${syncEsc(i18n.t('wizard.stepSchedule'))}</div>
+           <label class="form-label">${syncEsc(i18n.t('wizard.cronExpression'))}${d.TriggerTaskId ? ` <span class="schedule-secondary-label">${syncEsc(i18n.t('sync.cronSecondary'))}</span>` : ''}</label>
+           <input type="text" class="form-input mono ${d.TriggerTaskId ? 'schedule-secondary' : ''}" id="sync-cron" value="${syncEsc(d.CronExpression)}" placeholder="0 3 * * *" style="margin-bottom:6px" oninput="syncPage.draft.CronExpression=this.value; syncPage._updateSummary()">
           <div class="wiz-chips" style="margin-bottom:14px">
             <span class="bp-db-chip" onclick="syncPage._setCron('0 * * * *')">${syncEsc(i18n.t('cron.everyHour'))}</span>
             <span class="bp-db-chip" onclick="syncPage._setCron('0 3 * * *')">${syncEsc(i18n.t('cron.daily2'))}</span>
             <span class="bp-db-chip" onclick="syncPage._setCron('0 2 * * 1-5')">${syncEsc(i18n.t('cron.weekdays'))}</span>
             <span class="bp-db-chip" onclick="syncPage._setCron('*/15 * * * *')">${syncEsc(i18n.t('cron.every15'))}</span>
           </div>
-          <div class="form-hint" style="margin-bottom:12px">${syncEsc(i18n.t('sync.triggerHint'))}</div>
-          <label class="form-label">${syncEsc(i18n.t('sync.triggerTaskLabel'))}</label>
-          <select class="form-input" id="sync-trigger-task" onchange="syncPage.draft.TriggerTaskId=this.value; syncPage._updateSummary()">
-            <option value="" ${!d.TriggerTaskId ? 'selected' : ''}>${syncEsc(i18n.t('sync.triggerNone'))}</option>
-            ${this.tasks.map(t => `<option value="${syncEsc(t.Id)}" ${d.TriggerTaskId === t.Id ? 'selected' : ''}>${syncEsc(t.Name)}</option>`).join('')}
-          </select>
-        </div>
-        <label class="check-row" for="sync-enabled">
+          <div class="form-hint" style="margin-bottom:12px">${syncEsc(i18n.t('sync.triggerHint'))}</div>           <label class="form-label">${syncEsc(i18n.t('sync.triggerTaskLabel'))}</label>
+           <select class="form-input" id="sync-trigger-task" onchange="syncPage._setTriggerTask(this.value)">
+            <option value="" ${!d.TriggerTaskId ? 'selected' : ''}>${syncEsc(i18n.t('sync.triggerNone'))}</option>             ${this.tasks.map(t => `<option value="${syncEsc(t.Id)}" ${d.TriggerTaskId === t.Id ? 'selected' : ''}>${syncEsc(t.Name)}</option>`).join('')}
+           </select>
+           <div class="form-hint" style="margin-top:8px">${d.TriggerTaskId ? syncEsc(i18n.t('sync.taskTriggerPrimary')) : syncEsc(i18n.t('sync.triggerHint'))}</div>
+           <div class="watch-option">
+             <label class="check-row" for="sync-watch-enabled">
+               <input type="checkbox" id="sync-watch-enabled" ${d.WatchEnabled ? 'checked' : ''} onchange="syncPage._setWatchEnabled(this.checked)">
+               <span>${syncEsc(i18n.t('sync.watchTitle'))}<span class="check-hint">${syncEsc(i18n.t('sync.watchHint'))}</span></span>
+             </label>
+             ${d.WatchEnabled ? `<div class="watch-debounce"><label class="form-label">${syncEsc(i18n.t('sync.watchDebounce'))}</label><input type="number" class="form-input" id="sync-watch-debounce" min="250" max="60000" step="250" value="${d.WatchDebounceMs || 1500}" onchange="syncPage._setWatchDebounce(this.value)"><span>${syncEsc(i18n.t('sync.milliseconds'))}</span></div>` : ''}
+           </div>
+         </div>
+         <label class="check-row" for="sync-enabled">
           <input type="checkbox" id="sync-enabled" ${d.Enabled !== false ? 'checked' : ''} onchange="syncPage.draft.Enabled=this.checked">
           <span>${syncEsc(i18n.t('wizard.enableProfile'))}</span>
         </label>
@@ -430,6 +417,13 @@ class SyncPage {
           ${a.medianGapDays ? `<span class="badge badge-info">~${a.medianGapDays}d ${syncEsc(i18n.t('sync.medianGap'))}</span>` : ''}
         </div>
         ${a.withDates ? `<div class="form-hint" style="margin:0">${a.withDates}/${a.totalFiles} ${syncEsc(i18n.t('sync.datedFilesFound'))}</div>` : ''}
+        <div class="analysis-evidence">
+          <div class="analysis-evidence-title">${syncEsc(i18n.t('sync.understoodFiles'))} <b>${(a.understood || []).length}</b></div>
+          <div class="analysis-file-list">${(a.understood || []).slice(0, 30).map(f => `<div class="analysis-file"><span class="analysis-file-state ok">✓</span><span class="mono">${syncEsc(f.rel)}</span><small>${syncEsc(f.source)} · ${syncEsc(f.date || '')}</small></div>`).join('') || `<div class="form-hint">${syncEsc(i18n.t('sync.noUnderstoodFiles'))}</div>`}</div>
+          <div class="analysis-evidence-title ignored-title">${syncEsc(i18n.t('sync.ignoredFiles'))} <b>${(a.ignored || []).length}</b></div>
+          <div class="analysis-file-list">${(a.ignored || []).slice(0, 30).map(f => `<div class="analysis-file"><span class="analysis-file-state ignored">—</span><span class="mono">${syncEsc(f.rel)}</span><small>${syncEsc(i18n.t('sync.ignoredReason'))}</small></div>`).join('') || `<div class="form-hint">${syncEsc(i18n.t('sync.noIgnoredFiles'))}</div>`}</div>
+          ${a.filesTruncated ? `<div class="form-hint">${syncEsc(i18n.t('sync.analysisTruncated'))}</div>` : ''}
+        </div>
         ${s.Enabled ? `<div style="margin-top:8px;font-size:12px;color:var(--primary)">
           <i data-lucide="sparkles" style="width:12px;height:12px"></i> ${syncEsc(i18n.t('sync.suggestion'))}:
           ${s.ByAge ? `${syncEsc(i18n.t('sync.retByAge'))} ${s.KeepDays} ${syncEsc(i18n.t('sync.days'))}` : ''}
@@ -526,6 +520,14 @@ class SyncPage {
     };
     this._renderWizard();
     showToast(i18n.t('sync.suggestionApplied'), 'success');
+  }
+
+  _toggleRetention() {
+    const enabled = document.getElementById('sync-ret-enabled')?.checked;
+    this.draft.Retention.Enabled = !!enabled;
+    this.retentionPreview = null;
+    this.simulation = null;
+    this._renderWizard();
   }
 
   _syncRetention() {
@@ -628,6 +630,21 @@ class SyncPage {
   _rerenderSim() {
     const box = document.getElementById('sync-sim-result');
     if (box) { box.innerHTML = this._renderSimulation(); if (window.lucide) lucide.createIcons(); }
+  }
+
+  _setTriggerTask(value) {
+    this.draft.TriggerTaskId = value || '';
+    this._renderWizard();
+  }
+
+  _setWatchEnabled(enabled) {
+    this.draft.WatchEnabled = !!enabled;
+    if (enabled && !this.draft.WatchDebounceMs) this.draft.WatchDebounceMs = 1500;
+    this._renderWizard();
+  }
+
+  _setWatchDebounce(value) {
+    this.draft.WatchDebounceMs = Math.max(250, parseInt(value, 10) || 1500);
   }
 
   _setCron(expr) {
