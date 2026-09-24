@@ -232,15 +232,15 @@ describe('retention: analyze with metadata dates', () => {
   });
 });
 
-// ─── Monthly rule (annual history) ───
+// ─── Monthly rule (keep rule) ───
 describe('retention: monthly rule in planDeletion', () => {
   const now = Date.now();
   const day = 24 * 3600 * 1000;
-  const compiled = retention.compile({ Enabled: true, ByMonthly: true, MonthlyKeepMonths: 12, MinKeep: 0 });
+  const compiled = retention.compile({ Enabled: true, DateSource: 'names', ByMonthly: true, MonthlyKeepMonths: 12, MinKeep: 0 });
 
   function f(rel, mtimeMs) { return { rel, size: 10, mtimeMs }; }
 
-  it('keeps the newest snapshot of each month and condemns the rest', () => {
+  it('alone, keeps only the newest snapshot of each month', () => {
     const files = [
       f('2026-01-05/dump.sql', now - 250 * day),
       f('2026-01-20/dump.sql', now - 240 * day), // newer in Jan: survives
@@ -249,19 +249,28 @@ describe('retention: monthly rule in planDeletion', () => {
     ];
     const plan = retention.planDeletion(files, compiled, { now });
     const doomed = plan.delete.map(d => d.rel);
-    expect(doomed).to.include('2026-02-01/dump.sql');
-    expect(doomed).to.include('2026-01-05/dump.sql');
-    expect(doomed).to.not.include('2026-01-20/dump.sql');
-    expect(doomed).to.not.include('2026-02-10/dump.sql');
-    expect(plan.delete[0].reason).to.equal('monthly');
+    expect(doomed.sort()).to.deep.equal(['2026-01-05/dump.sql', '2026-02-01/dump.sql']);
+    expect(plan.delete.every(d => d.reason === 'notPeriodic')).to.equal(true);
   });
 
-  it('never touches snapshots without a readable date', () => {
+  it('dates snapshots without a date in the name by their mtime', () => {
+    // Same month by mtime: the newer one is the monthly copy.
     const files = [
       f('undated/dump.sql', now - 300 * day),
-      f('plain.txt', now - 300 * day),
+      f('plain.txt', now - 300 * day + 3600 * 1000),
     ];
     const plan = retention.planDeletion(files, compiled, { now });
-    expect(plan.delete).to.have.lengthOf(0);
+    expect(plan.delete.map(d => d.rel)).to.deep.equal(['undated/dump.sql']);
+  });
+
+  it('defaults to the mtime clock when no DateSource is given', () => {
+    // A restored snapshot: old name, fresh mtime. The historical default
+    // (mtime) must keep it; only an explicit 'names' ages it by its name.
+    const files = [f('2020-01-01/dump.sql', now - day)];
+    const byMtime = retention.compile({ Enabled: true, ByAge: true, KeepDays: 30 });
+    const byName = retention.compile({ Enabled: true, ByAge: true, KeepDays: 30, DateSource: 'names' });
+    expect(byMtime.dateSource).to.equal('metadata');
+    expect(retention.planDeletion(files, byMtime, { now }).delete).to.have.lengthOf(0);
+    expect(retention.planDeletion(files, byName, { now }).delete).to.have.lengthOf(1);
   });
 });

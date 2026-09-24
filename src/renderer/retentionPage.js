@@ -188,8 +188,13 @@ class RetentionPage {
           <span>${retEsc(i18n.t('sync.retByAge'))} <input type="number" class="form-input" id="ret-adv-days" value="${c.KeepDays}" min="1" max="3650" style="width:80px;display:inline-block;padding:2px 6px" onchange="retentionPage._syncAdvanced()"> ${retEsc(i18n.t('sync.days'))}</span></label>
         <label class="check-row"><input type="checkbox" id="ret-adv-count" ${c.ByCount ? 'checked' : ''} onchange="retentionPage._syncAdvanced()">
           <span>${retEsc(i18n.t('sync.retByCount'))} <input type="number" class="form-input" id="ret-adv-count-n" value="${c.KeepCount}" min="1" max="10000" style="width:80px;display:inline-block;padding:2px 6px" onchange="retentionPage._syncAdvanced()"> ${retEsc(i18n.t('sync.snapshots'))}</span></label>
+        <label class="check-row"><input type="checkbox" id="ret-adv-weekly" ${c.ByWeekly ? 'checked' : ''} onchange="retentionPage._syncAdvanced()">
+          <span>${retEsc(i18n.t('retention.byWeekly'))} <input type="number" class="form-input" id="ret-adv-weeks" value="${c.WeeklyKeepWeeks}" min="1" max="520" style="width:80px;display:inline-block;padding:2px 6px" onchange="retentionPage._syncAdvanced()"> ${retEsc(i18n.t('retention.weeks'))}</span></label>
+        <label class="check-row"><input type="checkbox" id="ret-adv-biweekly" ${c.ByBiweekly ? 'checked' : ''} onchange="retentionPage._syncAdvanced()">
+          <span>${retEsc(i18n.t('retention.byBiweekly'))} <input type="number" class="form-input" id="ret-adv-fortnights" value="${c.BiweeklyKeepPeriods}" min="1" max="480" style="width:80px;display:inline-block;padding:2px 6px" onchange="retentionPage._syncAdvanced()"> ${retEsc(i18n.t('retention.fortnights'))}</span></label>
         <label class="check-row"><input type="checkbox" id="ret-adv-monthly" ${c.ByMonthly ? 'checked' : ''} onchange="retentionPage._syncAdvanced()">
           <span>${retEsc(i18n.t('retention.byMonthly'))} <input type="number" class="form-input" id="ret-adv-months" value="${c.MonthlyKeepMonths}" min="1" max="240" style="width:80px;display:inline-block;padding:2px 6px" onchange="retentionPage._syncAdvanced()"> ${retEsc(i18n.t('retention.months'))}</span></label>
+        <div class="form-hint" style="margin:2px 0 8px 26px">${retEsc(i18n.t('retention.periodicHint'))}</div>
         <label class="check-row"><input type="checkbox" id="ret-adv-size" ${c.BySize ? 'checked' : ''} onchange="retentionPage._syncAdvanced()">
           <span>${retEsc(i18n.t('sync.retBySize'))} <input type="number" class="form-input" id="ret-adv-gb" value="${c.FreeGb || 10}" min="1" max="100000" style="width:80px;display:inline-block;padding:2px 6px" onchange="retentionPage._syncAdvanced()"> GB</span></label>
         <div style="margin-top:10px">
@@ -202,8 +207,11 @@ class RetentionPage {
 
   _getCfg() {
     if (!this.cfg) {
-      this.cfg = { Enabled: true, ByAge: true, KeepDays: 90, ByCount: false, KeepCount: 10, BySize: false, FreeGb: 0, ByMonthly: false, MonthlyKeepMonths: 12, MinKeep: 5 };
+      this.cfg = { Enabled: true, ByAge: true, KeepDays: 90, ByCount: false, KeepCount: 10, BySize: false, FreeGb: 0, ByWeekly: false, WeeklyKeepWeeks: 8, ByBiweekly: false, BiweeklyKeepPeriods: 12, ByMonthly: false, MonthlyKeepMonths: 12, MinKeep: 5 };
     }
+    // The date source toggle is part of the policy: preview and apply must
+    // date snapshots exactly as the analysis did.
+    this.cfg.DateSource = this.useMetadata ? 'metadata' : 'names';
     return this.cfg;
   }
 
@@ -223,6 +231,10 @@ class RetentionPage {
     c.KeepDays = parseInt(document.getElementById('ret-adv-days').value, 10) || 30;
     c.ByCount = document.getElementById('ret-adv-count').checked;
     c.KeepCount = parseInt(document.getElementById('ret-adv-count-n').value, 10) || 10;
+    c.ByWeekly = document.getElementById('ret-adv-weekly').checked;
+    c.WeeklyKeepWeeks = parseInt(document.getElementById('ret-adv-weeks').value, 10) || 8;
+    c.ByBiweekly = document.getElementById('ret-adv-biweekly').checked;
+    c.BiweeklyKeepPeriods = parseInt(document.getElementById('ret-adv-fortnights').value, 10) || 12;
     c.ByMonthly = document.getElementById('ret-adv-monthly').checked;
     c.MonthlyKeepMonths = parseInt(document.getElementById('ret-adv-months').value, 10) || 12;
     c.BySize = document.getElementById('ret-adv-size').checked;
@@ -236,6 +248,8 @@ class RetentionPage {
       ByAge: !!s.ByAge, KeepDays: s.KeepDays || 90,
       ByCount: !!s.ByCount, KeepCount: s.KeepCount || 10,
       BySize: !!s.BySize, FreeGb: s.FreeGb || 0,
+      ByWeekly: !!s.ByWeekly, WeeklyKeepWeeks: s.WeeklyKeepWeeks || 8,
+      ByBiweekly: !!s.ByBiweekly, BiweeklyKeepPeriods: s.BiweeklyKeepPeriods || 12,
       ByMonthly: !!s.ByMonthly, MonthlyKeepMonths: s.MonthlyKeepMonths || 12,
       MinKeep: s.MinKeep != null ? s.MinKeep : 5,
     };
@@ -291,20 +305,57 @@ class RetentionPage {
     const p = this.preview;
     if (!p) return '';
     if (p.ok === false) return `<div class="form-hint" style="color:var(--red)">${retEsc(p.error)}</div>`;
-    if (!p.delete || !p.delete.length) {
-      return `<div class="form-hint" style="color:var(--green)">✓ ${retEsc(i18n.t('sync.previewNothing'))}</div>`;
-    }
-    const rows = p.delete.slice(0, 50).map(x => `
-      <div style="display:flex;gap:8px;font-size:11px;padding:2px 0;border-bottom:1px solid var(--border)">
-        <span style="color:var(--amber)" class="mono">${retEsc(x.reason)}</span>
-        <span class="mono" style="flex:1;word-break:break-all">${retEsc(x.rel)}</span>
-        <span style="color:var(--text3)">${retEsc(x.detail || '')}</span>
-      </div>`).join('');
+    const del = p.delete || [];
+    const kept = p.kept || [];
+    // Every file is listed - no "+N more". The user signs off on deleting
+    // exactly these, so a truncated list is not a preview.
+    const table = (items, color) => `
+      <table class="ret-file-table">
+        <thead><tr><th>${retEsc(i18n.t('retention.colReason'))}</th><th>${retEsc(i18n.t('retention.colFile'))}</th><th>${retEsc(i18n.t('retention.colDate'))}</th><th>${retEsc(i18n.t('retention.colDetail'))}</th></tr></thead>
+        <tbody>${items.map(x => `
+          <tr>
+            <td class="mono" style="color:${color};white-space:nowrap">${retEsc(i18n.t('retention.reason.' + x.reason))}</td>
+            <td class="mono" style="word-break:break-all">${retEsc(x.rel)}</td>
+            <td class="mono" style="white-space:nowrap">${retEsc(x.date ? x.date.slice(0, 10) : '')}</td>
+            <td style="color:var(--text3);white-space:nowrap">${retEsc(x.detail || '')}</td>
+          </tr>`).join('')}</tbody>
+      </table>`;
     return `
-      <div style="background:rgba(255,80,80,.05);border:1px solid rgba(255,80,80,.25);border-radius:8px;padding:10px">
-        <div style="font-size:12px;color:var(--red);margin-bottom:6px"><i data-lucide="trash-2" style="width:12px;height:12px"></i> ${p.delete.length} ${retEsc(i18n.t('sync.previewWouldDelete'))}</div>
-        <div style="max-height:200px;overflow-y:auto">${rows}</div>
-        ${p.delete.length > 50 ? `<div class="form-hint" style="margin-top:4px">+${p.delete.length - 50}…</div>` : ''}
+      ${this._renderRules(p)}
+      ${p.totalFiles != null ? `<div class="form-hint" style="margin:8px 0">${retEsc(i18n.t('retention.summary', { total: p.totalFiles, snaps: p.totalSnapshots || 0 }))}</div>` : ''}
+      ${del.length ? `
+        <div class="ret-list ret-list-delete">
+          <div class="ret-list-title" style="color:var(--red)"><i data-lucide="trash-2" style="width:12px;height:12px"></i> ${retEsc(i18n.t('retention.deleteListTitle', { n: del.length, size: this._fmtBytes(p.deleteBytes || 0) }))}</div>
+          <div class="ret-list-scroll">${table(del, 'var(--amber)')}</div>
+        </div>` : `<div class="form-hint" style="color:var(--green)">✓ ${retEsc(i18n.t('sync.previewNothing'))}</div>`}
+      ${kept.length ? `
+        <div class="ret-list ret-list-kept">
+          <div class="ret-list-title" style="color:var(--green)"><i data-lucide="shield-check" style="width:12px;height:12px"></i> ${retEsc(i18n.t('retention.keptListTitle', { n: kept.length }))}</div>
+          <div class="ret-list-scroll">${table(kept, 'var(--green)')}</div>
+        </div>` : ''}`;
+  }
+
+  _renderRules(p) {
+    if (!p.rules || !p.rules.length) return '';
+    const items = p.rules.map(r => {
+      const n = r.type === 'age' ? r.days
+        : r.type === 'count' ? r.keep
+          : r.type === 'size' ? Math.round(r.freeBytes / 1073741824)
+            : r.periods;
+      return `<li><i data-lucide="${r.kind === 'keep' ? 'shield' : 'trash-2'}" style="width:12px;height:12px"></i> ${retEsc(i18n.t('retention.rule.' + r.type, { n }))}</li>`;
+    });
+    const hasKeep = p.rules.some(r => r.kind === 'keep');
+    if (hasKeep && !p.rules.some(r => r.kind === 'delete')) {
+      items.push(`<li style="color:var(--amber)"><i data-lucide="alert-triangle" style="width:12px;height:12px"></i> ${retEsc(i18n.t('retention.rule.onlyPeriodic'))}</li>`);
+    }
+    if (p.minKeep > 0) items.push(`<li><i data-lucide="shield" style="width:12px;height:12px"></i> ${retEsc(i18n.t('retention.rule.minKeep', { n: p.minKeep }))}</li>`);
+    if (hasKeep || p.minKeep > 0) items.push(`<li><i data-lucide="info" style="width:12px;height:12px"></i> ${retEsc(i18n.t('retention.rule.protectWins'))}</li>`);
+    const src = p.dateSource === 'metadata' ? i18n.t('retention.sourceMetadata') : i18n.t('retention.sourceNamesFallback');
+    items.push(`<li><i data-lucide="calendar" style="width:12px;height:12px"></i> ${retEsc(i18n.t('retention.rule.dateSource', { src }))}</li>`);
+    return `
+      <div class="ret-rules">
+        <div class="ret-list-title">${retEsc(i18n.t('retention.rulesTitle'))}</div>
+        <ul>${items.join('')}</ul>
       </div>`;
   }
 

@@ -710,32 +710,16 @@ kbd {
 
 
 /* Generic hover tooltips (wizard steps, retention toggles, …) */
-[data-tip] { position: relative; }
-[data-tip]::after {
-  content: attr(data-tip);
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%) translateY(4px);
-  background: #1a1a2e;
-  border: 1px solid rgba(255,255,255,.14);
-  color: var(--text1, #eee);
-  font-size: 11.5px;
-  line-height: 1.45;
-  padding: 8px 12px;
-  border-radius: 8px;
-  width: max-content;
-  max-width: 300px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity .18s ease, transform .18s ease;
-  z-index: 1000;
-  box-shadow: 0 6px 20px rgba(0,0,0,.4);
+/* Rendered by tooltip.js on <body>, position: fixed - a ::after inside the
+   element was clipped by every ancestor with overflow. Above modals (100). */
+.kc-tooltip {
+  position: fixed; top: 0; left: 0; z-index: 5000;
+  background: #1a1a2e; border: 1px solid rgba(255,255,255,.14); color: var(--text1, #eee);
+  font-size: 11.5px; line-height: 1.45; padding: 8px 12px; border-radius: 8px;
+  width: max-content; max-width: 300px; opacity: 0; pointer-events: none;
+  transition: opacity .18s ease; box-shadow: 0 6px 20px rgba(0,0,0,.4);
 }
-[data-tip]:hover::after {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
-}
+.kc-tooltip.visible { opacity: 1; }
 
 /* Sync wizard simulator */
 .sim-box { background: rgba(0,0,0,.2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
@@ -787,6 +771,17 @@ kbd {
 .ret-default-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .ret-advanced { display: flex; flex-direction: column; gap: 8px; }
 .ret-lastrun { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text2); padding: 8px 0; }
+.ret-rules { background: rgba(255,255,255,.03); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.ret-rules ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text2); }
+.ret-rules li { display: flex; align-items: center; gap: 6px; }
+.ret-list { border-radius: 8px; padding: 10px; margin-top: 10px; }
+.ret-list-delete { background: rgba(255,80,80,.05); border: 1px solid rgba(255,80,80,.25); }
+.ret-list-kept { background: rgba(80,200,120,.05); border: 1px solid rgba(80,200,120,.25); }
+.ret-list-title { font-size: 12px; font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+.ret-list-scroll { max-height: 320px; overflow-y: auto; }
+.ret-file-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.ret-file-table th { text-align: left; font-weight: 600; color: var(--text3); position: sticky; top: 0; background: var(--bg2, #1a1a22); padding: 3px 6px; }
+.ret-file-table td { padding: 2px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .wizard-content { min-height: 280px; }
 .wizard-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
 .mysqldump-option { padding: 12px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 10px; background: rgba(0,0,0,.15); }

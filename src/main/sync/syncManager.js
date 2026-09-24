@@ -19,13 +19,21 @@ function normalizeRetention(raw) {
   const r = raw && typeof raw === 'object' ? raw : {};
   return {
     Enabled: r.Enabled === true,
+    // Where snapshot dates come from: 'metadata' (mtime, the historical
+    // default) or 'names' (falls back to mtime when a name has no date).
+    DateSource: r.DateSource === 'names' ? 'names' : 'metadata',
     ByAge: r.ByAge === true,
     KeepDays: parseInt(r.KeepDays, 10) || 30,
     ByCount: r.ByCount === true,
     KeepCount: parseInt(r.KeepCount, 10) || 10,
     BySize: r.BySize === true,
     FreeGb: parseFloat(r.FreeGb) || 0,
-    // Annual history: keep one snapshot per month for N months.
+    // Periodic history: keep one snapshot per week / fortnight / month for
+    // the last N periods, protected from every delete rule.
+    ByWeekly: r.ByWeekly === true,
+    WeeklyKeepWeeks: parseInt(r.WeeklyKeepWeeks, 10) || 8,
+    ByBiweekly: r.ByBiweekly === true,
+    BiweeklyKeepPeriods: parseInt(r.BiweeklyKeepPeriods, 10) || 12,
     ByMonthly: r.ByMonthly === true,
     MonthlyKeepMonths: parseInt(r.MonthlyKeepMonths, 10) || 12,
     MinKeep: r.MinKeep === undefined ? 3 : Math.max(0, parseInt(r.MinKeep, 10) || 0),
@@ -511,13 +519,25 @@ class SyncManager {
    * Preview which destination files a policy would delete, without touching
    * anything. The wizard shows this list before the user confirms.
    */
-  previewRetention(dir, retentionCfg) {
+  previewRetention(dir, retentionCfg, hooks = {}) {
     const compiled = retention.compile(normalizeRetention(retentionCfg));
     if (!compiled.ok) return { ok: false, error: compiled.error };
     const files = retention.scanDest(dir);
-    const plan = retention.planDeletion(files, compiled);
+    const plan = retention.planDeletion(files, compiled, { now: hooks.now });
     if (!plan.ok) return { ok: false, error: plan.error };
-    return { ok: true, delete: plan.delete, totalFiles: files.length };
+    // Everything the UI needs to show the rules and every single file:
+    // what goes, and what a keep rule rescued from a delete rule.
+    return {
+      ok: true,
+      delete: plan.delete,
+      kept: plan.kept,
+      rules: plan.rules,
+      minKeep: plan.minKeep,
+      dateSource: plan.dateSource,
+      totalFiles: files.length,
+      totalSnapshots: plan.totalSnapshots,
+      deleteBytes: plan.delete.reduce((s, d) => s + (d.size || 0), 0),
+    };
   }
 
   /**
