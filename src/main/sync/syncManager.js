@@ -376,6 +376,98 @@ class SyncManager {
     return { ok: true, delete: plan.delete, totalFiles: files.length };
   }
 
+  /**
+   * Dry-run of the whole sync: the exact planner the execution uses, plus a
+   * retention pass simulated over the destination as it would look after the
+   * copy. Reads nothing but the filesystem; writes nothing. The wizard's
+   * simulator renders this so the user sees precisely which files will be
+   * copied, skipped or deleted - "simulated", never "executed".
+   *
+   * @param {object} like - { SourcePath, DestPath, Engine, Mode, Mirror,
+   *                         Excludes, Retention } - a draft profile
+   */
+  async previewSyncPlan(like) {
+    const p = like || {};
+    const base = {
+      copy: [], delete: [], skipped: [], totalSource: 0, totalBytes: 0,
+      retention: [], retentionDeletedBytes: 0,
+    };
+
+    let planned;
+    try {
+      planned = planner.plan({
+        sourceDir: p.SourcePath,
+        destDir: p.DestPath,
+        mode: p.Mode,
+        excludes: p.Excludes || [],
+        mirror: p.Mirror,
+      });
+    } catch (e) {
+      return { ok: false, error: e.message, ...base };
+    }
+    if (!planned.ok) return { ok: false, error: planned.error, ...base };
+
+    // The planner reports rels; the simulator re-attaches sizes and mtimes
+    // so the UI can show WHEN a file would age out and how much each
+    // operation moves.
+    const srcDir = path.resolve(p.SourcePath);
+    const byRel = (files) => new Map(files.map(f => [f.rel, f]));
+    const withMeta = (rels, files, reason) => rels.map(rel => {
+      const f = files.get(rel);
+      return { rel, reason, size: f ? f.size : 0, mtimeMs: f ? f.mtimeMs : 0 };
+    });
+
+    const sourceFiles = planner.scan(srcDir).filter(f =>
+      !(p.Excludes || []).some(pat => { const re = planner.compileExclude(pat); return re && re.test(f.rel); }));
+    const sourceMap = byRel(sourceFiles);
+
+    // Skipped = source files the incremental planner left alone.
+    const copyRels = new Set(planned.copy.map(c => c.rel));
+    const skipped = sourceFiles.filter(f => !copyRels.has(f.rel));
+
+    const retCfg = normalizeRetention(p.Retention);
+    let retentionDoomed = new Map();
+    let postCopyMap = new Map(); // destination as it would be after the copy
+    if (retCfg.Enabled) {
+      const compiled = retention.compile(retCfg);
+      if (!compiled.ok) {
+        return { ok: false, error: compiled.error, ...base, copy: planned.copy, delete: planned.delete, skipped, totalSource: planned.totalSource, totalBytes: planned.totalBytes };
+      }
+      // Retention looks at the destination AS IT WOULD BE after the copy:
+      // what is there now, minus what the mirror would remove, plus what the
+      // copy would add (stamped with the source's mtimes).
+      const destFiles = await engines.listFiles(
+        { path: p.DestPath, host: p.Host, port: p.Port, user: p.User, password: p.Password },
+        p.Engine || 'local');
+      postCopyMap = byRel(destFiles.filter(f => !planned.delete.includes(f.rel)));
+      for (const c of planned.copy) {
+        const f = sourceMap.get(c.rel);
+        if (f) postCopyMap.set(c.rel, { rel: c.rel, size: f.size, mtimeMs: f.mtimeMs });
+      }
+      const verdict = retention.planDeletion([...postCopyMap.values()], compiled);
+      if (verdict.ok) {
+        retentionDoomed = new Map(verdict.delete.map(d => [d.rel, d]));
+      }
+    }
+
+    // Retention sizes come from the post-copy destination map.
+    const destSize = (rel) => (postCopyMap.get(rel) || {}).size || 0;
+
+    return {
+      ok: true,
+      copy: planned.copy.map(c => {
+        const f = sourceMap.get(c.rel);
+        return { rel: c.rel, reason: c.reason, size: f ? f.size : 0, mtimeMs: f ? f.mtimeMs : 0 };
+      }),
+      delete: planned.delete.map(rel => ({ rel, size: destSize(rel) })),
+      skipped: skipped.map(f => ({ rel: f.rel, size: f.size, mtimeMs: f.mtimeMs })),
+      totalSource: planned.totalSource,
+      totalBytes: planned.totalBytes,
+      retention: [...retentionDoomed.values()].map(d => ({ ...d, size: destSize(d.rel) })),
+      retentionDeletedBytes: [...retentionDoomed.values()].reduce((s, d) => s + destSize(d.rel), 0),
+    };
+  }
+
   /** Persist the outcome: profile status, history entry, audit log. */
   _finish(profileId, profile, runId, success, duration, planned, results, message, retentionResult) {
     this.updateProfile({

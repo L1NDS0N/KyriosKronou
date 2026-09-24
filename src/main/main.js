@@ -874,6 +874,10 @@ function registerIPC() {
   ipcMain.handle('get-sync-engines', () => require('./sync/engines').list());
   ipcMain.handle('analyze-sync-folder', (e, dir) => syncManager.analyzeFolder(dir));
   ipcMain.handle('preview-sync-retention', (e, dir, retentionCfg) => syncManager.previewRetention(dir, retentionCfg));
+  ipcMain.handle('preview-sync-plan', async (e, draft) => {
+    try { return await syncManager.previewSyncPlan(draft); }
+    catch (err) { return { ok: false, error: err.message };
+  }});
   ipcMain.handle('get-sync-history', (e, profileId) => ({ history: syncManager.getHistory(profileId), stats: syncManager.getHistoryStats(profileId) }));
   ipcMain.handle('test-sync-connection', async (e, engineId, cfg) => {
     try {

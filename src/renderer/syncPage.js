@@ -12,11 +12,14 @@ class SyncPage {
   constructor() {
     this.profiles = [];
     this.engines = [];
+    this.tasks = [];            // for the task-trigger dropdown
     this.editingId = null;
     this.currentStep = 0;
     this.draft = {};
     this.analysis = null;       // folder pattern analysis for the wizard
     this.retentionPreview = null; // what would be deleted, live
+    this.simulation = null;     // whole-sync dry run (planner + retention)
+    this.simTab = 'copy';
   }
 
   async load() {
@@ -31,6 +34,11 @@ class SyncPage {
       this.engines = (await window.api.getSyncEngines()) || [];
     } catch (e) {
       this.engines = [{ id: 'local', label: 'Local / mapped drive', defaultPort: null, credentials: false }];
+    }
+    try {
+      this.tasks = (await window.api.getTasks()) || [];
+    } catch (e) {
+      this.tasks = [];
     }
     this.render();
   }
@@ -169,6 +177,8 @@ class SyncPage {
     this.currentStep = 0;
     this.analysis = null;
     this.retentionPreview = null;
+    this.simulation = null;
+    this.simTab = 'copy';
     this.draft = {
       Name: i18n.t('sync.newProfileName') + ' ' + (this.profiles.length + 1),
       SourcePath: '', Engine: 'local', DestPath: '',
@@ -188,6 +198,8 @@ class SyncPage {
     this.currentStep = 0;
     this.analysis = null;
     this.retentionPreview = null;
+    this.simulation = null;
+    this.simTab = 'copy';
     this.draft = JSON.parse(JSON.stringify(p));
     if (!this.draft.Retention) {
       this.draft.Retention = { Enabled: false, ByAge: false, KeepDays: 30, ByCount: false, KeepCount: 10, BySize: false, FreeGb: 0, MinKeep: 3 };
@@ -196,13 +208,15 @@ class SyncPage {
   }
 
   goStep(i) { this.currentStep = i; this._renderWizard(); }
-  nextStep() { if (this.currentStep < 3) { this.currentStep++; this._renderWizard(); } }
+  // Three steps total; the summary lives in the side panel, not a ghost step.
+  nextStep() { if (this.currentStep < 2) { this.currentStep++; this._renderWizard(); } }
   prevStep() { if (this.currentStep > 0) { this.currentStep--; this._renderWizard(); } }
 
   _renderWizard() {
     const isEdit = !!this.editingId;
-    const steps = [i18n.t('sync.stepFolders'), i18n.t('sync.stepRetention'), i18n.t('sync.stepSchedule'), i18n.t('wizard.summary')];
-    const stepIcons = ['folder-sync', 'scissors', 'clock', 'check-circle'];
+    const steps = [i18n.t('sync.stepFolders'), i18n.t('sync.stepRetention'), i18n.t('sync.stepSchedule')];
+    const stepTips = [i18n.t('sync.tipFolders'), i18n.t('sync.tipRetention'), i18n.t('sync.tipSchedule')];
+    const stepIcons = ['folder-sync', 'scissors', 'clock'];
 
     showModal(`
       <div class="wizard-layout">
@@ -211,8 +225,8 @@ class SyncPage {
 
           <div class="wizard-tabs">
             ${steps.map((s, i) => `
-              <div class="wizard-tab ${i === this.currentStep ? 'active' : ''} ${i < this.currentStep ? 'completed' : ''}" onclick="syncPage.goStep(${i})">
-                <div class="wizard-tab-num">${i < this.currentStep ? '<i data-lucide=\\"check\\" style=\\"width:12px;height:12px\\"></i>' : `<i data-lucide=\\"${stepIcons[i]}\\" style=\\"width:12px;height:12px\\"></i>`}</div>
+              <div class="wizard-tab ${i === this.currentStep ? 'active' : ''} ${i < this.currentStep ? 'completed' : ''}" data-tip="${syncEsc(stepTips[i])}" onclick="syncPage.goStep(${i})">
+                <div class="wizard-tab-num">${i < this.currentStep ? '<i data-lucide=\\"check\\" style=\\"width:12px;height:12px\\"></i>' : (i + 1)}</div>
                 <span class="wizard-tab-label">${syncEsc(s)}</span>
               </div>`).join('')}
           </div>
@@ -268,6 +282,7 @@ class SyncPage {
     switch (this.currentStep) {
 
       case 0: return `
+        <div class="form-hint" style="margin-bottom:12px">${syncEsc(i18n.t('sync.stepDescFolders'))}</div>
         <label class="form-label">${syncEsc(i18n.t('wizard.profileName'))} *</label>
         <input type="text" class="form-input" id="sync-name" value="${syncEsc(d.Name)}" oninput="syncPage.draft.Name=this.value; syncPage._updateSummary()">
 
@@ -311,7 +326,7 @@ class SyncPage {
       case 1: {
         const r = d.Retention || {};
         return `
-        <div class="form-hint" style="margin-bottom:12px">${syncEsc(i18n.t('sync.retentionIntro'))}</div>
+        <div class="form-hint" style="margin-bottom:12px">${syncEsc(i18n.t('sync.stepDescRetention'))}</div>
 
         <div class="form-section">
           <div class="form-section-title"><i data-lucide="search"></i> ${syncEsc(i18n.t('sync.analyzeTitle'))}</div>
@@ -351,9 +366,20 @@ class SyncPage {
             <div id="sync-retention-preview" style="margin-top:10px">${this._renderPreview()}</div>
           </div>
         </div>
+
+        <div class="form-section">
+          <div class="form-section-title"><i data-lucide="flask-conical"></i> ${syncEsc(i18n.t('sync.simTitle'))}</div>
+          <div class="form-hint" style="margin:0 0 10px">${syncEsc(i18n.t('sync.simHint'))}</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn-glow btn-sm" onclick="syncPage.runSimulation()"><i data-lucide="play"></i> ${syncEsc(i18n.t('sync.simBtn'))}</button>
+            <span id="sync-sim-status" style="font-size:12px"></span>
+          </div>
+          <div id="sync-sim-result" style="margin-top:12px">${this._renderSimulation()}</div>
+        </div>
       `; }
 
       case 2: return `
+        <div class="form-hint" style="margin-bottom:12px">${syncEsc(i18n.t('sync.stepDescSchedule'))}</div>
         <div class="form-section">
           <div class="form-section-title"><i data-lucide="clock"></i> ${syncEsc(i18n.t('wizard.stepSchedule'))}</div>
           <label class="form-label">${syncEsc(i18n.t('wizard.cronExpression'))}</label>
@@ -365,7 +391,11 @@ class SyncPage {
             <span class="bp-db-chip" onclick="syncPage._setCron('*/15 * * * *')">${syncEsc(i18n.t('cron.every15'))}</span>
           </div>
           <div class="form-hint" style="margin-bottom:12px">${syncEsc(i18n.t('sync.triggerHint'))}</div>
-          <input type="text" class="form-input" id="sync-trigger-task" value="${syncEsc(d.TriggerTaskId)}" placeholder="Task ID (opcional)" oninput="syncPage.draft.TriggerTaskId=this.value">
+          <label class="form-label">${syncEsc(i18n.t('sync.triggerTaskLabel'))}</label>
+          <select class="form-input" id="sync-trigger-task" onchange="syncPage.draft.TriggerTaskId=this.value; syncPage._updateSummary()">
+            <option value="" ${!d.TriggerTaskId ? 'selected' : ''}>${syncEsc(i18n.t('sync.triggerNone'))}</option>
+            ${this.tasks.map(t => `<option value="${syncEsc(t.Id)}" ${d.TriggerTaskId === t.Id ? 'selected' : ''}>${syncEsc(t.Name)}</option>`).join('')}
+          </select>
         </div>
         <label class="check-row" for="sync-enabled">
           <input type="checkbox" id="sync-enabled" ${d.Enabled !== false ? 'checked' : ''} onchange="syncPage.draft.Enabled=this.checked">
@@ -526,6 +556,78 @@ class SyncPage {
     if (status) status.textContent = '';
     const box = document.getElementById('sync-retention-preview');
     if (box) { box.innerHTML = this._renderPreview(); if (window.lucide) lucide.createIcons(); }
+  }
+
+  // ─── Whole-sync simulator ───
+  /** Dry-run through the real planner + retention, zero writes. */
+  async runSimulation() {
+    const status = document.getElementById('sync-sim-status');
+    if (status) { status.textContent = '…'; status.style.color = 'var(--amber)'; }
+    try {
+      this.simulation = await window.api.previewSyncPlan({
+        SourcePath: this.draft.SourcePath, DestPath: this.draft.DestPath,
+        Engine: this.draft.Engine, Host: this.draft.Host, Port: this.draft.Port,
+        User: this.draft.User, Password: this.draft.Password,
+        Mode: this.draft.Mode, Mirror: this.draft.Mirror,
+        Excludes: this.draft.Excludes || [], Retention: this.draft.Retention,
+      });
+    } catch (e) {
+      this.simulation = { ok: false, error: e.message };
+    }
+    if (status) status.textContent = '';
+    this._rerenderSim();
+  }
+
+  _fmtBytes(b) {
+    if (!b) return '0 B';
+    if (b > 1073741824) return (b / 1073741824).toFixed(1) + ' GB';
+    if (b > 1048576) return (b / 1048576).toFixed(1) + ' MB';
+    if (b > 1024) return (b / 1024).toFixed(1) + ' KB';
+    return b + ' B';
+  }
+
+  _renderSimulation() {
+    if (!this.simulation) return `<div class="form-hint" style="margin:0">${syncEsc(i18n.t('sync.simIdle'))}</div>`;
+    const s = this.simulation;
+    if (s.ok === false) {
+      return `<div class="form-hint" style="color:var(--red)">${syncEsc(s.error)}</div>`;
+    }
+    const tabs = [
+      { id: 'copy', label: i18n.t('sync.simCopy'), n: s.copy.length },
+      { id: 'skip', label: i18n.t('sync.simSkipped'), n: s.skipped.length },
+      { id: 'mirror', label: i18n.t('sync.simMirror'), n: s.delete.length },
+      { id: 'retention', label: i18n.t('sync.simRetention'), n: (s.retention || []).length },
+    ];
+    const list = this.simTab === 'copy' ? s.copy
+      : this.simTab === 'skip' ? s.skipped
+      : this.simTab === 'mirror' ? s.delete
+      : (s.retention || []);
+    const rows = list.length
+      ? list.slice(0, 200).map(x => `
+          <div class="sim-row">
+            <span class="sim-row-reason mono">${syncEsc(x.reason || '')}</span>
+            <span class="mono sim-row-path">${syncEsc(x.rel)}</span>
+            <span class="sim-row-meta">${syncEsc(x.size ? this._fmtBytes(x.size) : '')}</span>
+          </div>`).join('')
+      : `<div class="form-hint" style="margin:4px 0">${syncEsc(i18n.t('sync.simEmpty'))}</div>`;
+    return `
+      <div class="sim-box">
+        <div class="sim-tabs">
+          ${tabs.map(t => `<span class="sim-tab ${t.id === this.simTab ? 'active' : ''} sim-${t.id}" onclick="syncPage.simTab='${t.id}'; syncPage._rerenderSim()">${syncEsc(t.label)} <b>${t.n}</b></span>`).join('')}
+        </div>
+        <div class="sim-summary">${syncEsc(i18n.t('sync.simTotals', {
+          files: s.totalSource, copied: s.copy.length, skipped: s.skipped.length,
+          removed: s.delete.length + (s.retention || []).length,
+          size: this._fmtBytes(s.totalBytes || 0),
+        }))}</div>
+        <div class="sim-list">${rows}</div>
+        <div class="sim-note">${syncEsc(i18n.t('sync.simNote'))}</div>
+      </div>`;
+  }
+
+  _rerenderSim() {
+    const box = document.getElementById('sync-sim-result');
+    if (box) { box.innerHTML = this._renderSimulation(); if (window.lucide) lucide.createIcons(); }
   }
 
   _setCron(expr) {

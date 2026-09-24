@@ -364,3 +364,94 @@ describe('SyncManager: reload across processes', () => {
     cfg.dispose();
   });
 });
+
+// ─── Whole-sync simulator (previewSyncPlan) ───
+describe('SyncManager: previewSyncPlan (dry-run simulator)', () => {
+  let mgr, src, dst;
+  beforeEach(() => {
+    mgr = newManager();
+    src = tmpDir('sim-src');
+    dst = tmpDir('sim-dst');
+  });
+  afterEach(() => {
+    mgr.config.dispose();
+    try { fs.rmSync(src, { recursive: true, force: true }); } catch (e) {}
+    try { fs.rmSync(dst, { recursive: true, force: true }); } catch (e) {}
+  });
+
+  it('lists which files would be copied, skipped and removed — writing nothing', () => {
+    write(src, 'keep.txt', 'same');
+    write(src, 'new.txt', 'brand new');
+    write(dst, 'keep.txt', 'same');
+    write(dst, 'gone.txt', 'doomed by mirror');
+
+    const out = mgr.previewSyncPlan({
+      SourcePath: src, DestPath: dst, Engine: 'local',
+      Mode: 'incremental', Mirror: true, Excludes: [],
+      Retention: { Enabled: false },
+    });
+
+    return out.then(r => {
+      expect(r.ok).to.equal(true);
+      const copyRels = r.copy.map(f => f.rel);
+      expect(copyRels).to.include('new.txt');
+      expect(copyRels).to.not.include('keep.txt');
+      expect(r.skipped.map(f => f.rel)).to.include('keep.txt');
+      expect(r.delete.map(f => f.rel)).to.include('gone.txt');
+      expect(r.retention).to.have.lengthOf(0);
+      // The simulator must not touch the disk: the doomed file is still there
+      // and the copy never happened.
+      expect(fs.existsSync(path.join(dst, 'gone.txt'))).to.equal(true);
+      expect(fs.existsSync(path.join(dst, 'new.txt'))).to.equal(false);
+    });
+  });
+
+  it('simulates retention over the destination as it would be AFTER the copy', () => {
+    // A fresh file at the source with a dated name: after the first sync it
+    // would exist on the destination and be safe; an old dated file already
+    // there would be evicted by the age rule.
+    retention_day_setup(src, dst);
+
+    return mgr.previewSyncPlan({
+      SourcePath: src, DestPath: dst, Engine: 'local',
+      Mode: 'incremental', Mirror: false, Excludes: [],
+      Retention: { Enabled: true, ByAge: true, KeepDays: 10, ByCount: false, BySize: false, MinKeep: 0 },
+    }).then(r => {
+      expect(r.ok).to.equal(true);
+      expect(r.retention.map(f => f.rel)).to.include('2020-01-01/old.sql');
+      expect(r.retention.map(f => f.rel)).to.not.include('2026-09-01/fresh.sql');
+      expect(r.retentionDeletedBytes).to.be.above(0);
+      // Nothing was deleted on disk.
+      expect(fs.existsSync(path.join(dst, '2020-01-01', 'old.sql'))).to.equal(true);
+    });
+  });
+
+  it('rejects an impossible source without throwing', () => {
+    return mgr.previewSyncPlan({
+      SourcePath: path.join(src, 'nao-existe'), DestPath: dst, Engine: 'local',
+    }).then(r => {
+      expect(r.ok).to.equal(false);
+      expect(r.error).to.be.a('string');
+    });
+  });
+
+  it('rejects a destination inside the source', () => {
+    return mgr.previewSyncPlan({
+      SourcePath: src, DestPath: path.join(src, 'dentro'), Engine: 'local',
+    }).then(r => {
+      expect(r.ok).to.equal(false);
+      expect(r.error).to.be.a('string');
+    });
+  });
+
+  // Helper: dated content on both sides, the old one only on the destination.
+  function retention_day_setup(src, dst) {
+    write(src, '2026-09-01/fresh.sql', 'fresh');
+    write(dst, '2026-09-01/fresh.sql', 'stale copy');
+    const oldDir = path.join(dst, '2020-01-01');
+    fs.mkdirSync(oldDir, { recursive: true });
+    fs.writeFileSync(path.join(oldDir, 'old.sql'), 'ancient');
+    const t = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+    fs.utimesSync(path.join(oldDir, 'old.sql'), t, t);
+  }
+});

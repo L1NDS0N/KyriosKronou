@@ -82,6 +82,7 @@ contextBridge.exposeInMainWorld('api', {
   getSyncEngines: () => ipcRenderer.invoke('get-sync-engines'),
   analyzeSyncFolder: (dir) => ipcRenderer.invoke('analyze-sync-folder', dir),
   previewSyncRetention: (dir, cfg) => ipcRenderer.invoke('preview-sync-retention', dir, cfg),
+  previewSyncPlan: (draft) => ipcRenderer.invoke('preview-sync-plan', draft),
   getSyncHistory: (profileId) => ipcRenderer.invoke('get-sync-history', profileId),
   testSyncConnection: (engineId, cfg) => ipcRenderer.invoke('test-sync-connection', engineId, cfg),
   getBackupHistoryStats: (profileId) => ipcRenderer.invoke('get-backup-history-stats', profileId),
