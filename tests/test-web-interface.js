@@ -116,8 +116,11 @@ describe('Web access: sessions', () => {
   it('rejects a tampered cookie', () => {
     const sid = auth.createSession(user, '10.0.0.1');
     const cookie = auth.signCookie(sid);
-    const replacement = cookie.slice(-1) === 'A' ? 'B' : 'A';
-    expect(auth.verifyCookie(cookie.slice(0, -1) + replacement)).to.equal(null);
+    const separator = cookie.lastIndexOf('.');
+    const tamperedSid = `${sid[0] === 'a' ? 'b' : 'a'}${sid.slice(1)}`;
+    const tamperedMac = `${cookie[separator + 1] === '0' ? '1' : '0'}${cookie.slice(separator + 2)}`;
+    expect(auth.verifyCookie(`${tamperedSid}${cookie.slice(separator)}`)).to.equal(null);
+    expect(auth.verifyCookie(`${cookie.slice(0, separator + 1)}${tamperedMac}`)).to.equal(null);
     expect(auth.verifyCookie(sid)).to.equal(null, 'an unsigned id must not pass');
     expect(auth.verifyCookie('garbage')).to.equal(null);
   });
