@@ -70,6 +70,15 @@ describe('Retention UI in the real Electron renderer', () => {
     expect(result.allFormats).to.deep.equal([]);
   });
 
+  it('offers a file tree that shows the pattern matched by every file', () => {
+    expect(result.previewViewButtons).to.equal(2);
+    expect(result.treeModeActive).to.equal(true);
+    expect(result.treeFolders).to.equal(3);
+    expect(result.treeFiles).to.equal(2);
+    expect(result.treePattern).to.equal('dated-folders');
+    expect(result.treePatternText).to.match(/dated/i);
+  });
+
   it('lists scheduled profiles and runs them by persisted id', () => {
     expect(result.profileRows).to.equal(1);
     expect(result.profileRuns).to.deep.equal(['scheduled-1']);

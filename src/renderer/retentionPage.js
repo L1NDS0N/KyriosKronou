@@ -28,6 +28,7 @@ class RetentionPage {
     this.profiles = [];
     this.editingProfileId = null;
     this.previewTab = 'all';
+    this.previewView = 'folders';
   }
 
   async load() {
@@ -80,7 +81,10 @@ class RetentionPage {
         </div>
 
         <aside class="glass-card ret-card ret-preview-sidebar" id="ret-preview-card">
-          <div class="glass-card-header"><h3><i data-lucide="eye"></i> ${retEsc(i18n.t('retention.previewTitle'))}</h3></div>
+          <div class="ret-preview-head">
+            <div class="glass-card-header"><h3><i data-lucide="eye"></i> ${retEsc(i18n.t('retention.previewTitle'))}</h3></div>
+            ${this._renderPreviewViewToggle()}
+          </div>
           ${this._renderLastRun()}
           <div class="ret-preview-content">${this._renderPreviewState()}</div>
           <button class="btn-danger" onclick="retentionPage.applyNow()" id="ret-apply-btn" ${this.preview && this.preview.ok ? '' : 'disabled'}><i data-lucide="trash-2"></i> ${retEsc(i18n.t('retention.applyBtn'))}</button>
@@ -409,6 +413,22 @@ class RetentionPage {
     }
   }
 
+  _renderPreviewViewToggle() {
+    const ready = !!(this.preview && this.preview.ok);
+    return `<div class="ret-preview-view" role="group" aria-label="${retEsc(i18n.t('retention.previewViewLabel'))}">
+      <button class="ret-preview-view-btn ${this.previewView === 'folders' ? 'active' : ''}" data-ret-view="folders" ${ready ? '' : 'disabled'} onclick="retentionPage.setPreviewView('folders')"><i data-lucide="folder-tree"></i> ${retEsc(i18n.t('retention.previewViewFolders'))}</button>
+      <button class="ret-preview-view-btn ${this.previewView === 'tree' ? 'active' : ''}" data-ret-view="tree" ${ready ? '' : 'disabled'} onclick="retentionPage.setPreviewView('tree')"><i data-lucide="list-tree"></i> ${retEsc(i18n.t('retention.previewViewTree'))}</button>
+    </div>`;
+  }
+
+  setPreviewView(view) {
+    if (view !== 'folders' && view !== 'tree') return;
+    this.previewView = view;
+    const head = document.querySelector('.ret-preview-head');
+    if (head) head.innerHTML = `<div class="glass-card-header"><h3><i data-lucide="eye"></i> ${retEsc(i18n.t('retention.previewTitle'))}</h3></div>${this._renderPreviewViewToggle()}`;
+    this._renderPreviewSidebar();
+  }
+
   _renderFolderPreviews(p) {
     return `<div class="ret-preview-folders">${p.folders.map((f, index) => this._renderFolderPreview(f, index, p)).join('')}</div>`;
   }
@@ -450,6 +470,128 @@ class RetentionPage {
     </table></div>`;
   }
 
+  _previewPatternLabel(value) {
+    const labels = {
+      'dated-folders': 'sync.patternDatedFolders',
+      'dated-files': 'sync.patternDatedFiles',
+      mixed: 'sync.patternMixed',
+      flat: 'sync.patternFlat',
+      empty: 'sync.patternEmpty',
+    };
+    return labels[value] ? i18n.t(labels[value]) : (value || '—');
+  }
+
+  _previewTreeItems(p) {
+    const items = [];
+    const analysisFolders = this.analysis && Array.isArray(this.analysis.folders) ? this.analysis.folders : [];
+    if (Array.isArray(p.folders) && p.folders.length) {
+      for (const f of p.folders) {
+        const groupRel = f.rel || f.path || f.folder || '';
+        const analysisFolder = analysisFolders.find(x => (x.rel || '') === (f.rel || ''));
+        const pattern = f.folderPattern || f.pattern || (analysisFolder && (analysisFolder.folderPattern || analysisFolder.pattern)) || p.folderPattern;
+        for (const item of f.delete || []) items.push({ ...item, status: 'delete', pattern, rel: this._previewTreeRel(item, groupRel) });
+        for (const item of f.kept || []) items.push({ ...item, status: 'kept', pattern, rel: this._previewTreeRel(item, groupRel) });
+      }
+    } else {
+      for (const item of p.delete || []) items.push({ ...item, status: 'delete', pattern: p.folderPattern });
+      for (const item of p.kept || []) items.push({ ...item, status: 'kept', pattern: p.folderPattern });
+    }
+    const known = new Set(items.map(item => item.rel));
+    const evidence = analysisFolders.length
+      ? analysisFolders.flatMap(group => (group.evidence && group.evidence.understood || []).map(file => ({ ...file, pattern: group.folderPattern || group.pattern })))
+      : ((this.analysis && this.analysis.understood) || []).map(file => ({ ...file, pattern: p.folderPattern }));
+    for (const file of evidence) {
+      if (known.has(file.rel)) continue;
+      known.add(file.rel);
+      items.push({ rel: file.rel, date: file.date, size: file.size, status: 'kept', reason: 'retained', detail: file.source, pattern: file.pattern });
+    }
+    return items;
+  }
+
+  _previewTreeRel(item, groupRel) {
+    const rel = String(item.rel || '').replace(/\\/g, '/').replace(/^\/+/, '');
+    const itemFolder = String(item.folder || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    if (itemFolder) {
+      if (rel === itemFolder || rel.startsWith(`${itemFolder}/`)) return rel;
+      return `${itemFolder}/${rel}`.replace(/\/{2,}/g, '/');
+    }
+    if (groupRel && !rel.startsWith(`${groupRel}/`) && rel !== groupRel) return `${groupRel}/${rel}`.replace(/\/{2,}/g, '/');
+    return rel;
+  }
+
+  _buildPreviewTree(items) {
+    const root = { name: '', dirs: new Map(), files: [] };
+    for (const item of items) {
+      const parts = String(item.rel || item.path || '').split('/').filter(Boolean);
+      if (!parts.length) continue;
+      let node = root;
+      for (const part of parts.slice(0, -1)) {
+        if (!node.dirs.has(part)) node.dirs.set(part, { name: part, dirs: new Map(), files: [] });
+        node = node.dirs.get(part);
+      }
+      node.files.push({ ...item, name: parts[parts.length - 1] });
+    }
+    return root;
+  }
+
+  _previewTreeCounts(node) {
+    let del = 0;
+    let kept = 0;
+    for (const file of node.files) {
+      if (file.status === 'kept') kept++;
+      else del++;
+    }
+    for (const child of node.dirs.values()) {
+      const counts = this._previewTreeCounts(child);
+      del += counts.delete;
+      kept += counts.kept;
+    }
+    return { delete: del, kept };
+  }
+
+  _renderPreviewTreeNode(node, depth, p) {
+    const dirs = [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name));
+    const files = node.files.sort((a, b) => a.name.localeCompare(b.name));
+    const folders = dirs.map(dir => {
+      const counts = this._previewTreeCounts(dir);
+      return `<details class="ret-tree-folder" data-ret-tree-folder="${retEsc(dir.name)}" ${depth < 2 ? 'open' : ''}>
+        <summary><span><i data-lucide="folder"></i> ${retEsc(dir.name)}</span><span class="ret-folder-count">${retEsc(i18n.t('retention.folderPreviewCount', { delete: counts.delete, keep: counts.kept }))}</span></summary>
+        <div class="ret-tree-children">${this._renderPreviewTreeNode(dir, depth + 1, p)}</div>
+      </details>`;
+    }).join('');
+    const fileRows = files.map(file => this._renderPreviewTreeFile(file, depth, p)).join('');
+    return `${folders}${fileRows}`;
+  }
+
+  _renderPreviewTreeFile(file, depth, p) {
+    const isKept = file.status === 'kept';
+    const dateSource = p.dateSource === 'metadata' ? i18n.t('retention.sourceMetadata') : i18n.t('retention.sourceNames');
+    return `<div class="ret-tree-file ${isKept ? 'kept' : 'delete'}" data-ret-tree-file="${retEsc(file.rel)}" data-ret-pattern="${retEsc(file.pattern || '')}" style="--tree-depth:${depth}">
+      <div class="ret-tree-file-main">
+        <i data-lucide="${isKept ? 'shield-check' : 'file-warning'}"></i>
+        <span class="ret-tree-file-name" title="${retEsc(file.rel)}">${retEsc(file.name)}</span>
+        <span class="badge ${isKept ? 'badge-active' : 'badge-error'}">${retEsc(i18n.t('retention.reason.' + (file.reason || (isKept ? 'minKeep' : 'age'))))}</span>
+      </div>
+      <div class="ret-tree-file-details">
+        <span><i data-lucide="fingerprint"></i> ${retEsc(i18n.t('retention.treePattern', { pattern: this._previewPatternLabel(file.pattern) }))}</span>
+        <span><i data-lucide="calendar"></i> ${retEsc(i18n.t('retention.treeDate', { date: file.date ? file.date.slice(0, 10) : '—', source: dateSource }))}</span>
+        ${file.detail ? `<span><i data-lucide="info"></i> ${retEsc(file.detail)}</span>` : ''}
+      </div>
+    </div>`;
+  }
+
+  _renderPreviewTree(p) {
+    const items = this._previewTreeItems(p);
+    if (!items.length) return `<div class="form-hint" style="color:var(--green)">${retEsc(i18n.t('retention.previewTabEmpty'))}</div>`;
+    const tree = this._buildPreviewTree(items);
+    const counts = this._previewTreeCounts(tree);
+    const rootName = i18n.t('retention.treeRoot');
+    return `<div class="ret-file-tree" data-ret-file-tree>
+      <div class="ret-tree-summary"><i data-lucide="network"></i> ${retEsc(rootName)} · ${retEsc(i18n.t('retention.folderPreviewCount', { delete: counts.delete, keep: counts.kept }))}</div>
+      <div class="ret-tree-root">${this._renderPreviewTreeNode(tree, 0, p)}</div>
+    </div>`;
+  }
+
   _renderPreviewSidebar() {
     const content = document.querySelector('.ret-preview-content');
     if (content) content.innerHTML = this._renderPreviewState();
@@ -463,6 +605,7 @@ class RetentionPage {
     const p = this.preview;
     if (!p) return '';
     if (p.ok === false) return `<div class="form-hint" style="color:var(--red)">${retEsc(p.error)}</div>`;
+    if (this.previewView === 'tree') return this._renderPreviewTree(p);
     if (Array.isArray(p.folders) && p.folders.length) return this._renderFolderPreviews(p);
     const del = p.delete || [];
     const kept = p.kept || [];

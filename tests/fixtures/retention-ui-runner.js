@@ -27,7 +27,7 @@ app.whenReady().then(async () => {
         }),
         previewSyncRetention: async () => previewMode === 'fail'
           ? { ok: false, error: 'Destination unavailable' }
-          : { ok: true, delete: [{ rel: 'old.zip', reason: 'age', date: '2020-01-01T00:00:00Z', detail: 'old' }], kept: [], rules: [], minKeep: 5, dateSource: 'names', totalFiles: 40, totalSnapshots: 40, folders: [{ path: 'daily', folderPattern: 'dated-folders', delete: [{ rel: 'old.zip', reason: 'age', date: '2020-01-01T00:00:00Z', detail: 'old' }], kept: [], rules: [{ type: 'age', kind: 'delete', days: 30 }], minKeep: 5, dateSource: 'names' }] },
+          : { ok: true, delete: [{ rel: 'old.zip', reason: 'age', date: '2020-01-01T00:00:00Z', detail: 'old' }], kept: [], rules: [], minKeep: 5, dateSource: 'names', totalFiles: 40, totalSnapshots: 40, folders: [{ rel: 'daily', folderPattern: 'dated-folders', delete: [{ rel: '2020-01-01/old.zip', folder: 'daily', reason: 'age', date: '2020-01-01T00:00:00Z', detail: 'old' }], kept: [{ rel: '2026-09-01/fresh.zip', folder: 'daily', reason: 'monthly', date: '2026-09-01T00:00:00Z', detail: 'monthly copy' }], rules: [{ type: 'age', kind: 'delete', days: 30 }], minKeep: 5, dateSource: 'names' }] },
         runRetentionNow: async (folder, policy) => { applyCalls++; appliedPolicy = policy; return { ok: true, deleted: 1, freed: 10, failed: [] }; },
         getRetentionProfiles: async () => [{ Id: 'scheduled-1', Name: 'Nightly backups', FolderPath: 'D:/Backups', CronExpression: '0 3 * * *', Enabled: true, LastStatus: 'Success', LastRun: '2026-09-24T03:00:00Z' }],
         runRetentionProfile: async id => { window.__profileRuns.push(id); return { success: true }; },
@@ -49,6 +49,13 @@ app.whenReady().then(async () => {
       await retentionPage.runPreview();
       const successEnabled = !document.getElementById('ret-apply-btn').disabled;
       const folderAccordions = document.querySelectorAll('.ret-folder-accordion').length;
+      const previewViewButtons = document.querySelectorAll('[data-ret-view]').length;
+      retentionPage.setPreviewView('tree');
+      const treeFolders = document.querySelectorAll('[data-ret-tree-folder]').length;
+      const treeFiles = document.querySelectorAll('[data-ret-tree-file]').length;
+      const treePattern = document.querySelector('[data-ret-tree-file]').getAttribute('data-ret-pattern');
+      const treePatternText = document.querySelector('.ret-tree-file-details').textContent;
+      const treeModeActive = document.querySelector('[data-ret-view="tree"]').classList.contains('active');
       const defaultFormats = retentionPage._getCfg().FileExtensions.slice();
       retentionPage._toggleFormat('.bak', true);
       const customFormats = retentionPage._getCfg().FileExtensions.slice();
@@ -66,7 +73,7 @@ app.whenReady().then(async () => {
       await retentionPage.load();
       const profileRows = document.querySelectorAll('[data-retention-profile]').length;
       await retentionPage.runScheduleProfile('scheduled-1');
-      return { initialDisabled, failedDisabled, blocked, successEnabled, changedDisabled, applyCalls, appliedPolicy, sidebarVisible, previewButtonCount, modalCalls: window.__modalCalls, folderAccordions, defaultFormats, customFormats, allFormats, profileRows, profileRuns: window.__profileRuns, pageErrors: [] };
+      return { initialDisabled, failedDisabled, blocked, successEnabled, changedDisabled, applyCalls, appliedPolicy, sidebarVisible, previewButtonCount, modalCalls: window.__modalCalls, folderAccordions, previewViewButtons, treeFolders, treeFiles, treePattern, treePatternText, treeModeActive, defaultFormats, customFormats, allFormats, profileRows, profileRuns: window.__profileRuns, pageErrors: [] };
     })()`);
     process.stdout.write(`RETENTION_UI_RESULT=${JSON.stringify(result)}\n`);
     app.exit(0);
