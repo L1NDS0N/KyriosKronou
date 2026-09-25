@@ -116,7 +116,8 @@ describe('Web access: sessions', () => {
   it('rejects a tampered cookie', () => {
     const sid = auth.createSession(user, '10.0.0.1');
     const cookie = auth.signCookie(sid);
-    expect(auth.verifyCookie(cookie.slice(0, -2) + 'ff')).to.equal(null);
+    const replacement = cookie.slice(-1) === 'A' ? 'B' : 'A';
+    expect(auth.verifyCookie(cookie.slice(0, -1) + replacement)).to.equal(null);
     expect(auth.verifyCookie(sid)).to.equal(null, 'an unsigned id must not pass');
     expect(auth.verifyCookie('garbage')).to.equal(null);
   });

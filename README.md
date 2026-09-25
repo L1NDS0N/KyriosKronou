@@ -1,16 +1,27 @@
 # Kyrios Chronos — Κύριος Χρόνος
 
-![Platform](https://img.shields.io/badge/platform-Windows-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Electron](https://img.shields.io/badge/Electron-28-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A516-brightgreen)
+![Platform](https://img.shields.io/badge/platform-Windows-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Electron](https://img.shields.io/badge/Electron-28-47848F) ![Node](https://img.shields.io/badge/node-%E2%89%A516-brightgreen) ![Interface](https://img.shields.io/badge/interface-dark%20%2B%20pt--BR%2FEN-6a5aad)
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard.png" alt="Painel do Kyrios Chronos com tarefas, backups, sincronismo, retenção e serviços" width="1100">
+</p>
+
+<p align="center"><strong>Kyrios Chronos — Κύριος Χρόνος</strong><br>Agendamento, backup, sincronismo, retenção e serviços Windows em um único aplicativo.</p>
+
+#Windows #Electron #TaskScheduler #Cron #NSSM #WindowsService #MySQL #MariaDB #SQLServer #DatabaseBackup #FolderSync #SFTP #SMB #BackupRetention #DevOps #PowerShell #Automation #SelfHosted #ElectronApp #NodeJS #OpenSource
 
 > Agendador de tarefas moderno com suporte a cron, gerenciador de serviços do Windows e backup de bancos de dados.
 
 Português | **[English](README.en.md)**
 
-O **Kyrios Chronos** é um aplicativo desktop (Electron) para Windows que centraliza três necessidades operacionais em uma única interface:
+O **Kyrios Chronos** é um aplicativo desktop (Electron) para Windows que centraliza as operações que normalmente exigem cinco ferramentas separadas:
 
-1. **Agendamento de tarefas** (scripts PowerShell, executáveis, batches) via expressões cron;
-2. **Gerenciamento de serviços do Windows** via [NSSM](https://nssm.cc/) — instalar, iniciar, parar, editar parâmetros e renomear serviços;
-3. **Backup agendado de bancos de dados** (MySQL/MariaDB e SQL Server) com compressão e upload para FTP, SFTP ou compartilhamento SMB.
+1. **Agendamento de tarefas** (scripts PowerShell, executáveis e batches) via expressões cron;
+2. **Gerenciamento de serviços do Windows** via [NSSM](https://nssm.cc/), com instalação, Parameters e ciclo de vida;
+3. **Backup agendado de bancos de dados** (MySQL/MariaDB e SQL Server) com upload FTP, SFTP ou SMB;
+4. **Sincronismo de pastas** entre disco local, unidade mapeada, FTP, SFTP e SMB;
+5. **Retenção segura de backups**, com análise por subpasta, prévia sem escrita e perfis agendados;
+6. **Painel web e API REST** opcionais, servidos pelo serviço Windows e protegidos por login + allowlist.
 
 ## ✨ Funcionalidades
 
@@ -38,6 +49,22 @@ O **Kyrios Chronos** é um aplicativo desktop (Electron) para Windows que centra
 - Histórico e estatísticas de sucesso/falha por perfil;
 - Importação/exportação de perfis em JSON.
 
+### 🔄 Sincronismo de pastas
+- Perfis incrementais ou espelho entre disco local, FTP, SFTP e SMB;
+- Agendamento cron e opción de vigiar a origem;
+- Exclusões por padrão, proteção contra destino dentro da origem esymlinks;
+- Simulação completa antes de executar: cópia, arquivos ignorados e retenção pós-copia;
+- Histórico e status da última execução por perfil.
+
+### 🧹 Retenção segura
+- Execução manual ao vivo e perfis de retenção agendados por cron;
+- Filtro nível 0 de formatos, com `.7z` e `.zip` por padrão e opção explícita de remover o filtro;
+- Política padrão: 30 arquivos mais recentes + uma cópia por mês durante 12 meses;
+- Idade, semanal, quinzenal, espaço livre e mínimo de segurança como regras avançadas;
+- Análise independente de cada subpasta — cada uma recebe seu próprio padrão de nome de arquivo;
+- Prévia obrigatória antes de excluir, agrupada por pasta e também em árvore de arquivos;
+- Cada arquivo da árvore mostra o padrão detectado, a regra aplicada, a data e a origem da data.
+
 ### 🖥️ Experiência desktop
 - Interface dark com ícones [Lucide](https://lucide.dev/), janela sem moldura nativa;
 - **System tray** com ações rápidas (executar tarefas pendentes, atualizar dashboard);
@@ -49,6 +76,102 @@ O **Kyrios Chronos** é um aplicativo desktop (Electron) para Windows que centra
 - Log de aplicação, log de erros e **log de auditoria** (quem criou/alterou/executou o quê, e quando);
 - Leitura de logs direto do disco — enxerga também o que o serviço rodou em outra sessão;
 - Exportação de logs em TXT, CSV ou JSON.
+
+---
+
+## 🖼️ Tour visual das telas
+
+As imagens abaixo são geradas automaticamente por `scripts/capture-readme-screenshots.js`, usando dados de demonstração e a mesma janela real do aplicativo. Elas não dependem de uma máquina de produção nem expõem credenciais.
+
+### Painel e agenda unificada
+
+<table>
+<tr>
+<td width="65%"><img src="./docs/screenshots/dashboard.png" alt="Dashboard com indicadores e atividade recente" width="100%"></td>
+<td width="35%"><img src="./docs/screenshots/calendario.png" alt="Calendário unificado de tarefas, backups e serviços" width="100%"></td>
+</tr>
+<tr>
+<td><strong>Dashboard.</strong> Estado do agendador, tarefas ativas, perfis de backup, próxima execução, falhas de 24 horas e atividade recente em uma única tela.</td>
+<td><strong>Calendário.</strong> Tarefas, backups e serviços projetados na mesma linha do tempo, com visões Mensal, Semana, Agenda e Carga por hora.</td>
+</tr>
+</table>
+
+### Tarefas, criação rápida e histórico
+
+<table>
+<tr>
+<td width="50%"><img src="./docs/screenshots/tarefas.png" alt="Tarefas agendadas e criação rápida" width="100%"></td>
+<td width="50%"><img src="./docs/screenshots/historico.png" alt="Histórico unificado de tarefas e backups" width="100%"></td>
+</tr>
+<tr>
+<td><strong>Tarefas.</strong> Cron, script, argumentos e descrição em cards; execução manual, habilitação, histórico e criação rápida em lote.</td>
+<td><strong>Histórico.</strong> Execuções de tarefas e backups no mesmo fluxo, filtráveis por período e exportáveis em CSV.</td>
+</tr>
+</table>
+
+### Backups de banco de dados
+
+<table>
+<tr>
+<td width="50%"><img src="./docs/screenshots/backups.png" alt="Perfis de backup MySQL e SQL Server" width="100%"></td>
+<td width="50%"><img src="./docs/screenshots/wizard-backup.png" alt="Wizard de criação de backup" width="100%"></td>
+</tr>
+<tr>
+<td><strong>Perfis de backup.</strong> Motor, destino, bancos, cron, upload, última execução e estatísticas em cards.</td>
+<td><strong>Wizard em cinco etapas.</strong> Conexão, seleção de bancos, destino, upload e agenda, com resumo permanente ao lado.</td>
+</tr>
+</table>
+
+### Sincronismo com retenção integrada
+
+<table>
+<tr>
+<td width="50%"><img src="./docs/screenshots/sincronizacao.png" alt="Perfis de sincronismo de pastas" width="100%"></td>
+<td width="50%"><img src="./docs/screenshots/wizard-sync-retencao.png" alt="Etapa de retenção do wizard de sincronismo" width="100%"></td>
+</tr>
+<tr>
+<td><strong>Perfis de sync.</strong> Origem, destino, modo, espelho, retenção e estatísticas de execução.</td>
+<td><strong>Retenção no destino.</strong> Análise do padrão, filtro de formatos, regras e prévia antes de qualquer exclusão.</td>
+</tr>
+</table>
+
+### Retenção: prévia por pastas e árvore de arquivos
+
+<table>
+<tr>
+<td width="50%"><img src="./docs/screenshots/retencao.png" alt="Tela de retenção com prévia permanente na sidebar" width="100%"></td>
+<td width="50%"><img src="./docs/screenshots/retencao-arvore.png" alt="Árvore de arquivos com padrão e regra aplicada" width="100%"></td>
+</tr>
+<tr>
+<td><strong>Execução manual.</strong> Política padrão de 30 arquivos + 12 cópias mensais, com regras avançadas opcionais e prévia sempre visível.</td>
+<td><strong>Árvore de retenção.</strong> Cada arquivo mostra em qual padrão de pasta se encaixa e por que será mantido ou excluído.</td>
+</tr>
+</table>
+
+### Serviços, logs e configuração
+
+<table>
+<tr>
+<td width="33%"><img src="./docs/screenshots/servicos.png" alt="Gerenciamento de serviços Windows" width="100%"></td>
+<td width="33%"><img src="./docs/screenshots/logs.png" alt="Logs, auditoria e erros" width="100%"></td>
+<td width="33%"><img src="./docs/screenshots/configuracoes.png" alt="Configurações, bandeja, notificações e web" width="100%"></td>
+</tr>
+<tr>
+<td><strong>Serviços.</strong> Iniciar, parar, reiniciar, clonar e instalar pelo NSSM.</td>
+<td><strong>Logs.</strong> Erros, auditoria e aplicação com busca e exportação.</td>
+<td><strong>Configurações.</strong> Perfil, NSSM, idioma, bandeja, notificações e acesso web.</td>
+</tr>
+</table>
+
+### Gerar as imagens novamente
+
+```bash
+npx electron scripts/capture-readme-screenshots.js
+```
+
+O script carrega o renderer real em uma janela Electron isolada, simula apenas as respostas IPC necessárias e grava as imagens em `docs/screenshots/`.
+
+---
 
 ## 🏗️ Arquitetura
 
@@ -71,7 +194,7 @@ Tudo vive em `%ProgramData%\KyriosChronos` (configurável via `KYRION_DATA_DIR`)
 
 ```
 %ProgramData%\KyriosChronos\
-├── config\            # tasks.json, backup-profiles.json, histórico, dono do scheduler
+├── config\            # tasks.json, backup-profiles.json, sync-profiles.json, retention-profiles.json, históricos e heartbeat
 └── logs\              # app.log, erros, auditoria
 ```
 
@@ -140,6 +263,8 @@ kyrios-chronos/
 │   │   ├── schedulerCore.js    # Motor de agendamento compartilhado (GUI + serviço)
 │   │   ├── taskManager.js      # CRUD, execução e histórico de tarefas
 │   │   ├── backupManager.js    # Perfis e execução de backups
+│   │   ├── retentionManager.js # Perfis de retenção agendados e lock por pasta
+│   │   ├── sync/               # Perfis de sync e motor de retenção por subpasta
 │   │   ├── serviceManager.js   # Operações NSSM
 │   │   ├── kyrionService.js    # Serviço headless KyriosChronos
 │   │   ├── apiServer.js        # Interface web + API REST
@@ -149,14 +274,15 @@ kyrios-chronos/
 │   ├── renderer/          # Interface desktop (HTML/CSS/JS, i18n)
 │   └── web/               # Interface web servida pela API
 ├── tests/                 # Suíte Mocha + Chai
-├── scripts/               # Empacotamento (portable)
+├── docs/screenshots/      # Imagens do tour visual geradas por automação
+├── scripts/               # Empacotamento e captura automatizada de screenshots
 ├── installer/             # Scripts NSIS
 └── build-resources/       # Ícones e artefatos visuais
 ```
 
 ## 🔌 API REST
 
-Quando habilitada nas configurações (desabilitada por padrão), a interface web/API expõe endpoints para gerenciar tarefas, serviços, backups, histórico e logs em `http://localhost:7600`. Endpoints públicos antes do login: `/login`, `/api/health`.
+Quando habilitada nas configurações (desabilitada por padrão), a interface web/API expõe endpoints para gerenciar tarefas, serviços, backups, sincronismo, retenção, histórico e logs em `http://localhost:7600`. Endpoints públicos antes do login: `/login`, `/api/health`.
 
 ## 🔒 Notas de segurança
 
