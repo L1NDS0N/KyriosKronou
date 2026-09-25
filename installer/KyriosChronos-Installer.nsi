@@ -1,5 +1,4 @@
 ; Kyrios Chronos NSIS Installer Script
-; Generated for Kyrios Chronos v1.0.0
 ; Author: l1nds0n
 
 !include "MUI2.nsh"
@@ -7,25 +6,30 @@
 !include "LogicLib.nsh"
 !include "WordFunc.nsh"
 
+!ifndef APP_VERSION
+  !define APP_VERSION "1.0.0"
+!endif
+!define SETUP_EXE "KyriosChronos-Setup-${APP_VERSION}.exe"
+
 ; ─── General ────────────────────────────────────────────
 Name "Kyrios Chronos"
-OutFile "..\dist\KyriosChronos-Setup-1.0.0.exe"
+OutFile "..\dist\${SETUP_EXE}"
 InstallDir "$LOCALAPPDATA\KyriosChronos"
 InstallDirRegKey HKCU "Software\KyriosChronos" "InstallDir"
 RequestExecutionLevel admin
 Unicode True
 SetCompressor /SOLID lzma
-BrandingText "Kyrios Chronos v1.0.0"
+BrandingText "Kyrios Chronos v${APP_VERSION}"
 
 ; ─── Version Info ───────────────────────────────────────
-VIProductVersion "1.0.0.0"
+VIProductVersion "${APP_VERSION}.0"
 VIAddVersionKey "ProductName" "Kyrios Chronos"
 VIAddVersionKey "CompanyName" "l1nds0n"
 VIAddVersionKey "FileDescription" "Kyrios Chronos Installer"
-VIAddVersionKey "FileVersion" "1.0.0"
-VIAddVersionKey "ProductVersion" "1.0.0"
+VIAddVersionKey "FileVersion" "${APP_VERSION}"
+VIAddVersionKey "ProductVersion" "${APP_VERSION}"
 VIAddVersionKey "LegalCopyright" "Copyright 2026 l1nds0n"
-VIAddVersionKey "OriginalFilename" "KyriosChronos-Setup-1.0.0.exe"
+VIAddVersionKey "OriginalFilename" "${SETUP_EXE}"
 
 ; ─── MUI Settings ──────────────────────────────────────
 !define MUI_ABORTWARNING

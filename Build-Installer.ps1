@@ -42,6 +42,14 @@ try {
     # Check npm
     $npmVersion = npm --version 2>$null
     Write-Host "  npm: $npmVersion" -ForegroundColor DarkGray
+
+    $packageInfo = Get-Content "package.json" -Raw | ConvertFrom-Json
+    $version = $packageInfo.version
+    if (-not $version) {
+        Write-Host "  [ERROR] package.json has no version!" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "  Version: $version" -ForegroundColor DarkGray
     Write-Host ""
 
     # Install dependencies if needed
@@ -161,7 +169,7 @@ try {
         }
 
         $ErrorActionPreference = 'Continue'
-        & "$nsisPath" installer\KyriosChronos-Installer.nsi
+        & "$nsisPath" "/DAPP_VERSION=$version" installer\KyriosChronos-Installer.nsi
         $nsisExit = $LASTEXITCODE
         $ErrorActionPreference = 'Stop'
         if ($nsisExit -ne 0) {

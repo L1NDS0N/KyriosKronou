@@ -1,0 +1,174 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (leave empty to bump patch automatically)'
+        required: false
+        type: string
+      publish:
+        description: 'Commit the version, create the tag and publish the GitHub Release'
+        required: true
+        default: true
+        type: boolean
+      prerelease:
+        description: 'Mark the GitHub Release as a prerelease'
+        required: false
+        default: false
+        type: boolean
+      draft:
+        description: 'Create the GitHub Release as a draft'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build Windows artifacts
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      NODE_VERSION: '16.20.2'
+    steps:
+      - name: Checkout source and tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve version and publication tag
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${GITHUB_REF_NAME}"
+            PACKAGE_VERSION=$(node -p "require('./package.json').version")
+            if [ "$TAG" != "v$PACKAGE_VERSION" ]; then
+              echo "Tag $TAG does not match package.json version $PACKAGE_VERSION." >&2
+              exit 1
+            fi
+          elif [ "${{ inputs.publish }}" = "true" ]; then
+            if [ "${{ github.ref_type }}" != "branch" ]; then
+              echo "Publish must be dispatched from a branch, not a tag." >&2
+              exit 1
+            fi
+            CURRENT=$(node -p "require('./package.json').version")
+            if [ -n "${{ inputs.version }}" ]; then
+              VERSION="${{ inputs.version }}"
+            else
+              VERSION=$(node -e "const m=/^(\\d+)\\.(\\d+)\\.(\\d+)$/.exec(process.argv[1]); if(!m) process.exit(1); console.log(m[1]+'.'+m[2]+'.'+(Number(m[3])+1));" "$CURRENT")
+            fi
+            if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Release version must use MAJOR.MINOR.PATCH, received: $VERSION" >&2
+              exit 1
+            fi
+            TAG="v$VERSION"
+            npm version "$VERSION" --no-git-tag-version --allow-same-version
+            node scripts/generate-changelog.js --version "$VERSION" --output CHANGELOG.md --notes-output release-notes.md
+          else
+            TAG=""
+          fi
+          echo "tag=$TAG" >> "$GITHUB_ENV"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis --no-progress -y
+
+      - name: Run tests and build installer
+        shell: pwsh
+        run: .\Build-Installer.ps1
+
+      - name: Commit version and create release tag
+        if: github.event_name == 'workflow_dispatch' && inputs.publish == true && github.ref_type == 'branch'
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json package-lock.json CHANGELOG.md
+          git commit -m "chore(release): $TAG"
+          git tag -a "$TAG" -m "Kyrios Chronos $TAG"
+          git push origin "HEAD:${{ github.ref_name }}"
+          git push origin "$TAG"
+
+      - name: Generate release notes
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.publish }}" = "true" ]; then
+            :
+          elif [ -n "$RELEASE_TAG" ]; then
+            node scripts/generate-changelog.js --tag "$RELEASE_TAG" --output CHANGELOG.md --notes-output release-notes.md
+          else
+            node scripts/generate-changelog.js --version "$(node -p "require('./package.json').version")" --output CHANGELOG.md --notes-output release-notes.md
+          fi
+          if [ -n "$RELEASE_TAG" ]; then
+            {
+              echo "## Kyrios Chronos $RELEASE_TAG"
+              echo
+              cat release-notes.md
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kyrios-chronos-${{ steps.version.outputs.tag || 'build' }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest.yml
+            CHANGELOG.md
+            release-notes.md
+
+      - name: Attach artifacts to GitHub Release
+        if: steps.version.outputs.tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease || false }}
+          DRAFT: ${{ inputs.draft || false }}
+        run: |
+          set -euo pipefail
+          mapfile -t ASSETS < <(find dist -maxdepth 1 -type f \( -name '*.exe' -o -name '*.blockmap' -o -name 'latest.yml' \) | sort)
+          if [ "${#ASSETS[@]}" -eq 0 ]; then
+            echo "No release assets were produced." >&2
+            exit 1
+          fi
+          FLAGS=(--title "Kyrios Chronos $TAG" --notes-file release-notes.md)
+          if [ "$PRERELEASE" = "true" ]; then FLAGS+=(--prerelease); fi
+          if [ "$DRAFT" = "true" ]; then FLAGS+=(--draft); fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
+            gh release edit "$TAG" "${FLAGS[@]}"
+          else
+            gh release create "$TAG" "${ASSETS[@]}" "${FLAGS[@]}" --verify-tag
+          fi

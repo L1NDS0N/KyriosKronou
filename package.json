@@ -9,6 +9,7 @@
     "build:portable": "node scripts/package-app.js",
     "build:installer": "electron-builder --win --x64 --config",
     "test": "mocha tests/*.js --timeout 60000",
+    "changelog": "node scripts/generate-changelog.js",
     "pack": "electron-builder --dir"
   },
   "author": "l1nds0n",

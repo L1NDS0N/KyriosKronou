@@ -253,6 +253,15 @@ Artefatos gerados em `dist/`:
 - `KyriosChronos Setup <versão>.exe` — instalador NSIS (atalhos na área de trabalho e menu iniciar, escolha de diretório);
 - `KyriosChronos-<versão>-portable.exe` — versão portátil sem instalação.
 
+### Publicação automatizada
+
+O workflow `.github/workflows/release.yml` roda no `windows-latest` e pode ser disparado de duas formas:
+
+- **Tags** — ao enviar `v1.2.0`, executa testes, gera o instalador e publica a GitHub Release;
+- **Manual** — em *Actions → Build and Release → Run workflow*, deixa a versão vazia para bump automático ou informa `MAJOR.MINOR.PATCH`.
+
+Depois de uma build bem-sucedida, o workflow cria a tag, envia os artefatos para a Release e publica as mudanças categorizadas em `Added`, `Fixed`, `Security`, `Changed`, `Documentation` e `Tests`. O mesmo resumo aparece na aba *Summary* da execução e no [`CHANGELOG.md`](CHANGELOG.md).
+
 ## 📁 Estrutura do projeto
 
 ```
