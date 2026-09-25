@@ -1,0 +1,84 @@
+const { expect } = require('chai');
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+
+const ROOT = path.join(__dirname, '..');
+const ELECTRON = path.join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe');
+const RUNNER = path.join(__dirname, 'fixtures', 'retention-ui-runner.js');
+
+function runRetention() {
+  return new Promise((resolve, reject) => {
+    const child = spawn(ELECTRON, [RUNNER], {
+      cwd: ROOT,
+      env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: '1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`retention renderer did not finish. stderr:\n${stderr}`));
+    }, 30000);
+    child.stdout.on('data', chunk => { stdout += chunk.toString(); });
+    child.stderr.on('data', chunk => { stderr += chunk.toString(); });
+    child.on('error', reject);
+    child.on('exit', code => {
+      clearTimeout(timer);
+      if (code !== 0) return reject(new Error(`retention renderer exited ${code}. stderr:\n${stderr}`));
+      const line = stdout.split(/\r?\n/).reverse().find(value => value.startsWith('RETENTION_UI_RESULT='));
+      if (!line) return reject(new Error(`retention renderer returned no result. stdout:\n${stdout}\nstderr:\n${stderr}`));
+      try { resolve(JSON.parse(line.slice('RETENTION_UI_RESULT='.length))); }
+      catch (error) { reject(error); }
+    });
+  });
+}
+
+describe('Retention UI in the real Electron renderer', () => {
+  let result;
+
+  before(async function () {
+    if (!fs.existsSync(ELECTRON)) return this.skip();
+    result = await runRetention();
+  });
+
+  it('keeps the preview permanently visible without opening a modal', () => {
+    expect(result.sidebarVisible).to.equal(true);
+    expect(result.previewButtonCount).to.equal(0);
+    expect(result.modalCalls).to.equal(0);
+  });
+
+  it('keeps Apply disabled without a successful preview', () => {
+    expect(result.initialDisabled).to.equal(true);
+    expect(result.failedDisabled).to.equal(true);
+    expect(result.blocked.applyCalls).to.equal(0);
+    expect(result.blocked.confirmCalls).to.equal(0);
+    expect(result.blocked.toasts).to.have.lengthOf(1);
+    expect(result.blocked.toasts[0].type).to.equal('error');
+  });
+
+  it('invalidates the preview whenever the policy changes', () => {
+    expect(result.successEnabled).to.equal(true);
+    expect(result.changedDisabled).to.equal(true);
+  });
+
+  it('groups the preview by folder and defaults to 7z and zip formats', () => {
+    expect(result.folderAccordions).to.equal(1);
+    expect(result.defaultFormats).to.deep.equal(['.7z', '.zip']);
+    expect(result.customFormats).to.deep.equal(['.7z', '.zip', '.bak']);
+    expect(result.allFormats).to.deep.equal([]);
+  });
+
+  it('lists scheduled profiles and runs them by persisted id', () => {
+    expect(result.profileRows).to.equal(1);
+    expect(result.profileRuns).to.deep.equal(['scheduled-1']);
+  });
+
+  it('applies the exact policy that was previewed', () => {
+    expect(result.applyCalls).to.equal(1);
+    expect(result.appliedPolicy.DateSource).to.equal('names');
+    expect(result.appliedPolicy.KeepDays).to.equal(45);
+    expect(result.appliedPolicy.MinKeep).to.equal(5);
+  });
+});

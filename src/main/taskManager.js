@@ -50,6 +50,7 @@ class TaskManager {
       Arguments: taskData.Arguments || '',
       WorkingDirectory: taskData.WorkingDirectory || '',
       Description: taskData.Description || '',
+      DescriptionHtml: taskData.DescriptionHtml || '',
       ScriptContent: taskData.ScriptContent || '',
       ScriptType: taskData.ScriptType || '',
       ManagementMode: taskData.ManagementMode || 'cronmaster',

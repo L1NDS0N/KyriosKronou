@@ -13,6 +13,7 @@ const WrapperGenerator = require('./wrapperGenerator');
 const ApiServer = require('./apiServer');
 const BackupManager = require('./backupManager');
 const SyncManager = require('./sync/syncManager');
+const RetentionManager = require('./retentionManager');
 const KyrionService = require('./kyrionService');
 const paths = require('./paths');
 const { SchedulerCore, ROLE_GUI, readOwner } = require('./schedulerCore');
@@ -48,6 +49,7 @@ let wrapperGenerator;
 let apiServer;
 let backupManager;
 let syncManager;
+let retentionManager;
 let isQuitting = false;
 
 // ─── Push Notifications ───
@@ -287,6 +289,7 @@ function initComponents() {
   wrapperGenerator = new WrapperGenerator(config, logger);
   backupManager = new BackupManager(config, logger, runs);
   syncManager = new SyncManager(config, logger, runs);
+  retentionManager = new RetentionManager({ syncManager, cronParser, logger });
 
   if (migration.migrated) {
     logger.log('INFO', `Migrated ${migration.copied} file(s) from ${migration.sources.join(', ')} to ${paths.dataDir()}`);
@@ -323,7 +326,7 @@ function syncWebInterface() {
 // never fire twice.
 function startScheduler() {
   scheduler = new SchedulerCore(
-    { taskManager, backupManager, syncManager, cronParser, logger },
+    { taskManager, backupManager, syncManager, retentionManager, cronParser, logger },
     ROLE_GUI,
     {
       onTaskExecuted: (task, result) => {
@@ -875,6 +878,11 @@ function registerIPC() {
   ipcMain.handle('analyze-sync-folder', (e, dir, options) => syncManager.analyzeFolder(dir, options || {}));
   ipcMain.handle('preview-sync-retention', (e, dir, retentionCfg) => syncManager.previewRetention(dir, retentionCfg));
   ipcMain.handle('run-retention-now', (e, dir, retentionCfg) => syncManager.runRetentionNow(dir, retentionCfg));
+  ipcMain.handle('get-retention-profiles', () => retentionManager.getAllProfiles());
+  ipcMain.handle('create-retention-profile', (e, data) => retentionManager.createProfile(data));
+  ipcMain.handle('update-retention-profile', (e, data) => retentionManager.updateProfile(data));
+  ipcMain.handle('delete-retention-profile', (e, id) => retentionManager.deleteProfile(id));
+  ipcMain.handle('run-retention-profile', (e, id) => retentionManager.runProfile(id));
   ipcMain.handle('preview-sync-plan', async (e, draft) => {
     try { return await syncManager.previewSyncPlan(draft); }
     catch (err) { return { ok: false, error: err.message };

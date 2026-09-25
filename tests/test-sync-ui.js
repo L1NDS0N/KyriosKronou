@@ -65,6 +65,13 @@ describe('Sync UI in the real Electron renderer', () => {
     ]);
   });
 
+  it('applies retention action prerequisites and invalidation rules', () => {
+    expect(result.actionState).to.deep.equal({ emptyAnalyze: true, emptyPreview: true, emptySimulate: true });
+    expect(result.actionEnabled).to.deep.equal({ analyze: true, preview: true, simulate: true });
+    expect(result.actionCalls).to.deep.equal({ analyze: 1, preview: 1, simulate: 1 });
+    expect(result.invalidated).to.equal(true);
+  });
+
   it('saves the current draft when Save is used outside the last tab', () => {
     expect(result.saves).to.have.length(2);
     expect(result.saves[0].operation).to.equal('create');

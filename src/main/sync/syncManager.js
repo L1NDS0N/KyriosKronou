@@ -17,11 +17,18 @@ const retention = require('./retention');
 /** Fill a profile's Retention block with safe defaults. */
 function normalizeRetention(raw) {
   const r = raw && typeof raw === 'object' ? raw : {};
+  // Level-0 rule of formats: retention manages archives unless the user
+  // narrows the list - and an emptied list means "every format", not "none".
+  const exts = retention.normalizeExtensions(r);
   return {
     Enabled: r.Enabled === true,
     // Where snapshot dates come from: 'metadata' (mtime, the historical
     // default) or 'names' (falls back to mtime when a name has no date).
     DateSource: r.DateSource === 'names' ? 'names' : 'metadata',
+    // Both spellings are accepted on the way in and kept in sync on the way
+    // out, so either UI can read the profile back.
+    FileExtensions: exts,
+    Extensions: exts,
     ByAge: r.ByAge === true,
     KeepDays: parseInt(r.KeepDays, 10) || 30,
     ByCount: r.ByCount === true,
@@ -136,7 +143,13 @@ class SyncManager {
   updateProfile(data) {
     const idx = this.profiles.findIndex(p => p.Id === data.Id);
     if (idx === -1) return null;
-    this.profiles[idx] = { ...this.profiles[idx], ...data, UpdatedAt: new Date().toISOString() };
+    const patch = { ...data };
+    // A saved policy goes through the same normalizer as a new one, so the
+    // format filter is never stored half-specified.
+    if (Object.prototype.hasOwnProperty.call(patch, 'Retention')) {
+      patch.Retention = normalizeRetention(patch.Retention);
+    }
+    this.profiles[idx] = { ...this.profiles[idx], ...patch, UpdatedAt: new Date().toISOString() };
     this.saveProfiles();
     return this.profiles[idx];
   }
@@ -444,9 +457,10 @@ class SyncManager {
    * deletes anything.
    *
    * @param {string} dir - folder to inspect
-   * @param {object} [options] - { useNames: true, useMetadata: false }
+   * @param {object} [options] - { useNames: true, useMetadata: false, extensions }
    *   the toggles choose WHERE the dates come from: file names, file
-   *   metadata (mtime), or both (names win per file).
+   *   metadata (mtime), or both (names win per file). `extensions` restricts
+   *   the analysis to the formats the retention policy manages.
    */
   analyzeFolder(dir, options = {}) {
     if (!dir) return { ok: false, error: 'Pasta não informada' };
@@ -455,6 +469,7 @@ class SyncManager {
     return retention.analyze(resolved, {
       useNames: options.useNames !== false,
       useMetadata: options.useMetadata === true,
+      extensions: options.extensions,
     });
   }
 
@@ -478,11 +493,11 @@ class SyncManager {
     if (!compiled.ok) return { ok: false, deleted: 0, error: compiled.error };
 
     const files = retention.scanDest(resolved);
-    if (!files.length) return { ok: true, deleted: 0, freed: 0, planned: 0 };
+    if (!files.length) return { ok: true, deleted: 0, freed: 0, planned: 0, folders: [] };
 
     const plan = retention.planDeletion(files, compiled, { now: hooks.now });
     if (!plan.ok) return { ok: false, deleted: 0, error: plan.error };
-    if (!plan.delete.length) return { ok: true, deleted: 0, freed: 0, planned: 0 };
+    if (!plan.delete.length) return { ok: true, deleted: 0, freed: 0, planned: 0, folders: plan.folders };
 
     // Local engine deleteFile also prunes the empty parent folders a dead
     // snapshot would leave behind - exactly what a dated-folder archive wants.
@@ -493,11 +508,21 @@ class SyncManager {
     let deleted = 0;
     let freed = 0;
     const failures = [];
+    // Per-subfolder tally: the plan covers every archive, and the run has to
+    // cover every archive it planned for.
+    const byFolder = new Map();
+    const tally = (rel) => {
+      let e = byFolder.get(rel);
+      if (!e) { e = { rel, isRoot: rel === '', deleted: 0, planned: 0 }; byFolder.set(rel, e); }
+      return e;
+    };
+    for (const item of plan.delete) tally(item.folder || '').planned++;
     for (const item of plan.delete) {
       const r = await engine.deleteFile(dest, item.rel);
       if (r.success) {
         deleted++;
         freed += sizeOf.get(item.rel) || 0;
+        tally(item.folder || '').deleted++;
         this.logger.audit('RETENTION_FILE_DELETED', {
           targetType: 'retention', target: resolved,
           before: { rel: item.rel, size: sizeOf.get(item.rel) || 0 },
@@ -512,7 +537,10 @@ class SyncManager {
       targetType: 'retention', target: resolved,
       after: { deleted, freed, planned: plan.delete.length, failed: failures.length },
     });
-    return { ok: true, deleted, freed, planned: plan.delete.length, failed: failures };
+    return {
+      ok: true, deleted, freed, planned: plan.delete.length, failed: failures,
+      folders: [...byFolder.values()].sort((a, b) => (a.rel ? 1 : 0) - (b.rel ? 1 : 0) || a.rel.localeCompare(b.rel)),
+    };
   }
 
   /**
@@ -527,13 +555,17 @@ class SyncManager {
     if (!plan.ok) return { ok: false, error: plan.error };
     // Everything the UI needs to show the rules and every single file:
     // what goes, and what a keep rule rescued from a delete rule.
+    // `folders` is the same verdict grouped per subfolder, so the UI can
+    // render one accordion per archive instead of a single list.
     return {
       ok: true,
       delete: plan.delete,
       kept: plan.kept,
+      folders: plan.folders,
       rules: plan.rules,
       minKeep: plan.minKeep,
       dateSource: plan.dateSource,
+      extensions: plan.extensions,
       totalFiles: files.length,
       totalSnapshots: plan.totalSnapshots,
       deleteBytes: plan.delete.reduce((s, d) => s + (d.size || 0), 0),

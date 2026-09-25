@@ -415,7 +415,7 @@ describe('SyncManager: previewSyncPlan (dry-run simulator)', () => {
     return mgr.previewSyncPlan({
       SourcePath: src, DestPath: dst, Engine: 'local',
       Mode: 'incremental', Mirror: false, Excludes: [],
-      Retention: { Enabled: true, ByAge: true, KeepDays: 10, ByCount: false, BySize: false, MinKeep: 0 },
+      Retention: { Enabled: true, FileExtensions: [], ByAge: true, KeepDays: 10, ByCount: false, BySize: false, MinKeep: 0 },
     }).then(r => {
       expect(r.ok).to.equal(true);
       expect(r.retention.map(f => f.rel)).to.include('2020-01-01/old.sql');
@@ -473,7 +473,7 @@ describe('SyncManager: runRetentionNow', () => {
     fs.utimesSync(path.join(oldDir, 'dump.sql'), t, t);
     write(dir, '2026-09-01/fresh.sql', 'new');
 
-    return mgr.runRetentionNow(dir, { Enabled: true, ByAge: true, KeepDays: 365, ByCount: false, BySize: false, MinKeep: 0 }).then(r => {
+    return mgr.runRetentionNow(dir, { Enabled: true, FileExtensions: [], ByAge: true, KeepDays: 365, ByCount: false, BySize: false, MinKeep: 0 }).then(r => {
       expect(r.ok).to.equal(true);
       expect(r.deleted).to.equal(1);
       expect(r.freed).to.equal(1000);

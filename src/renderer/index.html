@@ -12,8 +12,6 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <script src="lucide.min.js"></script>
-  <link rel="stylesheet" href="codemirror.min.css">
-  <link rel="stylesheet" href="show-hint.min.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -292,10 +290,6 @@
               <button class="btn-glow" onclick="backupPage.showCreateModal()"><i data-lucide="plus"></i><span>New Profile</span></button>
             </div>
           </div>
-          <div class="glass-card" style="padding:10px 16px;margin-bottom:12px;display:flex;align-items:center;gap:12px">
-            <span style="font-size:12px;color:var(--text2)"><i data-lucide="terminal" style="width:14px;height:14px;vertical-align:middle"></i> mysqldump:</span>
-            <div id="mysqldump-status" style="display:flex;align-items:center;gap:8px;flex:1"></div>
-          </div>
           <div id="backup-profiles-list"></div>
           <div class="empty-state" id="backup-empty" style="display:none">
             <i data-lucide="hard-drive-download" class="empty-icon"></i>
@@ -557,18 +551,12 @@
 
   <!-- Modal -->
   <div id="modal-overlay" class="hidden"><div id="modal-content"><div id="modal-body"></div></div></div>
+  <div id="script-editor-overlay" class="secondary-modal-overlay hidden"></div>
+  <div id="rich-text-overlay" class="secondary-modal-overlay hidden"></div>
 
   <!-- Toast -->
   <div id="toast-container"></div>
 
-  <script src="codemirror.min.js"></script>
-  <script src="codemirror-modes/powershell.min.js"></script>
-  <script src="codemirror-modes/shell.min.js"></script>
-  <script src="codemirror-modes/vb.min.js"></script>
-  <script src="show-hint.min.js"></script>
-  <script src="matchbrackets.min.js"></script>
-  <script src="closebrackets.min.js"></script>
-  <script src="active-line.min.js"></script>
   <script src="i18n.js"></script>
   <script src="tooltip.js"></script>
   <script src="runMonitor.js"></script>
@@ -577,6 +565,7 @@
   <script src="smartCron.js"></script>
   <script src="quickCreate.js"></script>
   <script src="quickAssist.js"></script>
+  <script src="simpleRichText.js"></script>
   <script src="scriptEditor.js"></script>
   <script src="backupPage.js"></script>
   <script src="syncPage.js"></script>

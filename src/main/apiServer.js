@@ -504,6 +504,7 @@ class ApiServer {
       const existing = this.taskManager.getTask(req.params.id);
       if (!existing) return res.status(404).json({ error: 'Task not found' });
       const data = Object.assign({}, existing, req.body, { Id: req.params.id });
+      if (Object.prototype.hasOwnProperty.call(req.body, 'Description')) data.DescriptionHtml = '';
       const result = this.taskManager.updateTask(data);
       if (result.success === false) return res.status(400).json({ error: result.message || 'Failed to update task' });
       this._audit(req, 'TASK_UPDATED_WEB', {

@@ -40,6 +40,33 @@ app.whenReady().then(async () => {
       };
 
       syncPage.showCreateModal();
+      syncPage.draft.Retention.Enabled = true;
+      syncPage.draft.SourcePath = '';
+      syncPage.draft.DestPath = '';
+      syncPage.currentStep = 1;
+      syncPage._renderWizard();
+      const actionState = {
+        emptyAnalyze: document.getElementById('sync-action-analyze').disabled,
+        emptyPreview: document.getElementById('sync-action-preview').disabled,
+        emptySimulate: document.getElementById('sync-action-simulate').disabled,
+      };
+      await syncPage.runAnalysis();
+      await syncPage.refreshPreview();
+      await syncPage.runSimulation();
+      syncPage._setSourcePath('C:/source');
+      syncPage._setDestPath('D:/destination');
+      const actionEnabled = {
+        analyze: !document.getElementById('sync-action-analyze').disabled,
+        preview: !document.getElementById('sync-action-preview').disabled,
+        simulate: !document.getElementById('sync-action-simulate').disabled,
+      };
+      await syncPage.runAnalysis();
+      await syncPage.refreshPreview();
+      await syncPage.runSimulation();
+      syncPage._setSourcePath('C:/changed');
+      const invalidated = !syncPage.analysis && !syncPage.retentionPreview && !syncPage.simulation;
+
+      syncPage.showCreateModal();
       const saveButtonsByTab = [];
       for (let step = 0; step < 3; step++) {
         syncPage.currentStep = step;
@@ -61,7 +88,7 @@ app.whenReady().then(async () => {
       syncPage.draft.DestPath = 'D:/destination-2';
       await syncPage.saveProfile();
 
-      return { menu, saveButtonsByTab, saves: window.__saves };
+      return { menu, saveButtonsByTab, saves: window.__saves, actionState, actionEnabled, actionCalls: window.__retentionActionCalls, invalidated };
     })()`);
     process.stdout.write(`SYNC_UI_RESULT=${JSON.stringify(result)}\n`);
     app.exit(0);

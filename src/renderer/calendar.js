@@ -25,6 +25,10 @@
     return d.innerHTML;
   }
 
+  function escAttr(s) {
+    return esc(s).replace(/`/g, '&#96;');
+  }
+
   const KIND_CLASS = { task: 'k-task', backup: 'k-backup', service: 'k-service' };
 
   // Dates must follow the app's language setting, not the machine's locale:
@@ -34,6 +38,8 @@
   let view = 'month';
   let anchor = new Date();      // the month/week being looked at
   let cache = null;
+  let requestSequence = 0;
+  let miniRequestSequence = 0;
 
   // ─── Range for the current view ───
   function range() {
@@ -51,7 +57,7 @@
       to.setDate(to.getDate() + 6);
     } else {
       // Agenda and load look forward a fortnight.
-      to.setDate(to.getDate() + 14);
+      to.setDate(to.getDate() + 13);
     }
     return { from, to };
   }
@@ -64,10 +70,14 @@
 
   async function load() {
     const { from, to } = range();
+    const sequence = ++requestSequence;
     try {
-      cache = await window.api.getCalendar(from.toISOString(), to.toISOString());
+      const data = await window.api.getCalendar(from.toISOString(), to.toISOString());
+      if (sequence !== requestSequence) return null;
+      cache = data;
     } catch (e) {
-      cache = { success: false, days: {}, totals: {}, hours: [] };
+      if (sequence !== requestSequence) return null;
+      cache = { success: false, days: {}, totals: {}, hours: [], error: e.message };
     }
     return cache;
   }
@@ -98,15 +108,16 @@
       if (key === today) classes.push('today');
       if (items.length) classes.push('has-items');
 
-      html += `<div class="${classes.join(' ')}" data-day="${key}">
+      const dayLabel = cursor.toLocaleDateString(locale(), { weekday: 'long', day: 'numeric', month: 'long' });
+      html += `<div class="${classes.join(' ')}" data-day="${escAttr(key)}" aria-label="${escAttr(`${dayLabel}: ${items.length} ${T('calendar.scheduled')}`)}">
         <div class="cal-day-num">${cursor.getDate()}</div>
         <div class="cal-day-items">
           ${items.slice(0, 3).map(o => `
-            <div class="cal-chip ${KIND_CLASS[o.kind] || ''} s-${o.state}"
-                 data-goto="${esc(o.page)}" data-id="${esc(o.id || '')}" title="${esc(o.name + ' · ' + time(o.at))}">
-              <span class="cal-chip-time">${esc(time(o.at))}</span>${esc(o.name)}
+            <div class="cal-chip ${KIND_CLASS[o.kind] || ''} s-${escAttr(o.state)}" role="button" tabindex="0"
+                 data-goto="${escAttr(o.page)}" data-id="${escAttr(o.id || '')}" title="${escAttr(o.name + ' · ' + time(o.at))}">
+              <span class="cal-chip-time">${esc(time(o.at))}</span><span class="cal-chip-name">${esc(o.name)}</span>
             </div>`).join('')}
-          ${items.length > 3 ? `<div class="cal-more" data-open-day="${key}">+${items.length - 3}</div>` : ''}
+          ${items.length > 3 ? `<div class="cal-more" data-open-day="${escAttr(key)}" role="button" tabindex="0">+${items.length - 3}</div>` : ''}
         </div>
       </div>`;
       cursor.setDate(cursor.getDate() + 1);
@@ -142,9 +153,9 @@
       for (const d of days) {
         const items = ((cache.days || {})[dayKey(d)] || []).filter(o => new Date(o.at).getHours() === hour);
         html += `<div class="cal-week-cell">${items.map(o => `
-          <div class="cal-chip ${KIND_CLASS[o.kind] || ''} s-${o.state}"
-               data-goto="${esc(o.page)}" data-id="${esc(o.id || '')}" title="${esc(o.name)}">
-            <span class="cal-chip-time">${esc(time(o.at))}</span>${esc(o.name)}
+          <div class="cal-chip ${KIND_CLASS[o.kind] || ''} s-${escAttr(o.state)}" role="button" tabindex="0"
+               data-goto="${escAttr(o.page)}" data-id="${escAttr(o.id || '')}" title="${escAttr(o.name)}">
+            <span class="cal-chip-time">${esc(time(o.at))}</span><span class="cal-chip-name">${esc(o.name)}</span>
           </div>`).join('')}</div>`;
       }
       html += '</div>';
@@ -166,9 +177,9 @@
         </div>
         <div class="cal-agenda-items">
           ${items.map(o => `
-            <div class="cal-agenda-item" data-goto="${esc(o.page)}" data-id="${esc(o.id || '')}">
+            <div class="cal-agenda-item" role="button" tabindex="0" data-goto="${escAttr(o.page)}" data-id="${escAttr(o.id || '')}">
               <span class="cal-agenda-time">${esc(time(o.at))}</span>
-              <span class="cal-dot ${KIND_CLASS[o.kind] || ''} s-${o.state}"></span>
+              <span class="cal-dot ${KIND_CLASS[o.kind] || ''} s-${escAttr(o.state)}"></span>
               <span class="cal-agenda-name">${esc(o.name)}</span>
               <span class="cal-agenda-kind">${esc(T(o.kind === 'backup' ? 'dash.kindBackup' : o.kind === 'service' ? 'calendar.kindService' : 'dash.kindTask'))}</span>
               ${o.state !== 'scheduled' ? `<span class="badge badge-${o.state === 'success' ? 'active' : 'error'}">${esc(o.duration || '')}</span>` : ''}
@@ -195,7 +206,10 @@
   }
 
   function renderBody() {
-    if (!cache || !cache.success) return `<div class="cal-empty">${esc(T('calendar.empty'))}</div>`;
+    if (!cache || !cache.success) {
+      const message = cache && cache.error ? `: ${cache.error}` : '';
+      return `<div class="cal-empty"><strong>${esc(T('calendar.loadFailed'))}</strong><span>${esc(message)}</span><button class="btn-outline btn-sm" type="button" data-cal-retry>${esc(T('calendar.retry'))}</button></div>`;
+    }
     if (view === 'month') return renderMonth();
     if (view === 'week') return renderWeek();
     if (view === 'load') return renderLoad();
@@ -217,24 +231,26 @@
     if (!body) return;
     body.innerHTML = `<div class="tbl-loading">${esc(T('svc.loading'))}</div>`;
 
-    await load();
+    const data = await load();
+    if (!data) return;
     body.innerHTML = renderBody();
 
     const label = document.getElementById('cal-period');
     if (label) label.textContent = periodLabel();
 
     const totals = document.getElementById('cal-totals');
-    if (totals && cache.totals) {
+    if (totals && data.totals) {
       totals.innerHTML = `
-        <span>${cache.totals.scheduled || 0} ${esc(T('calendar.scheduled'))}</span>
-        <span class="ok">${cache.totals.executed || 0} ${esc(T('calendar.executed'))}</span>
-        <span class="${cache.totals.failed ? 'bad' : ''}">${cache.totals.failed || 0} ${esc(T('calendar.failed'))}</span>`;
+        <div class="cal-metric"><i data-lucide="calendar-clock"></i><span><strong>${data.totals.scheduled || 0}</strong>${esc(T('calendar.scheduled'))}</span></div>
+        <div class="cal-metric ok"><i data-lucide="check-circle"></i><span><strong>${data.totals.executed || 0}</strong>${esc(T('calendar.executed'))}</span></div>
+        <div class="cal-metric ${data.totals.failed ? 'bad' : ''}"><i data-lucide="alert-triangle"></i><span><strong>${data.totals.failed || 0}</strong>${esc(T('calendar.failed'))}</span></div>
+        <div class="cal-metric neutral"><i data-lucide="layers-3"></i><span><strong>${data.totals.sources || 0}</strong>${esc(T('calendar.sources'))}</span></div>`;
     }
     if (window.lucide) lucide.createIcons();
   }
 
   function shift(direction) {
-    if (view === 'month') anchor.setMonth(anchor.getMonth() + direction);
+    if (view === 'month') anchor = new Date(anchor.getFullYear(), anchor.getMonth() + direction, 1);
     else if (view === 'week') anchor.setDate(anchor.getDate() + 7 * direction);
     else anchor.setDate(anchor.getDate() + 14 * direction);
     paint();
@@ -244,6 +260,11 @@
   //
   // A calendar entry is only useful if it takes you to the thing it names.
   document.addEventListener('click', (e) => {
+    if (e.target.closest('[data-cal-retry]')) {
+      paint();
+      return;
+    }
+
     const target = e.target.closest('[data-goto]');
     if (target) {
       const page = target.getAttribute('data-goto');
@@ -258,8 +279,19 @@
     if (more) {
       view = 'agenda';
       anchor = new Date(more.getAttribute('data-open-day') + 'T00:00:00');
-      document.querySelectorAll('.cal-view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === 'agenda'));
+      document.querySelectorAll('.cal-view-btn').forEach(b => {
+        const active = b.dataset.view === 'agenda';
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-selected', String(active));
+      });
       paint();
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-goto], [data-open-day]')) {
+      e.preventDefault();
+      e.target.click();
     }
   });
 
@@ -283,23 +315,29 @@
   }
 
   // ─── The full calendar modal ───
-  function open(initialView) {
+  function open(initialView, initialDate) {
     if (initialView) view = initialView;
-    anchor = new Date();
+    anchor = initialDate ? new Date(initialDate) : new Date();
 
     showModal(`
-      <h2><i data-lucide="calendar"></i> ${esc(T('calendar.title'))}</h2>
+      <div class="cal-header">
+        <div>
+          <h2><i data-lucide="calendar"></i> ${esc(T('calendar.title'))}</h2>
+          <p>${esc(T('calendar.subtitle'))}</p>
+        </div>
+        <button class="btn-secondary-sm" type="button" data-cal-close><i data-lucide="x"></i> ${esc(T('runs.close'))}</button>
+      </div>
 
       <div class="cal-toolbar">
         <div class="cal-nav">
-          <button class="btn-secondary-sm" id="cal-prev" type="button"><i data-lucide="chevron-left"></i></button>
+          <button class="btn-secondary-sm" id="cal-prev" type="button" aria-label="${escAttr(T('calendar.previous'))}"><i data-lucide="chevron-left"></i></button>
           <button class="btn-secondary-sm" id="cal-today" type="button">${esc(T('calendar.today'))}</button>
-          <button class="btn-secondary-sm" id="cal-next" type="button"><i data-lucide="chevron-right"></i></button>
+          <button class="btn-secondary-sm" id="cal-next" type="button" aria-label="${escAttr(T('calendar.next'))}"><i data-lucide="chevron-right"></i></button>
           <span class="cal-period" id="cal-period"></span>
         </div>
-        <div class="cal-views">
+        <div class="cal-views" role="tablist" aria-label="${escAttr(T('calendar.views'))}">
           ${[['month', 'calendar.viewMonth'], ['week', 'calendar.viewWeek'], ['agenda', 'calendar.viewAgenda'], ['load', 'calendar.viewLoad']]
-            .map(([id, key]) => `<button type="button" class="cal-view-btn${view === id ? ' active' : ''}" data-view="${id}">${esc(T(key))}</button>`).join('')}
+            .map(([id, key]) => `<button type="button" role="tab" aria-selected="${view === id}" class="cal-view-btn${view === id ? ' active' : ''}" data-view="${id}">${esc(T(key))}</button>`).join('')}
         </div>
       </div>
 
@@ -312,17 +350,21 @@
           <span><i class="cal-dot k-backup"></i>${esc(T('dash.kindBackup'))}</span>
           <span><i class="cal-dot k-service"></i>${esc(T('calendar.kindService'))}</span>
         </span>
-        <button class="btn-ghost" onclick="hideModal()">${esc(T('runs.close'))}</button>
       </div>
     `, true);
 
+    document.querySelector('[data-cal-close]').addEventListener('click', () => hideModal());
     document.getElementById('cal-prev').addEventListener('click', () => shift(-1));
     document.getElementById('cal-next').addEventListener('click', () => shift(1));
     document.getElementById('cal-today').addEventListener('click', () => { anchor = new Date(); paint(); });
     document.querySelectorAll('.cal-view-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         view = btn.dataset.view;
-        document.querySelectorAll('.cal-view-btn').forEach(b => b.classList.toggle('active', b === btn));
+        document.querySelectorAll('.cal-view-btn').forEach(b => {
+          const active = b === btn;
+          b.classList.toggle('active', active);
+          b.setAttribute('aria-selected', String(active));
+        });
         paint();
       });
     });
@@ -341,9 +383,11 @@
     const to = new Date(today);
     to.setDate(to.getDate() + 6);
 
+    const sequence = ++miniRequestSequence;
     let data;
     try { data = await window.api.getCalendar(from.toISOString(), to.toISOString()); }
     catch (e) { return; }
+    if (sequence !== miniRequestSequence || !document.getElementById('dash-calendar')) return;
 
     const days = [];
     for (let i = 0; i < 7; i++) {

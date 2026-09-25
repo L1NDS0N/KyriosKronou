@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="../../src/renderer/style.css"></head>
+<body>
+  <div id="modal-overlay" class="hidden"><div id="modal-content"><div id="modal-body"></div></div></div>
+  <div id="script-editor-overlay" class="secondary-modal-overlay hidden"></div>
+  <div id="rich-text-overlay" class="secondary-modal-overlay hidden"></div>
+  <div id="toast-container"></div>
+  <script>
+    window.lucide = { createIcons() {} };
+    window.showModal = html => {
+      document.getElementById('modal-body').innerHTML = html;
+      document.getElementById('modal-overlay').classList.remove('hidden');
+    };
+    window.hideModal = () => document.getElementById('modal-overlay').classList.add('hidden');
+    window.showToast = () => {};
+  </script>
+  <script src="../../src/renderer/i18n.js"></script>
+  <script src="../../src/renderer/simpleRichText.js"></script>
+  <script src="../../src/renderer/scriptEditor.js"></script>
+</body>
+</html>

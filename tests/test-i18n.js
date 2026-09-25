@@ -67,7 +67,7 @@ describe('i18n: dictionaries', () => {
 describe('i18n: the renderer does not hardcode user-visible text', () => {
   // Files that build UI markup. Anything Portuguese in here is a string the
   // language switch cannot reach.
-  const FILES = ['app.js', 'backupPage.js', 'pathInput.js'];
+  const FILES = ['app.js', 'backupPage.js', 'pathInput.js', 'simpleRichText.js', 'scriptEditor.js'];
 
   it('no Portuguese sentence is written directly into the renderer', () => {
     const offenders = [];

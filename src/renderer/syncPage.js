@@ -20,6 +20,7 @@ class SyncPage {
     this.retentionPreview = null; // what would be deleted, live
     this.simulation = null;     // whole-sync dry run (planner + retention)
     this.simTab = 'copy';
+    this.busyAction = null;
   }
 
   async load() {
@@ -160,7 +161,7 @@ class SyncPage {
           <span class="th-icon">${e.Status === 'Success' ? '✅' : '❌'}</span>
           <span class="th-time">${new Date(e.Timestamp).toLocaleString()}</span>
           <span class="th-duration">${syncEsc(e.Duration || '-')}</span>
-          <span class="th-status badge badge-${e.Status === 'Success' ? 'active' : 'badge-disabled'}">${syncEsc(e.Status)}</span>
+          <span class="th-status badge badge-${e.Status === 'Success' ? 'active' : 'error'}">${syncEsc(e.Status)}</span>
           <i data-lucide="chevron-down" class="th-chevron"></i>
         </div>
         <div class="th-output">
@@ -190,7 +191,7 @@ class SyncPage {
       Name: i18n.t('sync.newProfileName') + ' ' + (this.profiles.length + 1),
       SourcePath: '', Engine: 'local', DestPath: '',
       Host: '', Port: null, User: '', Password: '',
-      Mode: 'incremental', Mirror: false, Excludes: [],       Retention: { Enabled: false, ByAge: false, KeepDays: 30, ByCount: false, KeepCount: 10, BySize: false, FreeGb: 0, MinKeep: 3 },
+      Mode: 'incremental', Mirror: false, Excludes: [],       Retention: { Enabled: false, FileExtensions: ['.7z', '.zip'], ByAge: false, KeepDays: 30, ByCount: false, KeepCount: 10, BySize: false, FreeGb: 0, ByWeekly: false, WeeklyKeepWeeks: 8, ByBiweekly: false, BiweeklyKeepPeriods: 12, ByMonthly: false, MonthlyKeepMonths: 12, MinKeep: 3 },
        CronExpression: '0 3 * * *', Enabled: true,
        WatchEnabled: false, WatchDebounceMs: 1500,
        TriggerTaskId: '', TriggerOnFailure: false,
@@ -210,7 +211,7 @@ class SyncPage {
      this.draft.WatchEnabled = this.draft.WatchEnabled === true;
      this.draft.WatchDebounceMs = this.draft.WatchDebounceMs || 1500;
      if (!this.draft.Retention) {
-      this.draft.Retention = { Enabled: false, ByAge: false, KeepDays: 30, ByCount: false, KeepCount: 10, BySize: false, FreeGb: 0, MinKeep: 3 };
+      this.draft.Retention = { Enabled: false, ByAge: false, KeepDays: 30, ByCount: false, KeepCount: 10, BySize: false, FreeGb: 0, ByWeekly: false, WeeklyKeepWeeks: 8, ByBiweekly: false, BiweeklyKeepPeriods: 12, ByMonthly: false, MonthlyKeepMonths: 12, MinKeep: 3 };
     }
     this._renderWizard();
   }
@@ -267,6 +268,8 @@ class SyncPage {
       ? [r.ByAge ? `${r.KeepDays}d` : null, r.ByCount ? `${r.KeepCount}x` : null, r.BySize ? `${r.FreeGb}GB` : null].filter(Boolean).join(' · ')
       : i18n.t('sync.retentionOff');
     const dest = d.Engine === 'local' ? (d.DestPath || '—') : `${d.Host || '?'}:${d.Port || ''} ${d.DestPath || ''}`;
+    const hasSource = !!(d.SourcePath && d.SourcePath.trim());
+    const hasDest = !!(d.DestPath && d.DestPath.trim());
     return `
       <div class="ws-header"><i data-lucide="file-text" style="width:14px;height:14px"></i><span>${syncEsc(i18n.t('summary.title'))}</span></div>
       <div class="ws-section"><div class="ws-label">${syncEsc(i18n.t('summary.name'))}</div><div class="ws-value">${syncEsc(d.Name)}</div></div>
@@ -277,9 +280,9 @@ class SyncPage {
       <div class="ws-section"><div class="ws-label">${syncEsc(i18n.t('sync.watchTitle'))}</div><div class="ws-value">${d.WatchEnabled ? syncEsc(i18n.t('sync.watchEnabled')) : syncEsc(i18n.t('sync.watchDisabled'))}</div></div>
       ${r.Enabled ? `<div class="ws-section wizard-side-actions">
         <div class="ws-label">${syncEsc(i18n.t('sync.wizardActions'))}</div>
-        <button class="btn-outline btn-sm" onclick="syncPage.runAnalysis()"><i data-lucide="search"></i> ${syncEsc(i18n.t('sync.analyzeBtn'))}</button>
-        <button class="btn-outline btn-sm" onclick="syncPage.refreshPreview()"><i data-lucide="eye"></i> ${syncEsc(i18n.t('sync.previewBtn'))}</button>
-        <button class="btn-glow btn-sm" onclick="syncPage.runSimulation()"><i data-lucide="flask-conical"></i> ${syncEsc(i18n.t('sync.simBtn'))}</button>
+        <button class="btn-outline btn-sm" id="sync-action-analyze" onclick="syncPage.runAnalysis()" ${!hasSource || this.busyAction ? 'disabled' : ''}><i data-lucide="search"></i> ${syncEsc(i18n.t('sync.analyzeBtn'))}</button>
+        <button class="btn-outline btn-sm" id="sync-action-preview" onclick="syncPage.refreshPreview()" ${!hasDest || this.busyAction ? 'disabled' : ''}><i data-lucide="eye"></i> ${syncEsc(i18n.t('sync.previewBtn'))}</button>
+        <button class="btn-glow btn-sm" id="sync-action-simulate" onclick="syncPage.runSimulation()" ${!hasSource || !hasDest || this.busyAction ? 'disabled' : ''}><i data-lucide="flask-conical"></i> ${syncEsc(i18n.t('sync.simBtn'))}</button>
       </div>` : ''}
       <div class="ws-section"><div class="ws-label">${syncEsc(i18n.t('summary.status'))}</div><div class="ws-value">${d.Enabled !== false ? `<span style="color:var(--green)">&#9679; ${syncEsc(i18n.t('summary.enabled'))}</span>` : `<span style="color:var(--red)">&#9679; ${syncEsc(i18n.t('summary.disabled'))}</span>`}</div></div>
     `;
@@ -303,7 +306,7 @@ class SyncPage {
 
         <label class="form-label" style="margin-top:12px">${syncEsc(i18n.t('sync.origin'))} *</label>
         <div class="input-row">
-          <input type="text" class="form-input" id="sync-source" data-path-input data-path-kind="directory" value="${syncEsc(d.SourcePath)}" placeholder="C:\\Dados\\Producao" oninput="syncPage.draft.SourcePath=this.value; syncPage._updateSummary()">
+          <input type="text" class="form-input" id="sync-source" data-path-input data-path-kind="directory" value="${syncEsc(d.SourcePath)}" placeholder="C:\\Dados\\Producao" oninput="syncPage._setSourcePath(this.value)">
           <button class="btn-outline btn-sm" onclick="syncPage.browse('sync-source')" title="${syncEsc(i18n.t('taskModal.browse'))}"><i data-lucide="folder-open"></i></button>
         </div>
 
@@ -312,7 +315,7 @@ class SyncPage {
           ${(this.engines || []).map(e => `<option value="${e.id}" ${e.id === (d.Engine || 'local') ? 'selected' : ''}>${syncEsc(e.label)}</option>`).join('')}
         </select>
         <div class="input-row" style="margin-top:6px">
-          <input type="text" class="form-input" id="sync-dest" value="${syncEsc(d.DestPath)}" placeholder="${d.Engine === 'local' ? 'D:\\Espelho\\Dados' : '/backups/dados'}" oninput="syncPage.draft.DestPath=this.value; syncPage._updateSummary()">
+          <input type="text" class="form-input" id="sync-dest" value="${syncEsc(d.DestPath)}" placeholder="${d.Engine === 'local' ? 'D:\\Espelho\\Dados' : '/backups/dados'}" oninput="syncPage._setDestPath(this.value)">
           ${d.Engine === 'local' ? `<button class="btn-outline btn-sm" onclick="syncPage.browse('sync-dest')"><i data-lucide="folder-open"></i></button>` : ''}
         </div>
 
@@ -353,12 +356,19 @@ class SyncPage {
          ${r.Enabled ? `<div class="form-section retention-enabled-content">
            <div class="form-section-title"><i data-lucide="search"></i> ${syncEsc(i18n.t('sync.analyzeTitle'))}</div>
            <div class="form-hint" style="margin:0 0 10px">${syncEsc(i18n.t('sync.analyzeHint'))}</div>
-           <div id="sync-analysis-result" style="margin-top:12px">${this._renderAnalysis()}</div>
-           <label class="check-row"><input type="checkbox" id="sync-ret-age" ${r.ByAge ? 'checked' : ''} onchange="syncPage._syncRetention()">
+            <div id="sync-analysis-result" style="margin-top:12px">${this._renderAnalysis()}</div>
+            ${this._renderFormatRules()}
+            <label class="check-row"><input type="checkbox" id="sync-ret-age" ${r.ByAge ? 'checked' : ''} onchange="syncPage._syncRetention()">
              <span>${syncEsc(i18n.t('sync.retByAge'))} <input type="number" class="form-input" id="sync-ret-days" value="${r.KeepDays || 30}" min="1" max="3650" style="width:80px;display:inline-block;padding:2px 6px" onchange="syncPage._syncRetention()"> ${syncEsc(i18n.t('sync.days'))}</span></label>
            <label class="check-row"><input type="checkbox" id="sync-ret-count" ${r.ByCount ? 'checked' : ''} onchange="syncPage._syncRetention()">
              <span>${syncEsc(i18n.t('sync.retByCount'))} <input type="number" class="form-input" id="sync-ret-count-n" value="${r.KeepCount || 10}" min="1" max="10000" style="width:80px;display:inline-block;padding:2px 6px" onchange="syncPage._syncRetention()"> ${syncEsc(i18n.t('sync.snapshots'))}</span></label>
-           <label class="check-row"><input type="checkbox" id="sync-ret-size" ${r.BySize ? 'checked' : ''} onchange="syncPage._syncRetention()">
+            <label class="check-row"><input type="checkbox" id="sync-ret-weekly" ${r.ByWeekly ? 'checked' : ''} onchange="syncPage._syncRetention()">
+              <span>${syncEsc(i18n.t('retention.byWeekly'))} <input type="number" class="form-input" id="sync-ret-weeks" value="${r.WeeklyKeepWeeks || 8}" min="1" max="520" style="width:80px;display:inline-block;padding:2px 6px" onchange="syncPage._syncRetention()"> ${syncEsc(i18n.t('retention.weeks'))}</span></label>
+            <label class="check-row"><input type="checkbox" id="sync-ret-biweekly" ${r.ByBiweekly ? 'checked' : ''} onchange="syncPage._syncRetention()">
+              <span>${syncEsc(i18n.t('retention.byBiweekly'))} <input type="number" class="form-input" id="sync-ret-fortnights" value="${r.BiweeklyKeepPeriods || 12}" min="1" max="480" style="width:80px;display:inline-block;padding:2px 6px" onchange="syncPage._syncRetention()"> ${syncEsc(i18n.t('retention.fortnights'))}</span></label>
+            <label class="check-row"><input type="checkbox" id="sync-ret-monthly" ${r.ByMonthly ? 'checked' : ''} onchange="syncPage._syncRetention()">
+              <span>${syncEsc(i18n.t('retention.byMonthly'))} <input type="number" class="form-input" id="sync-ret-months" value="${r.MonthlyKeepMonths || 12}" min="1" max="240" style="width:80px;display:inline-block;padding:2px 6px" onchange="syncPage._syncRetention()"> ${syncEsc(i18n.t('retention.months'))}</span></label>
+            <label class="check-row"><input type="checkbox" id="sync-ret-size" ${r.BySize ? 'checked' : ''} onchange="syncPage._syncRetention()">
              <span>${syncEsc(i18n.t('sync.retBySize'))} <input type="number" class="form-input" id="sync-ret-gb" value="${r.FreeGb || 10}" min="1" max="100000" style="width:80px;display:inline-block;padding:2px 6px" onchange="syncPage._syncRetention()"> GB</span></label>
            <div style="margin-top:10px"><label class="form-label">${syncEsc(i18n.t('sync.minKeep'))}</label><input type="number" class="form-input" id="sync-ret-minkeep" value="${r.MinKeep != null ? r.MinKeep : 3}" min="0" max="1000" style="width:100px" onchange="syncPage._syncRetention()"><div class="form-hint">${syncEsc(i18n.t('sync.minKeepHint'))}</div></div>
            <div id="sync-retention-preview" style="margin-top:14px">${this._renderPreview()}</div>
@@ -397,6 +407,55 @@ class SyncPage {
       `;
     }
     return '';
+  }
+
+  _renderFormatRules() {
+    const r = this.draft.Retention;
+    const extensions = Array.isArray(r.FileExtensions) ? r.FileExtensions : ['.7z', '.zip'];
+    const all = extensions.length === 0;
+    const choices = ['.7z', '.zip', '.bak', '.tar', '.gz'];
+    for (const ext of extensions) if (!choices.includes(ext)) choices.push(ext);
+    return `<div class="ret-format-rule">
+      <div class="form-section-title"><i data-lucide="file-check-2"></i> ${syncEsc(i18n.t('retention.formatsTitle'))}</div>
+      <div class="form-hint" style="margin:0 0 8px">${syncEsc(i18n.t('retention.formatsHint'))}</div>
+      <label class="check-row"><input type="checkbox" ${all ? 'checked' : ''} onchange="syncPage._setAllFormats(this.checked)"><span>${syncEsc(i18n.t('retention.formatsAll'))}</span></label>
+      <div class="ret-format-choices">${choices.map(ext => `<label class="check-row"><input type="checkbox" ${!all && extensions.includes(ext) ? 'checked' : ''} onchange="syncPage._toggleFormat('${ext}', this.checked)"><span class="mono">${syncEsc(ext)}</span></label>`).join('')}</div>
+      <div class="input-row" style="margin-top:6px"><input type="text" class="form-input mono" id="sync-custom-format" placeholder="${syncEsc(i18n.t('retention.formatsCustom'))}" onkeydown="if(event.key==='Enter'){event.preventDefault();syncPage._addFormat()}"><button class="btn-outline btn-sm" onclick="syncPage._addFormat()"><i data-lucide="plus"></i></button></div>
+    </div>`;
+  }
+
+  _setAllFormats(enabled) {
+    this.draft.Retention.FileExtensions = enabled ? [] : ['.7z', '.zip'];
+    this._invalidateRetentionResults();
+  }
+
+  _toggleFormat(ext, enabled) {
+    const r = this.draft.Retention;
+    const current = Array.isArray(r.FileExtensions) ? r.FileExtensions : ['.7z', '.zip'];
+    r.FileExtensions = enabled ? Array.from(new Set([...current, ext])) : current.filter(x => x !== ext);
+    this._invalidateRetentionResults();
+  }
+
+  _addFormat() {
+    const input = document.getElementById('sync-custom-format');
+    if (!input || !input.value.trim()) return;
+    const value = input.value.trim().toLowerCase();
+    const ext = value.startsWith('.') ? value : `.${value}`;
+    const r = this.draft.Retention;
+    const current = Array.isArray(r.FileExtensions) ? r.FileExtensions : ['.7z', '.zip'];
+    r.FileExtensions = Array.from(new Set([...current.filter(x => x), ext]));
+    input.value = '';
+    this._invalidateRetentionResults();
+  }
+
+  _invalidateRetentionResults() {
+    this.retentionPreview = null;
+    this.simulation = null;
+    this._updateSummary();
+    const preview = document.getElementById('sync-retention-preview');
+    if (preview) preview.innerHTML = '';
+    const simulation = document.getElementById('sync-sim-result');
+    if (simulation) simulation.innerHTML = this._renderSimulation();
   }
 
   _renderAnalysis() {
@@ -502,16 +561,24 @@ class SyncPage {
 
   /** The analysis reads the SOURCE: its pattern predicts the destination's. */
   async runAnalysis() {
+    const source = (this.draft.SourcePath || '').trim();
+    if (!source || this.busyAction) return;
+    this.busyAction = 'analysis';
+    this.analysis = null;
+    this._updateSummary();
     const status = document.getElementById('sync-analysis-status');
     if (status) { status.textContent = '…'; status.style.color = 'var(--amber)'; }
     try {
-      this.analysis = await window.api.analyzeSyncFolder(this.draft.SourcePath || '');
+      this.analysis = await window.api.analyzeSyncFolder(source, { extensions: [...(this.draft.Retention.FileExtensions || ['.7z', '.zip'])] });
     } catch (e) {
       this.analysis = { ok: false, error: e.message };
+    } finally {
+      this.busyAction = null;
+      if (status) status.textContent = '';
+      this._updateSummary();
+      const box = document.getElementById('sync-analysis-result');
+      if (box) { box.innerHTML = this._renderAnalysis(); if (window.lucide) lucide.createIcons(); }
     }
-    if (status) status.textContent = '';
-    const box = document.getElementById('sync-analysis-result');
-    if (box) { box.innerHTML = this._renderAnalysis(); if (window.lucide) lucide.createIcons(); }
   }
 
   applySuggestion() {
@@ -519,9 +586,13 @@ class SyncPage {
     if (!s) return;
     this.draft.Retention = {
       Enabled: true,
+      FileExtensions: this.draft.Retention && Array.isArray(this.draft.Retention.FileExtensions) ? [...this.draft.Retention.FileExtensions] : ['.7z', '.zip'],
       ByAge: !!s.ByAge, KeepDays: s.KeepDays || 30,
       ByCount: !!s.ByCount, KeepCount: s.KeepCount || 10,
       BySize: !!s.BySize, FreeGb: s.FreeGb || 0,
+      ByWeekly: !!s.ByWeekly, WeeklyKeepWeeks: s.WeeklyKeepWeeks || 8,
+      ByBiweekly: !!s.ByBiweekly, BiweeklyKeepPeriods: s.BiweeklyKeepPeriods || 12,
+      ByMonthly: !!s.ByMonthly, MonthlyKeepMonths: s.MonthlyKeepMonths || 12,
       MinKeep: s.MinKeep != null ? s.MinKeep : 3,
     };
     this._renderWizard();
@@ -543,47 +614,66 @@ class SyncPage {
     r.KeepDays = parseInt(document.getElementById('sync-ret-days').value, 10) || 30;
     r.ByCount = document.getElementById('sync-ret-count').checked;
     r.KeepCount = parseInt(document.getElementById('sync-ret-count-n').value, 10) || 10;
+    r.ByWeekly = document.getElementById('sync-ret-weekly').checked;
+    r.WeeklyKeepWeeks = parseInt(document.getElementById('sync-ret-weeks').value, 10) || 8;
+    r.ByBiweekly = document.getElementById('sync-ret-biweekly').checked;
+    r.BiweeklyKeepPeriods = parseInt(document.getElementById('sync-ret-fortnights').value, 10) || 12;
+    r.ByMonthly = document.getElementById('sync-ret-monthly').checked;
+    r.MonthlyKeepMonths = parseInt(document.getElementById('sync-ret-months').value, 10) || 12;
     r.BySize = document.getElementById('sync-ret-size').checked;
     r.FreeGb = parseFloat(document.getElementById('sync-ret-gb').value) || 0;
     r.MinKeep = parseInt(document.getElementById('sync-ret-minkeep').value, 10) || 0;
 
-    const rules = document.getElementById('sync-ret-rules');
-    if (rules) rules.style.cssText = r.Enabled ? '' : 'opacity:.4;pointer-events:none;';
-    this._updateSummary();
+    this._invalidateRetentionResults();
   }
 
   /** Live preview: shows exactly what would be deleted, before confirming. */
   async refreshPreview() {
+    const dest = (this.draft.DestPath || '').trim();
+    if (!dest || this.busyAction) return;
+    this.busyAction = 'preview';
+    this._updateSummary();
     const status = document.getElementById('sync-preview-status');
     if (status) { status.textContent = '…'; status.style.color = 'var(--amber)'; }
     try {
-      this.retentionPreview = await window.api.previewSyncRetention(this.draft.DestPath || '', this.draft.Retention);
+      this.retentionPreview = await window.api.previewSyncRetention(dest, { ...this.draft.Retention });
     } catch (e) {
       this.retentionPreview = { ok: false, error: e.message };
+    } finally {
+      this.busyAction = null;
+      if (status) status.textContent = '';
+      this._updateSummary();
+      const box = document.getElementById('sync-retention-preview');
+      if (box) { box.innerHTML = this._renderPreview(); if (window.lucide) lucide.createIcons(); }
     }
-    if (status) status.textContent = '';
-    const box = document.getElementById('sync-retention-preview');
-    if (box) { box.innerHTML = this._renderPreview(); if (window.lucide) lucide.createIcons(); }
   }
 
   // ─── Whole-sync simulator ───
   /** Dry-run through the real planner + retention, zero writes. */
   async runSimulation() {
+    const source = (this.draft.SourcePath || '').trim();
+    const dest = (this.draft.DestPath || '').trim();
+    if (!source || !dest || this.busyAction) return;
+    this.busyAction = 'simulation';
+    this._updateSummary();
     const status = document.getElementById('sync-sim-status');
     if (status) { status.textContent = '…'; status.style.color = 'var(--amber)'; }
     try {
       this.simulation = await window.api.previewSyncPlan({
-        SourcePath: this.draft.SourcePath, DestPath: this.draft.DestPath,
+        SourcePath: source, DestPath: dest,
         Engine: this.draft.Engine, Host: this.draft.Host, Port: this.draft.Port,
         User: this.draft.User, Password: this.draft.Password,
         Mode: this.draft.Mode, Mirror: this.draft.Mirror,
-        Excludes: this.draft.Excludes || [], Retention: this.draft.Retention,
+        Excludes: this.draft.Excludes || [], Retention: { ...this.draft.Retention },
       });
     } catch (e) {
       this.simulation = { ok: false, error: e.message };
+    } finally {
+      this.busyAction = null;
+      if (status) status.textContent = '';
+      this._updateSummary();
+      this._rerenderSim();
     }
-    if (status) status.textContent = '';
-    this._rerenderSim();
   }
 
   _fmtBytes(b) {
@@ -651,6 +741,31 @@ class SyncPage {
 
   _setWatchDebounce(value) {
     this.draft.WatchDebounceMs = Math.max(250, parseInt(value, 10) || 1500);
+  }
+
+  _setSourcePath(value) {
+    this.draft.SourcePath = value;
+    this.analysis = null;
+    this.retentionPreview = null;
+    this.simulation = null;
+    this._updateSummary();
+    const result = document.getElementById('sync-analysis-result');
+    if (result) result.innerHTML = '';
+    const preview = document.getElementById('sync-retention-preview');
+    if (preview) preview.innerHTML = '';
+    const simulation = document.getElementById('sync-sim-result');
+    if (simulation) simulation.innerHTML = this._renderSimulation();
+  }
+
+  _setDestPath(value) {
+    this.draft.DestPath = value;
+    this.retentionPreview = null;
+    this.simulation = null;
+    this._updateSummary();
+    const preview = document.getElementById('sync-retention-preview');
+    if (preview) preview.innerHTML = '';
+    const simulation = document.getElementById('sync-sim-result');
+    if (simulation) simulation.innerHTML = this._renderSimulation();
   }
 
   _setCron(expr) {

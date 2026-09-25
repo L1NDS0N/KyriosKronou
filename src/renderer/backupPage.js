@@ -7,7 +7,7 @@ class BackupPage {
     this.editingId = null;
     this.currentStep = 0;
     this.draft = {};
-    this.mysqldumpStatus = null;
+    this.saving = false;
     this.engines = [];
   }
 
@@ -25,27 +25,7 @@ class BackupPage {
       // Fall back to MySQL only rather than rendering an empty picker.
       this.engines = [{ id: 'mysql', label: 'MySQL / MariaDB', defaultPort: 3306, formats: null }];
     }
-    try {
-      this.mysqldumpStatus = await window.api.checkMysqldump();
-    } catch (e) {
-      this.mysqldumpStatus = null;
-    }
-    this.render();
-    this.renderMysqldumpStatus();
-  }
-
-  renderMysqldumpStatus() {
-    const el = document.getElementById('mysqldump-status');
-    if (!el) return;
-    const s = this.mysqldumpStatus;
-    if (s && s.found) {
-      el.innerHTML = `<span class="badge badge-active" style="font-size:11px"><i data-lucide="check-circle" style="width:12px;height:12px"></i> mysqldump found</span>
-        <span class="mysqldump-path">${esc(s.path)}</span>`;
-    } else {
-      el.innerHTML = `<span class="badge badge-disabled" style="font-size:11px"><i data-lucide="alert-circle" style="width:12px;height:12px"></i> mysqldump not found</span>
-        <button class="btn-outline btn-sm" onclick="backupPage.showMysqldumpSetup()"><i data-lucide="settings"></i> Configure</button>`;
-    }
-    lucide.createIcons();
+    await this.render();
   }
 
   async render() {
@@ -60,14 +40,16 @@ class BackupPage {
     }
     if (empty) empty.style.display = 'none';
 
-    // Load stats for all profiles
-    const statsMap = {};
-    for (const p of this.profiles) {
+    const historyResults = await Promise.all(this.profiles.map(async profile => {
       try {
-        const stats = await window.api.getBackupHistoryStats(p.Id);
-        statsMap[p.Id] = stats.stats || {};
-      } catch (e) { statsMap[p.Id] = {}; }
-    }
+        const stats = await window.api.getBackupHistoryStats(profile.Id);
+        return (stats && stats.stats) || {};
+      } catch (e) {
+        return {};
+      }
+    }));
+    const statsMap = {};
+    this.profiles.forEach((profile, index) => { statsMap[profile.Id] = historyResults[index]; });
 
     content.innerHTML = this.profiles.map(p => {
       const st = statsMap[p.Id] || {};
@@ -84,7 +66,7 @@ class BackupPage {
             <span class="badge badge-info">${esc(engineLabel)}</span>
             <span class="badge ${p.Enabled ? 'badge-active' : 'badge-disabled'}">${esc(i18n.t(p.Enabled ? 'profile.active' : 'profile.disabled'))}</span>
             <span class="badge badge-info">${esc(p.Databases?.length ? p.Databases.join(', ') : i18n.t('wizard.allDatabases'))}</span>
-            ${p.Compression !== 'none' ? `<span class="badge badge-info" style="font-size:10px">${p.Compression.toUpperCase()} L${p.CompressionLevel}</span>` : ''}
+            ${p.Compression && p.Compression !== 'none' ? `<span class="badge badge-info" style="font-size:10px">${String(p.Compression).toUpperCase()} L${p.CompressionLevel || 5}</span>` : ''}
           </div>
           <!-- stopPropagation so an action button never opens the editor too -->
           <div class="backup-profile-actions" onclick="event.stopPropagation()">
@@ -103,109 +85,13 @@ class BackupPage {
           <div class="backup-detail"><i data-lucide="database"></i> <span>${esc(p.Host)}:${p.Port}</span></div>
           <div class="backup-detail"><i data-lucide="folder"></i> <span>${esc(p.BackupPath)}</span></div>
           <div class="backup-detail"><i data-lucide="clock"></i> <span>${esc(p.CronExpression)}</span></div>
-          ${p.UploadTargets.length > 0 ? `<div class="backup-detail"><i data-lucide="upload"></i> <span>${p.UploadTargets.map(t => t.type.toUpperCase()).join(', ')}</span></div>` : ''}
+          ${(p.UploadTargets || []).length > 0 ? `<div class="backup-detail"><i data-lucide="upload"></i> <span>${p.UploadTargets.map(t => String(t.type || '').toUpperCase()).filter(Boolean).join(', ')}</span></div>` : ''}
           ${p.LastRun ? `<div class="backup-detail"><i data-lucide="history"></i> <span>Last: ${new Date(p.LastRun).toLocaleString()} \u2014 ${p.LastStatus || '?'}</span></div>` : ''}
           ${st.total > 0 ? `<div class="backup-detail"><i data-lucide="bar-chart"></i> <span>${st.total} runs \u00b7 ${st.success} ok \u00b7 ${st.failed} failed</span></div>` : ''}
         </div>
       </div>
     `}).join('');
     if (window.lucide) lucide.createIcons();
-  }
-
-  // ─── mysqldump Setup Modal ───
-  showMysqldumpSetup() {
-    showModal(`
-      <h2><i data-lucide="settings"></i> MySQL Driver Setup</h2>
-      <p style="font-size:13px;color:var(--text2);margin-bottom:16px">mysqldump is required for MySQL backups. Configure it below.</p>
-
-      <div class="mysqldump-option">
-        <h4><i data-lucide="search"></i> Auto-detect</h4>
-        <p style="font-size:12px;color:var(--text3)">Scan system PATH, Program Files, XAMPP, WampServer, Laragon, MariaDB, Docker, and environment variables.</p>
-        <button class="btn-outline btn-sm" onclick="backupPage.detectMysqldump()"><i data-lucide="refresh-cw"></i> Scan Again</button>
-        <span id="detect-result" style="font-size:12px;margin-left:8px"></span>
-      </div>
-
-      <div class="mysqldump-option">
-        <h4><i data-lucide="folder-open"></i> Set Path Manually</h4>
-        <p style="font-size:12px;color:var(--text3)">Point to mysqldump.exe on your system.</p>
-        <div style="display:flex;gap:8px;margin-top:8px">
-          <input type="text" class="form-input" id="manual-mysqldump-path" data-path-input data-path-kind="file" data-path-ext=".exe" placeholder="C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysqldump.exe" style="flex:1">
-          <button class="btn-outline btn-sm" onclick="backupPage.browseMysqldump()"><i data-lucide="folder-open"></i></button>
-          <button class="btn-glow btn-sm" onclick="backupPage.setManualPath()">Set</button>
-        </div>
-        <span id="manual-result" style="font-size:12px;margin-top:4px;display:block"></span>
-      </div>
-
-      <div class="mysqldump-option">
-        <h4><i data-lucide="download"></i> Download MySQL Tools</h4>
-        <p style="font-size:12px;color:var(--text3)">Download MySQL Server binaries (includes mysqldump) from official source.</p>
-        <button class="btn-glow btn-sm" onclick="backupPage.downloadMysqldump()"><i data-lucide="download"></i> Download (~450 MB)</button>
-        <span id="download-result" style="font-size:12px;margin-left:8px"></span>
-      </div>
-
-      <div class="modal-actions">
-        <button class="btn-ghost" onclick="hideModal()">Close</button>
-      </div>
-    `);
-    lucide.createIcons();
-  }
-
-  async detectMysqldump() {
-    const el = document.getElementById('detect-result');
-    el.textContent = 'Scanning...';
-    el.style.color = 'var(--amber)';
-    const result = await window.api.checkMysqldump();
-    this.mysqldumpStatus = result;
-    if (result.found) {
-      el.textContent = `Found: ${result.path}`;
-      el.style.color = 'var(--green)';
-    } else {
-      el.textContent = 'Not found in any common location';
-      el.style.color = 'var(--red)';
-    }
-    this.renderMysqldumpStatus();
-  }
-
-  async setManualPath() {
-    const input = document.getElementById('manual-mysqldump-path');
-    const el = document.getElementById('manual-result');
-    const p = input.value.trim();
-    if (!p) { el.textContent = 'Enter a path'; el.style.color = 'var(--red)'; return; }
-    const result = await window.api.setMysqldumpPath(p);
-    if (result) {
-      el.textContent = `Set: ${p}`;
-      el.style.color = 'var(--green)';
-      this.mysqldumpStatus = { found: true, path: p };
-      this.renderMysqldumpStatus();
-    } else {
-      el.textContent = 'File not found at this path';
-      el.style.color = 'var(--red)';
-    }
-  }
-
-  async browseMysqldump() {
-    // This would use electron dialog - for now just prompt
-    const path = prompt('Enter mysqldump.exe path:');
-    if (path) {
-      document.getElementById('manual-mysqldump-path').value = path;
-      this.setManualPath();
-    }
-  }
-
-  async downloadMysqldump() {
-    const el = document.getElementById('download-result');
-    el.textContent = 'Downloading... this may take a few minutes';
-    el.style.color = 'var(--amber)';
-    const result = await window.api.downloadMysqldump();
-    if (result.success) {
-      el.textContent = `Installed: ${result.path}`;
-      el.style.color = 'var(--green)';
-      this.mysqldumpStatus = { found: true, path: result.path };
-      this.renderMysqldumpStatus();
-    } else {
-      el.textContent = `Failed: ${result.message}`;
-      el.style.color = 'var(--red)';
-    }
   }
 
   // ─── Profile Wizard ───
@@ -333,10 +219,10 @@ class BackupPage {
             </div>
             <div style="display:flex;gap:8px">
               <button class="btn-ghost" onclick="hideModal()">${esc(i18n.t('taskModal.cancel'))}</button>
-              ${isEdit ? `<button class=\"btn-glow\" onclick=\"backupPage.saveProfile()\"><i data-lucide=\"save\"></i> Save</button>` : ''}
+              ${isEdit ? `<button class="btn-glow" data-backup-save onclick="backupPage.saveProfile()"><i data-lucide="save"></i> ${esc(i18n.t('backup.saveChanges'))}</button>` : ''}
               ${this.currentStep < steps.length - 1
                 ? `<button class=\"btn-outline\" onclick=\"backupPage.nextStep()\">${esc(i18n.t('wizard.next'))} <i data-lucide=\"arrow-right\"></i></button>`
-                : `<button class=\"btn-glow\" onclick=\"backupPage.saveProfile()\"><i data-lucide=\"save\"></i> Create Profile</button>`}
+                : `<button class="btn-glow" data-backup-save onclick="backupPage.saveProfile()"><i data-lucide="save"></i> ${esc(i18n.t('backup.createBtn'))}</button>`}
             </div>
           </div>
         </div>
@@ -388,7 +274,7 @@ class BackupPage {
       </div>
       <div class="ws-section">
         <div class="ws-label">${esc(i18n.t('summary.status'))}</div>
-        <div class="ws-value">${d.Enabled !== false ? `<span style="color:var(--green)">&#9679; ${esc(i18n.t('summary.enabled'))}</span>` : `<span style="color:var(--red)">&#9679; ${esc(i18n.t('summary.disabled'))}</span>`}</div>
+        <div class="ws-value"><span class="badge ${d.Enabled !== false ? 'badge-active' : 'badge-disabled'}">${esc(i18n.t(d.Enabled !== false ? 'summary.enabled' : 'summary.disabled'))}</span></div>
       </div>
     `;
   }
@@ -804,30 +690,41 @@ class BackupPage {
 
   async testWizardConn() {
     const status = document.getElementById('wiz-conn-status');
-    status.innerHTML = '<span style="color:var(--amber)">Testing...</span>';
-    const result = await window.api.testMysqlConnection(this.draft.Host, this.draft.Port, this.draft.User, this.draft.Password);
-    status.innerHTML = result.success
-      ? '<span style="color:var(--green)">✓ Connected</span>'
-      : `<span style="color:var(--red)">✕ ${esc(result.message)}</span>`;
+    if (!status) return;
+    status.textContent = i18n.t('wizard.testing');
+    status.style.color = 'var(--amber)';
+    try {
+      const result = await window.api.testMysqlConnection(this.draft.Host, this.draft.Port, this.draft.User, this.draft.Password);
+      status.textContent = result && result.success ? i18n.t('wizard.connected') : ((result && result.message) || i18n.t('wizard.connectionFailed'));
+      status.style.color = result && result.success ? 'var(--green)' : 'var(--red)';
+    } catch (error) {
+      status.textContent = error.message || i18n.t('wizard.connectionFailed');
+      status.style.color = 'var(--red)';
+    }
   }
 
   async loadWizardDbs() {
     const status = document.getElementById('wiz-db-status');
-    status.textContent = 'Loading...';
-    const result = await window.api.listMysqlDatabases(this.draft.Host, this.draft.Port, this.draft.User, this.draft.Password);
     const container = document.getElementById('wiz-db-chips');
-    if (result.success && result.databases.length > 0) {
-      const selected = this.draft.Databases || [];
-      container.innerHTML = result.databases.map(d =>
-        `<label class="bp-db-check-row">
-          <input type="checkbox" class="bp-db-check" data-db="${esc(d)}" ${selected.includes(d) ? 'checked' : ''} onchange="backupPage._syncDbs()">
-          <span class="bp-db-check-box"></span>
-          <span class="bp-db-check-name">${esc(d)}</span>
-        </label>`
-      ).join('');
-      status.textContent = `Found ${result.databases.length} databases`;
-    } else {
-      status.textContent = result.message || 'No databases found';
+    if (!status || !container) return;
+    status.textContent = i18n.t('wizard.loading');
+    try {
+      const result = await window.api.listMysqlDatabases(this.draft.Host, this.draft.Port, this.draft.User, this.draft.Password);
+      if (result && result.success && result.databases && result.databases.length > 0) {
+        const selected = this.draft.Databases || [];
+        container.innerHTML = result.databases.map(d =>
+          `<label class="bp-db-check-row">
+            <input type="checkbox" class="bp-db-check" data-db="${esc(d)}" ${selected.includes(d) ? 'checked' : ''} onchange="backupPage._syncDbs()">
+            <span class="bp-db-check-box"></span>
+            <span class="bp-db-check-name">${esc(d)}</span>
+          </label>`
+        ).join('');
+        status.textContent = i18n.t('wizard.foundDatabases', { n: result.databases.length });
+      } else {
+        status.textContent = (result && result.message) || i18n.t('wizard.noDatabasesFound');
+      }
+    } catch (error) {
+      status.textContent = error.message || i18n.t('wizard.noDatabasesFound');
     }
     this._syncDbs();
   }
@@ -908,20 +805,28 @@ class BackupPage {
   }
 
   async saveProfile() {
+    if (this.saving) return;
     this._syncCurrentStep();
     const data = { ...this.draft };
-    if (!data.Name) { showToast('Profile name is required', 'error'); return; }
-
-    if (this.editingId) {
-      data.Id = this.editingId;
-      await window.api.updateBackupProfile(data);
-      showToast('Profile updated', 'success');
-    } else {
-      await window.api.createBackupProfile(data);
-      showToast('Profile created', 'success');
+    if (!data.Name || !data.Name.trim()) { showToast(i18n.t('wizard.profileNameRequired'), 'error'); return; }
+    data.Name = data.Name.trim();
+    const buttons = Array.from(document.querySelectorAll('[data-backup-save]'));
+    buttons.forEach(button => { button.disabled = true; });
+    this.saving = true;
+    try {
+      const result = this.editingId
+        ? await window.api.updateBackupProfile({ ...data, Id: this.editingId })
+        : await window.api.createBackupProfile(data);
+      if (!result || result.success === false) throw new Error((result && result.message) || i18n.t('backup.saveFailed'));
+      showToast(i18n.t(this.editingId ? 'backup.updatedToast' : 'backup.createdToast', { name: data.Name }), 'success');
+      hideModal();
+      await this.load();
+    } catch (error) {
+      showToast(error && error.message ? error.message : i18n.t('backup.saveFailed'), 'error');
+    } finally {
+      this.saving = false;
+      buttons.forEach(button => { if (button.isConnected) button.disabled = false; });
     }
-    hideModal();
-    this.load();
   }
 
   async deleteProfile(id, name) {

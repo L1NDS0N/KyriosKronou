@@ -24,6 +24,7 @@ const CronParser = require('./cronParser');
 const TaskManager = require('./taskManager');
 const BackupManager = require('./backupManager');
 const SyncManager = require('./sync/syncManager');
+const RetentionManager = require('./retentionManager');
 const ServiceManager = require('./serviceManager');
 const WrapperGenerator = require('./wrapperGenerator');
 const RunRegistry = require('./runRegistry');
@@ -47,10 +48,11 @@ function bootstrap() {
   const serviceManager = new ServiceManager(logger, config);
   const wrapperGenerator = new WrapperGenerator(config, logger);
   const syncManager = new SyncManager(config, logger, null);
+  const retentionManager = new RetentionManager({ syncManager, cronParser, logger });
 
   logger.log('INFO', '=== Κύριος Χρόνος service scheduler starting ===');
   logger.log('INFO', `PID ${process.pid} | node ${process.version} | data ${paths.dataDir()}`);
-  logger.log('INFO', `Tasks loaded: ${taskManager.getAllTasks().length} | backup profiles: ${backupManager.getAllProfiles().length} | sync profiles: ${syncManager.getAllProfiles().length}`);
+  logger.log('INFO', `Tasks loaded: ${taskManager.getAllTasks().length} | backup profiles: ${backupManager.getAllProfiles().length} | sync profiles: ${syncManager.getAllProfiles().length} | retention profiles: ${retentionManager.getAllProfiles().length}`);
   logger.audit('SERVICE_STARTED', { targetType: 'service', after: { pid: process.pid, dataDir: paths.dataDir() } });
 
   // Liveness marker for the GUI's "service health" panel.
@@ -58,7 +60,7 @@ function bootstrap() {
   try { fs.writeFileSync(pidFile, String(process.pid), 'utf8'); } catch (e) {}
 
   const scheduler = new SchedulerCore(
-    { taskManager, backupManager, syncManager, cronParser, logger },
+    { taskManager, backupManager, syncManager, retentionManager, cronParser, logger },
     ROLE_SERVICE
   ).start();
 
@@ -112,7 +114,7 @@ function bootstrap() {
   logger.log('INFO', 'Scheduler loop running (15s interval)');
   logger.flush();
 
-  return { scheduler, logger, taskManager, backupManager, config, apiServer };
+  return { scheduler, logger, taskManager, backupManager, syncManager, retentionManager, config, apiServer };
 }
 
 // Only bootstrap when executed directly, so tests can require this file.

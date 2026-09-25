@@ -163,7 +163,7 @@ describe('retention: planDeletion', () => {
       file('c.bin', 1, 2 * 1024 * 1024 * 1024),   // 2 GB
     ];
     // Total 11 GB; target: 8 GB free -> must free 3 GB -> only a.bin goes.
-    const c = retention.compile({ Enabled: true, BySize: true, FreeGb: 8 });
+    const c = retention.compile({ Enabled: true, BySize: true, FreeGb: 8, FileExtensions: ['.bin'] });
     const p = retention.planDeletion(files, c, { now: NOW });
     expect(p.delete.map(x => x.rel)).to.deep.equal(['a.bin']);
   });
@@ -236,7 +236,7 @@ describe('retention: analyze with metadata dates', () => {
 describe('retention: monthly rule in planDeletion', () => {
   const now = Date.now();
   const day = 24 * 3600 * 1000;
-  const compiled = retention.compile({ Enabled: true, DateSource: 'names', ByMonthly: true, MonthlyKeepMonths: 12, MinKeep: 0 });
+  const compiled = retention.compile({ Enabled: true, DateSource: 'names', ByMonthly: true, MonthlyKeepMonths: 12, MinKeep: 0, FileExtensions: [] });
 
   function f(rel, mtimeMs) { return { rel, size: 10, mtimeMs }; }
 
@@ -267,8 +267,8 @@ describe('retention: monthly rule in planDeletion', () => {
     // A restored snapshot: old name, fresh mtime. The historical default
     // (mtime) must keep it; only an explicit 'names' ages it by its name.
     const files = [f('2020-01-01/dump.sql', now - day)];
-    const byMtime = retention.compile({ Enabled: true, ByAge: true, KeepDays: 30 });
-    const byName = retention.compile({ Enabled: true, ByAge: true, KeepDays: 30, DateSource: 'names' });
+    const byMtime = retention.compile({ Enabled: true, ByAge: true, KeepDays: 30, FileExtensions: ['.sql'] });
+    const byName = retention.compile({ Enabled: true, ByAge: true, KeepDays: 30, DateSource: 'names', FileExtensions: ['.sql'] });
     expect(byMtime.dateSource).to.equal('metadata');
     expect(retention.planDeletion(files, byMtime, { now }).delete).to.have.lengthOf(0);
     expect(retention.planDeletion(files, byName, { now }).delete).to.have.lengthOf(1);

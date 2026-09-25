@@ -86,7 +86,7 @@ describe('SyncManager: retention end to end (local engine, real files)', () => {
     aged(dst, 'antigo.txt', 30, 'velho');
     aged(dst, 'recente.txt', 1, 'novo');
 
-    const p = profile({ Enabled: true, ByAge: true, KeepDays: 7, MinKeep: 0 });
+    const p = profile({ Enabled: true, ByAge: true, KeepDays: 7, MinKeep: 0, FileExtensions: [] });
     const r = await mgr.executeSync(p.Id);
 
     expect(r.success).to.equal(true);
@@ -102,9 +102,9 @@ describe('SyncManager: retention end to end (local engine, real files)', () => {
     // and the just-copied ordering must keep it alive.
     aged(src, 'importante-velho.txt', 400, 'precioso');
 
-    const p = profile({ Enabled: true, ByAge: true, KeepDays: 7, MinKeep: 0 });
+    const p = profile({ Enabled: true, ByAge: true, KeepDays: 7, MinKeep: 0, FileExtensions: [] });
     // First run copies it; MinKeep=1 protects it from being immediately deleted.
-    const p2 = profile({ Enabled: true, ByAge: true, KeepDays: 7, MinKeep: 1 });
+    const p2 = profile({ Enabled: true, ByAge: true, KeepDays: 7, MinKeep: 1, FileExtensions: [] });
     const r = await mgr.executeSync(p2.Id);
 
     expect(r.success).to.equal(true);
@@ -121,7 +121,7 @@ describe('SyncManager: retention end to end (local engine, real files)', () => {
     // Four old files + the fresh copy of unico.txt (newest of all).
     // MinKeep=2 protects unico.txt and velho4; by age all five were doomed,
     // so velho1, velho2 and velho3 go.
-    const p = profile({ Enabled: true, ByAge: true, KeepDays: 10, MinKeep: 2 });
+    const p = profile({ Enabled: true, ByAge: true, KeepDays: 10, MinKeep: 2, FileExtensions: [] });
     const r = await mgr.executeSync(p.Id);
     expect(r.retention.deleted).to.equal(3);
     expect(fs.existsSync(path.join(dst, 'velho3.txt'))).to.equal(false);
@@ -146,7 +146,7 @@ describe('SyncManager: retention end to end (local engine, real files)', () => {
       write(src, `${d.toISOString().slice(0, 10)}/dump.sql`, 'snap ' + i);
       write(dst, `${d.toISOString().slice(0, 10)}/dump.sql`, 'snap ' + i);
     }
-    const p = profile({ Enabled: true, ByCount: true, KeepCount: 2, MinKeep: 0 });
+    const p = profile({ Enabled: true, ByCount: true, KeepCount: 2, MinKeep: 0, FileExtensions: ['.sql'] });
     const r = await mgr.executeSync(p.Id);
     expect(r.success).to.equal(true);
     expect(r.retention.deleted).to.equal(3);
@@ -159,7 +159,7 @@ describe('SyncManager: retention end to end (local engine, real files)', () => {
   it('history records how many files retention removed', async () => {
     write(src, 'a.txt', 'a');
     aged(dst, 'velho.txt', 30, 'v');
-    const p = profile({ Enabled: true, ByAge: true, KeepDays: 5, MinKeep: 0 });
+    const p = profile({ Enabled: true, ByAge: true, KeepDays: 5, MinKeep: 0, FileExtensions: [] });
     await mgr.executeSync(p.Id);
     const h = mgr.getHistory(p.Id);
     expect(h[0].RetentionDeleted).to.equal(1);
@@ -184,7 +184,7 @@ describe('SyncManager: retention end to end (local engine, real files)', () => {
   it('previewRetention lists deletions without touching the disk', () => {
     aged(dst, 'antigo.txt', 30, 'v');
     aged(dst, 'novo.txt', 1, 'n');
-    const preview = mgr.previewRetention(dst, { Enabled: true, ByAge: true, KeepDays: 7, MinKeep: 0 });
+    const preview = mgr.previewRetention(dst, { Enabled: true, ByAge: true, KeepDays: 7, MinKeep: 0, FileExtensions: [] });
     expect(preview.ok).to.equal(true);
     expect(preview.delete.map(x => x.rel)).to.deep.equal(['antigo.txt']);
     // Files are still there - it is a preview.

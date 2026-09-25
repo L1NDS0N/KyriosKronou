@@ -159,6 +159,9 @@ document.getElementById('modal-overlay').addEventListener('click', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
+    const scriptOverlay = document.getElementById('script-editor-overlay');
+    const richTextOverlay = document.getElementById('rich-text-overlay');
+    if ((scriptOverlay && !scriptOverlay.classList.contains('hidden')) || (richTextOverlay && !richTextOverlay.classList.contains('hidden'))) return;
     const modal = document.getElementById('modal-overlay');
     if (!modal.classList.contains('hidden')) { hideModal(); e.stopPropagation(); }
   }
@@ -418,7 +421,7 @@ function renderTasks() {
           ${t.ScriptType ? `<span class="badge badge-info" style="font-size:9px;padding:1px 5px;">${t.ScriptType.toUpperCase()} inline</span>` : ''}
         </div>
         <div class="task-meta"><i data-lucide="clock"></i>${escHtml(t.CronExpression)}<span style="color:var(--text3)">|</span><i data-lucide="file-code"></i>${escHtml(t.ScriptPath || 'inline')}</div>
-        ${t.Description ? `<div class="task-desc">${escHtml(t.Description)}</div>` : ''}
+        ${t.Description || t.DescriptionHtml ? `<div class="task-desc rich-text-preview">${window.simpleRichText ? simpleRichText.sanitize(t.DescriptionHtml || simpleRichText.fromText(t.Description || '')) : escHtml(t.Description || '')}</div>` : ''}
       </div>
       <div class="task-actions" onclick="event.stopPropagation()">
         <label class="toggle-switch" title="${escHtml(i18n.t('tasks.toggleEnabled'))}" style="margin-right:4px">
@@ -564,6 +567,12 @@ function showTaskDialog(task = null) {
   const isEdit = !!task;
   const cron = isEdit ? task.CronExpression : '* * * * *';
   const hasInline = isEdit && task.ScriptContent;
+  _scriptMode = hasInline ? 'editor' : 'file';
+  _scriptContent = hasInline ? task.ScriptContent : '';
+  _scriptType = hasInline ? (task.ScriptType || 'ps1') : 'ps1';
+  _taskDescriptionText = isEdit ? (task.Description || '') : '';
+  _taskDescriptionHtml = isEdit ? (task.DescriptionHtml || '') : '';
+  scriptEditor.destroy();
   const T = (k, p) => escHtml(i18n.t(k, p));
 
   // Grouped into sections - identity, schedule, what runs, options - so a long
@@ -607,7 +616,10 @@ function showTaskDialog(task = null) {
       </div>
 
       <div id="script-mode-editor" style="display:none">
-        <div id="dialog-script-editor"></div>
+        <div class="script-mode-summary">
+          <span id="script-editor-summary">${T('scriptEditor.summary')}</span>
+          <button class="btn-outline btn-sm" type="button" onclick="scriptEditorSwitchMode('editor')"><i data-lucide="pencil"></i> ${T('scriptEditor.open')}</button>
+        </div>
         <div id="script-file-path" class="script-path-display" style="display:none"></div>
       </div>
 
@@ -627,7 +639,11 @@ function showTaskDialog(task = null) {
       <div class="form-section-title"><i data-lucide="settings-2"></i> ${T('taskModal.optionsSection')}</div>
       <div class="form-group">
         <label class="form-label" for="dlg-desc">${T('taskModal.description')}</label>
-        <textarea class="form-input" id="dlg-desc" placeholder="${T('taskModal.descriptionPlaceholder')}">${isEdit ? escHtml(task.Description || '') : ''}</textarea>
+        <div class="script-mode-summary">
+          <span id="task-description-summary">${_taskDescriptionText ? T('richText.editedDescription') : T('richText.emptyDescription')}</span>
+          <button class="btn-outline btn-sm" type="button" id="btn-edit-description" onclick="editTaskDescription()"><i data-lucide="text"></i> ${T('richText.edit')}</button>
+        </div>
+        <div id="task-description-preview" class="task-desc rich-text-preview"></div>
       </div>
       <label class="check-row" for="dlg-enabled">
         <input type="checkbox" id="dlg-enabled" ${isEdit && !task.Enabled ? '' : 'checked'}>
@@ -648,14 +664,8 @@ function showTaskDialog(task = null) {
   // Smart cron
   smartCron = new SmartCronInput('#smart-cron-container', { value: cron });
 
-  // Script editor
-  if (hasInline) {
-    scriptEditorSwitchMode('editor');
-    setTimeout(() => {
-      scriptEditor.init('dialog-script-editor');
-      scriptEditor.loadContent(task.ScriptContent, task.ScriptType || 'ps1');
-    }, 50);
-  }
+  scriptEditorSwitchMode(_scriptMode, false);
+  simpleRichText.renderPreview(document.getElementById('task-description-preview'), { Description: _taskDescriptionText, DescriptionHtml: _taskDescriptionHtml });
 
   // Enter to save
   document.getElementById('dlg-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('btn-save-task').click(); });
@@ -664,21 +674,47 @@ function showTaskDialog(task = null) {
 
 // Script mode switching
 let _scriptMode = 'file';
+let _scriptContent = '';
+let _scriptType = 'ps1';
+let _taskDescriptionText = '';
+let _taskDescriptionHtml = '';
 
 
-function scriptEditorSwitchMode(mode) {
+function scriptEditorSwitchMode(mode, openEditor = true) {
   _scriptMode = mode;
-  document.getElementById('tab-file').classList.toggle('active', mode === 'file');
-  document.getElementById('tab-editor').classList.toggle('active', mode === 'editor');
-  document.getElementById('script-mode-file').style.display = mode === 'file' ? '' : 'none';
-  document.getElementById('script-mode-editor').style.display = mode === 'editor' ? '' : 'none';
+  const fileTab = document.getElementById('tab-file');
+  const editorTab = document.getElementById('tab-editor');
+  const filePanel = document.getElementById('script-mode-file');
+  const editorPanel = document.getElementById('script-mode-editor');
+  if (fileTab) fileTab.classList.toggle('active', mode === 'file');
+  if (editorTab) editorTab.classList.toggle('active', mode === 'editor');
+  if (filePanel) filePanel.style.display = mode === 'file' ? '' : 'none';
+  if (editorPanel) editorPanel.style.display = mode === 'editor' ? '' : 'none';
+  if (mode !== 'editor' || !openEditor) return;
+  scriptEditor.open({
+    content: _scriptContent,
+    type: _scriptType,
+    onApply: result => {
+      _scriptContent = result.content;
+      _scriptType = result.type;
+      const summary = document.getElementById('script-editor-summary');
+      if (summary) summary.textContent = `${result.content.length} ${i18n.t('scriptEditor.characters')}`;
+    },
+  });
+}
 
-  if (mode === 'editor' && !scriptEditor.editor) {
-    setTimeout(() => {
-      scriptEditor.init('dialog-script-editor');
-      lucide.createIcons();
-    }, 50);
-  }
+function editTaskDescription() {
+  simpleRichText.open({
+    html: _taskDescriptionHtml,
+    text: _taskDescriptionText,
+    onApply: result => {
+      _taskDescriptionHtml = result.html;
+      _taskDescriptionText = result.text;
+      const summary = document.getElementById('task-description-summary');
+      if (summary) summary.textContent = result.text ? i18n.t('richText.editedDescription') : i18n.t('richText.emptyDescription');
+      simpleRichText.renderPreview(document.getElementById('task-description-preview'), result);
+    },
+  });
 }
 
 async function saveTask(editId) {
@@ -686,61 +722,61 @@ async function saveTask(editId) {
   if (!name) { showToast(i18n.t('toast.taskNameRequired'), 'error'); document.getElementById('dlg-name').focus(); return; }
   if (!smartCron || !smartCron.isValid()) { showToast(i18n.t('toast.invalidCron'), 'error'); return; }
   const cron = smartCron.getValue();
-
-  let scriptPath = '';
-  let scriptContent = '';
-  let scriptType = '';
-
-  if (_scriptMode === 'editor') {
-    // Inline script mode
-    const content = scriptEditor.getContent().trim();
-    if (!content) { showToast(i18n.t('toast.scriptContentRequired'), 'error'); return; }
-    scriptContent = content;
-    scriptType = scriptEditor.getMode();
-    const ext = scriptEditor.getExtension();
-
-    // Save script to managed directory
-    const scriptsDir = await window.api.getScriptsDir();
-    const taskId = editId || 'task-' + Date.now();
-    const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 30);
-    const scriptFile = `${safeName}_${taskId.substring(0, 8)}${ext}`;
-    scriptPath = `${scriptsDir}\${scriptFile}`;
-
-    const saveResult = await window.api.saveScriptFile(scriptPath, content);
-    if (!saveResult.success) {
-      showToast(`Failed to save script: ${saveResult.message}`, 'error');
-      return;
-    }
-  } else {
-    // File path mode
-    scriptPath = document.getElementById('dlg-script').value.trim();
-    if (!scriptPath) { showToast(i18n.t('toast.scriptPathRequired'), 'error'); document.getElementById('dlg-script').focus(); return; }
-  }
-
-  const data = {
-    Name: name, CronExpression: cron, ScriptPath: scriptPath,
-    ScriptContent: scriptContent, ScriptType: scriptType,
-    Arguments: document.getElementById('dlg-args').value,
-    WorkingDirectory: document.getElementById('dlg-workdir').value,
-    Description: document.getElementById('dlg-desc').value,
-    Enabled: document.getElementById('dlg-enabled').checked
-  };
-
   const btn = document.getElementById('btn-save-task');
-  btn.disabled = true; btn.style.opacity = '0.5';
 
-  if (editId) {
-    data.Id = editId;
-    await window.api.updateTask(data);
-    swrInvalidate('tasks'); showToast(i18n.t('toast.taskUpdated'), 'success');
-  } else {
-    await window.api.addTask(data);
-    swrInvalidate('tasks'); showToast(i18n.t('toast.taskCreated'), 'success');
+  try {
+    let scriptPath = '';
+    let scriptContent = '';
+    let scriptType = '';
+
+    if (_scriptMode === 'editor') {
+      const content = _scriptContent.trim();
+      if (!content) { showToast(i18n.t('toast.scriptContentRequired'), 'error'); return; }
+      scriptContent = content;
+      scriptType = _scriptType;
+      const ext = _scriptType === 'bat' ? '.bat' : '.ps1';
+      const scriptsDir = await window.api.getScriptsDir();
+      const taskId = editId || 'task-' + Date.now();
+      const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 30);
+      scriptPath = `${scriptsDir}\\${safeName}_${taskId.substring(0, 8)}${ext}`;
+      const saveResult = await window.api.saveScriptFile(scriptPath, content);
+      if (!saveResult || !saveResult.success) throw new Error((saveResult && saveResult.message) || i18n.t('toast.scriptSaveFailed'));
+    } else {
+      scriptPath = document.getElementById('dlg-script').value.trim();
+      if (!scriptPath) { showToast(i18n.t('toast.scriptPathRequired'), 'error'); document.getElementById('dlg-script').focus(); return; }
+    }
+
+    const data = {
+      Name: name, CronExpression: cron, ScriptPath: scriptPath,
+      ScriptContent: scriptContent, ScriptType: scriptType,
+      Arguments: document.getElementById('dlg-args').value,
+      WorkingDirectory: document.getElementById('dlg-workdir').value,
+      Description: _taskDescriptionText,
+      DescriptionHtml: _taskDescriptionHtml,
+      Enabled: document.getElementById('dlg-enabled').checked,
+    };
+
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+    const result = editId
+      ? await window.api.updateTask({ ...data, Id: editId })
+      : await window.api.addTask(data);
+    if (!result || result.success === false) throw new Error((result && result.message) || i18n.t('toast.taskSaveFailed'));
+
+    swrInvalidate('tasks');
+    showToast(i18n.t(editId ? 'toast.taskUpdated' : 'toast.taskCreated'), 'success');
+    scriptEditor.destroy();
+    hideModal();
+    refreshTasks();
+    refreshDashboard();
+  } catch (error) {
+    showToast(error && error.message ? error.message : i18n.t('toast.taskSaveFailed'), 'error');
+  } finally {
+    if (btn && btn.isConnected) {
+      btn.disabled = false;
+      btn.style.opacity = '';
+    }
   }
-  scriptEditor.destroy();
-  hideModal();
-  refreshTasks();
-  refreshDashboard();
 }
 
 async function showTaskHistory(taskId) {
@@ -763,7 +799,7 @@ async function showTaskHistory(taskId) {
         <span class="th-icon">${statusIcon(e.Status)}</span>
         <span class="th-time">${fmtTime(e.Timestamp)}</span>
         <span class="th-duration">${e.Duration || '-'}</span>
-        <span class="th-status badge badge-${e.Status === 'Success' ? 'active' : 'badge-disabled'}">${e.Status}</span>
+        <span class="th-status badge badge-${e.Status === 'Success' ? 'active' : 'error'}">${e.Status}</span>
         <i data-lucide="chevron-down" class="th-chevron"></i>
       </div>
       <div class="th-output">

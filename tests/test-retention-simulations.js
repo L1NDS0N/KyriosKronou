@@ -191,7 +191,7 @@ describe('retention simulations: layouts and date sources', () => {
       const folder = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6)}`;
       files.push({ ...f, rel: `${folder}/db.sql` }, { ...f, rel: `${folder}/files.zip` });
     }
-    const { survivors } = run(files, { DateSource: 'names', ByAge: true, KeepDays: 7, ByMonthly: true, MonthlyKeepMonths: 2 });
+    const { survivors } = run(files, { DateSource: 'names', ByAge: true, KeepDays: 7, ByMonthly: true, MonthlyKeepMonths: 2, FileExtensions: [] });
     const folders = [...new Set(survivors.map(r => r.split('/')[0]))].sort();
     expect(folders).to.deep.equal(['2026-08-31', '2026-09-09', '2026-09-10', '2026-09-11', '2026-09-12', '2026-09-13', '2026-09-14', '2026-09-15']);
     // Both files of every surviving folder remain.
@@ -200,7 +200,7 @@ describe('retention simulations: layouts and date sources', () => {
 
   it('metadata mode dates undated names by mtime and obeys the same rules', () => {
     const files = dailyArchive(400, (t, i) => `dump_${String(i).padStart(4, '0')}.sql`);
-    const { survivors } = run(files, { DateSource: 'metadata', ByAge: true, KeepDays: 30, ByMonthly: true, MonthlyKeepMonths: 4 });
+    const { survivors } = run(files, { DateSource: 'metadata', ByAge: true, KeepDays: 30, ByMonthly: true, MonthlyKeepMonths: 4, FileExtensions: ['.sql'] });
     // i = days before Sep 15. Age keeps i <= 29 (Aug 17 03:00 > Aug 16 12:00).
     // Monthly Jun..Sep: Jun 30 (i=77), Jul 31 (i=46), Aug 31 kept by age anyway.
     const expected = [];

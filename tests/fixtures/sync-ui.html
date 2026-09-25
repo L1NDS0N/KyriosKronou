@@ -103,6 +103,7 @@
     window.i18n = { t: (key) => translations[key] || key, currentLang: 'en' };
     window.__toasts = [];
     window.__saves = [];
+    window.__retentionActionCalls = { analyze: 0, preview: 0, simulate: 0 };
     window.showModal = (html, wide) => {
       document.getElementById('modal-body').innerHTML = html;
       document.getElementById('modal-overlay').classList.remove('hidden');
@@ -122,6 +123,18 @@
       updateSyncProfile: async (profile) => {
         window.__saves.push({ operation: 'update', profile: JSON.parse(JSON.stringify(profile)) });
         return { success: true };
+      },
+      analyzeSyncFolder: async () => {
+        window.__retentionActionCalls.analyze++;
+        return { ok: true, folderPattern: 'dated-folders', totalFiles: 1, totalBytes: 1 };
+      },
+      previewSyncRetention: async () => {
+        window.__retentionActionCalls.preview++;
+        return { ok: true, delete: [], kept: [], rules: [], minKeep: 0 };
+      },
+      previewSyncPlan: async () => {
+        window.__retentionActionCalls.simulate++;
+        return { ok: true, copy: [], skipped: [], delete: [], retention: [], totalSource: 0, totalBytes: 0 };
       }
     };
   </script>

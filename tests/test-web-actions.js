@@ -138,6 +138,21 @@ describe('Painel web: ações', function () {
     });
   });
 
+  describe('tarefas', () => {
+    it('limpa rich text antigo quando a descrição é editada no painel', async () => {
+      const task = taskManager.getAllTasks().find(t => t.Name === 'Demo');
+      taskManager.updateTask({ ...task, Description: 'Descrição antiga', DescriptionHtml: '<strong>Descrição antiga</strong>' });
+      const res = await request('/api/tasks/' + encodeURIComponent(task.Id), {
+        method: 'PUT',
+        body: JSON.stringify({ Description: 'Descrição pelo painel' }),
+      });
+      expect(res.status).to.equal(200);
+      const updated = taskManager.getTask(task.Id);
+      expect(updated.Description).to.equal('Descrição pelo painel');
+      expect(updated.DescriptionHtml).to.equal('');
+    });
+  });
+
   // ─── Serviços ───
 
   describe('serviços', () => {

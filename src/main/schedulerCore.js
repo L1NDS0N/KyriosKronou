@@ -99,6 +99,7 @@ class SchedulerCore {
     this.taskManager = deps.taskManager;
     this.backupManager = deps.backupManager;
     this.syncManager = deps.syncManager || null;
+    this.retentionManager = deps.retentionManager || null;
     this.cronParser = deps.cronParser;
     this.logger = deps.logger;
     this.role = role;
@@ -151,6 +152,7 @@ class SchedulerCore {
     try { if (this.taskManager.loadData) this.taskManager.loadData(); } catch (e) {}
     try { if (this.backupManager && this.backupManager.reload) this.backupManager.reload(); } catch (e) {}
     try { if (this.syncManager && this.syncManager.reload) this.syncManager.reload(); } catch (e) {}
+    try { if (this.retentionManager && this.retentionManager.reload) this.retentionManager.reload(); } catch (e) {}
   }
 
   _guard(key) {
@@ -181,6 +183,7 @@ class SchedulerCore {
       this.runDueTasks();
       this.runDueBackups();
       this.runDueSyncs();
+      this.runDueRetentionProfiles();
     } catch (err) {
       this.logger.error(`[${this.role}] Scheduler tick error`, err);
     }
@@ -250,6 +253,31 @@ class SchedulerCore {
           if (this.hooks.onSyncExecuted) this.hooks.onSyncExecuted(profile, result);
         })
         .catch((err) => this.logger.error(`[${this.role}] Sync failed: ${profile.Name}`, err))
+        .finally(() => this.running.delete(key));
+    }
+  }
+
+  runDueRetentionProfiles() {
+    if (!this.retentionManager) return;
+    let due;
+    try { due = this.retentionManager.getDueProfiles(); } catch (e) { return; }
+    if (!Array.isArray(due)) return;
+    const now = Date.now();
+
+    for (const profile of due) {
+      if (!this.cronParser.shouldRunNow(profile.CronExpression)) continue;
+      if (profile.LastRun && (now - new Date(profile.LastRun).getTime()) < 55000) continue;
+
+      const key = `retention:${profile.Id}`;
+      if (!this._guard(key)) continue;
+      this.logger.log('INFO', `[${this.role}] Executing retention profile: ${profile.Name}`);
+      Promise.resolve(this.retentionManager.runProfile(profile.Id))
+        .then((result) => {
+          const status = this.retentionManager.getProfile(profile.Id);
+          this.logger.log('INFO', `[${this.role}] Retention ${profile.Name}: ${(status && status.LastStatus) || 'Error'}`);
+          if (this.hooks.onRetentionProfileExecuted) this.hooks.onRetentionProfileExecuted(profile, result);
+        })
+        .catch((err) => this.logger.error(`[${this.role}] Retention failed: ${profile.Name}`, err))
         .finally(() => this.running.delete(key));
     }
   }
