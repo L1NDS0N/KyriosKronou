@@ -13,6 +13,7 @@ const path = require('path');
 const fs = require('fs');
 
 const WebAuth = require('./webAuth');
+const WebPermissions = require('./webPermissions');
 const SystemMetrics = require('./systemMetrics');
 const security = require('./webSecurity');
 
@@ -33,6 +34,10 @@ class ApiServer {
     this.serviceManager = serviceManager;
     this.wrapperGenerator = wrapperGenerator;
     this.backupManager = backupManager;
+    // Sync e retenção são opcionalmente injetados: o painel serve as telas
+    // mesmo sem eles, e cada rota responde 503 em vez de derrubar o servidor.
+    this.syncManager = opts.syncManager || null;
+    this.retentionManager = opts.retentionManager || null;
 
     this.app = express();
     this.server = null;
@@ -40,6 +45,9 @@ class ApiServer {
     this.apiKey = config.getSetting('ApiKey', '');
 
     this.auth = new WebAuth(config, logger);
+    // Quem entra é webAuth; o que a pessoa faz depois é webPermissions. Sem o
+    // setting WebUserPermissions configurado, todo login permitido faz tudo.
+    this.permissions = opts.permissions || new WebPermissions(config, logger);
     this.metrics = new SystemMetrics(logger, {
       intervalMs: config.getSetting('MetricsIntervalMs', SystemMetrics.DEFAULT_INTERVAL_MS),
     });
@@ -102,6 +110,17 @@ class ApiServer {
 
   _audit(req, action, details) {
     this.logger.audit(action, Object.assign({}, details, this._actor(req)));
+  }
+
+  /**
+   * Middleware de escopo por tela (ver webPermissions.js).
+   *
+   * Registrado na rota, ele roda depois da autenticação e do CSRF - os dois
+   * são middlewares globais em setupMiddleware - então o 403 só responde a quem
+   * já entrou, e a chave de API continua passando direto.
+   */
+  _need(scope) {
+    return this.permissions.requireScope(scope);
   }
 
   setupMiddleware() {
@@ -203,6 +222,8 @@ class ApiServer {
     this._metricsRoutes();
     this._taskRoutes();
     this._backupRoutes();
+    this._syncRoutes();
+    this._retentionRoutes();
     this._serviceRoutes();
     this._runRoutes();
     this._scriptRoutes();
@@ -405,13 +426,16 @@ class ApiServer {
         // O token acompanha o /api/me porque é a primeira chamada da página:
         // uma ida a menos antes de poder escrever qualquer coisa.
         csrfToken: u.sid ? security.csrfToken(this.auth.secret, u.sid) : null,
+        // Aditivo: o painel esconde o que esta pessoa não pode fazer, mas quem
+        // decide é o servidor - esconder botão não é controle de acesso.
+        permissions: this.permissions.summarize(u.login),
       });
     });
   }
 
   // ─── Resource monitor ───
   _metricsRoutes() {
-    this.app.get('/api/metrics', (req, res) => {
+    this.app.get('/api/metrics', this._need('monitor:view'), (req, res) => {
       const limit = parseInt(req.query.limit, 10) || 300;
       const current = this.metrics.current();
       res.json(Object.assign({ history: this.metrics.getHistory(limit) }, current));
@@ -419,7 +443,7 @@ class ApiServer {
 
     // Server-sent events: one long-lived connection per viewer, pushed from the
     // single sampler rather than polled per client.
-    this.app.get('/api/metrics/stream', (req, res) => {
+    this.app.get('/api/metrics/stream', this._need('monitor:view'), (req, res) => {
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache, no-transform',
@@ -461,7 +485,7 @@ class ApiServer {
       });
     });
 
-    this.app.get('/api/tasks', (req, res) => {
+    this.app.get('/api/tasks', this._need('tasks:view'), (req, res) => {
       let tasks = this.taskManager.getAllTasks();
       if (req.query.enabled !== undefined) {
         const enabled = req.query.enabled === 'true';
@@ -477,13 +501,13 @@ class ApiServer {
       res.json({ success: true, data: tasks, count: tasks.length });
     });
 
-    this.app.get('/api/tasks/:id', (req, res) => {
+    this.app.get('/api/tasks/:id', this._need('tasks:view'), (req, res) => {
       const task = this.taskManager.getTask(req.params.id);
       if (!task) return res.status(404).json({ error: 'Task not found' });
       res.json({ success: true, data: task });
     });
 
-    this.app.post('/api/tasks', (req, res) => {
+    this.app.post('/api/tasks', this._need('tasks:write'), (req, res) => {
       const { Name, CronExpression, ScriptPath, Arguments, WorkingDirectory, Description, Enabled } = req.body;
       if (!Name || !CronExpression || !ScriptPath) {
         return res.status(400).json({ error: 'Missing required fields: Name, CronExpression, ScriptPath' });
@@ -500,7 +524,7 @@ class ApiServer {
       res.status(201).json({ success: true, data: result });
     });
 
-    this.app.put('/api/tasks/:id', (req, res) => {
+    this.app.put('/api/tasks/:id', this._need('tasks:write'), (req, res) => {
       const existing = this.taskManager.getTask(req.params.id);
       if (!existing) return res.status(404).json({ error: 'Task not found' });
       const data = Object.assign({}, existing, req.body, { Id: req.params.id });
@@ -515,7 +539,7 @@ class ApiServer {
       res.json({ success: true, data: result });
     });
 
-    this.app.delete('/api/tasks/:id', (req, res) => {
+    this.app.delete('/api/tasks/:id', this._need('tasks:delete'), (req, res) => {
       const existing = this.taskManager.getTask(req.params.id);
       if (!existing) return res.status(404).json({ error: 'Task not found' });
       this.taskManager.deleteTask(req.params.id);
@@ -523,7 +547,7 @@ class ApiServer {
       res.json({ success: true, message: `Task "${existing.Name}" deleted` });
     });
 
-    this.app.post('/api/tasks/:id/run', async (req, res) => {
+    this.app.post('/api/tasks/:id/run', this._need('tasks:run'), async (req, res) => {
       const task = this.taskManager.getTask(req.params.id);
       if (!task) return res.status(404).json({ error: 'Task not found' });
       try {
@@ -535,7 +559,7 @@ class ApiServer {
       }
     });
 
-    this.app.get('/api/history', (req, res) => {
+    this.app.get('/api/history', this._need('history:view'), (req, res) => {
       let history = this.taskManager.history || [];
       if (req.query.taskId) history = history.filter(h => h.TaskId === req.query.taskId);
       const limit = parseInt(req.query.limit, 10);
@@ -543,7 +567,7 @@ class ApiServer {
       res.json({ success: true, data: history, count: history.length });
     });
 
-    this.app.post('/api/tasks/:id/attach', (req, res) => {
+    this.app.post('/api/tasks/:id/attach', this._need('tasks:write'), (req, res) => {
       const task = this.taskManager.getTask(req.params.id);
       if (!task) return res.status(404).json({ error: 'Task not found' });
       const { ScriptPath, Arguments, WorkingDirectory } = req.body;
@@ -557,7 +581,9 @@ class ApiServer {
       res.json({ success: true, data: result, message: `Script attached: ${ScriptPath}` });
     });
 
-    this.app.delete('/api/tasks/:id/attach', (req, res) => {
+    // Desvincular é remover, não editar: quem não pode apagar nada também não
+    // desliga o script de uma tarefa.
+    this.app.delete('/api/tasks/:id/attach', this._need('tasks:delete'), (req, res) => {
       const task = this.taskManager.getTask(req.params.id);
       if (!task) return res.status(404).json({ error: 'Task not found' });
       this.taskManager.updateTask(Object.assign({}, task, { ScriptPath: '', Arguments: '', WorkingDirectory: '' }));
@@ -565,7 +591,7 @@ class ApiServer {
       res.json({ success: true, message: `Script detached from "${task.Name}"` });
     });
 
-    this.app.get('/api/tasks/:id/script', (req, res) => {
+    this.app.get('/api/tasks/:id/script', this._need('tasks:view'), (req, res) => {
       const task = this.taskManager.getTask(req.params.id);
       if (!task) return res.status(404).json({ error: 'Task not found' });
       res.json({
@@ -586,28 +612,28 @@ class ApiServer {
       return true;
     };
 
-    this.app.get('/api/backups', (req, res) => {
+    this.app.get('/api/backups', this._need('backups:view'), (req, res) => {
       if (!guard(res)) return;
       // Passwords never leave the machine through this API.
       const data = this.backupManager.getAllProfiles().map(p => Object.assign({}, p, { Password: undefined }));
       res.json({ success: true, data, count: data.length });
     });
 
-    this.app.get('/api/backups/history', (req, res) => {
+    this.app.get('/api/backups/history', this._need('backups:view'), (req, res) => {
       if (!guard(res)) return;
       const limit = parseInt(req.query.limit, 10) || 100;
       const history = (this.backupManager.history || []).slice(0, limit);
       res.json({ success: true, data: history, count: history.length });
     });
 
-    this.app.get('/api/backups/:id', (req, res) => {
+    this.app.get('/api/backups/:id', this._need('backups:view'), (req, res) => {
       if (!guard(res)) return;
       const profile = this.backupManager.getProfile(req.params.id);
       if (!profile) return res.status(404).json({ error: 'Backup profile not found' });
       res.json({ success: true, data: Object.assign({}, profile, { Password: undefined }) });
     });
 
-    this.app.post('/api/backups', (req, res) => {
+    this.app.post('/api/backups', this._need('backups:write'), (req, res) => {
       if (!guard(res)) return;
       const { Name } = req.body || {};
       if (!Name) return res.status(400).json({ error: 'Name is required' });
@@ -621,7 +647,7 @@ class ApiServer {
       res.status(201).json({ success: true, data: Object.assign({}, result, { Password: undefined }) });
     });
 
-    this.app.put('/api/backups/:id', (req, res) => {
+    this.app.put('/api/backups/:id', this._need('backups:write'), (req, res) => {
       if (!guard(res)) return;
       const existing = this.backupManager.getProfile(req.params.id);
       if (!existing) return res.status(404).json({ error: 'Backup profile not found' });
@@ -641,7 +667,7 @@ class ApiServer {
       res.json({ success: true, data: Object.assign({}, result, { Password: undefined }) });
     });
 
-    this.app.delete('/api/backups/:id', (req, res) => {
+    this.app.delete('/api/backups/:id', this._need('backups:delete'), (req, res) => {
       if (!guard(res)) return;
       const existing = this.backupManager.getProfile(req.params.id);
       if (!existing) return res.status(404).json({ error: 'Backup profile not found' });
@@ -653,8 +679,9 @@ class ApiServer {
     });
 
     // Testar conexão pede a senha, que é a única vez em que ela entra por aqui -
-    // e mesmo assim não é gravada nem devolvida.
-    this.app.post('/api/backups/test-connection', async (req, res) => {
+    // e mesmo assim não é gravada nem devolvida. Só lê, então pede só a leitura
+    // da tela: um perfil de backup não é coisa de quem não pode ver a lista.
+    this.app.post('/api/backups/test-connection', this._need('backups:view'), async (req, res) => {
       if (!guard(res)) return;
       const { profileId, Host, Port, User, Password } = req.body || {};
       const alvo = profileId ? this.backupManager.getProfile(profileId) : { Host, Port, User, Password };
@@ -670,7 +697,7 @@ class ApiServer {
       }
     });
 
-    this.app.post('/api/backups/databases', async (req, res) => {
+    this.app.post('/api/backups/databases', this._need('backups:view'), async (req, res) => {
       if (!guard(res)) return;
       const { profileId, Host, Port, User, Password } = req.body || {};
       const alvo = profileId ? this.backupManager.getProfile(profileId) : { Host, Port, User, Password };
@@ -682,7 +709,7 @@ class ApiServer {
       }
     });
 
-    this.app.post('/api/backups/:id/run', async (req, res) => {
+    this.app.post('/api/backups/:id/run', this._need('backups:run'), async (req, res) => {
       if (!guard(res)) return;
       const profile = this.backupManager.getProfile(req.params.id);
       if (!profile) return res.status(404).json({ error: 'Backup profile not found' });
@@ -694,6 +721,285 @@ class ApiServer {
         });
         res.json({ success: true, data: result });
       } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+  }
+
+  // ─── Sync (sincronismo de pastas) ───
+  //
+  // A senha do destino (SMB/FTP/SFTP) nunca sai daqui: nem na listagem, nem no
+  // corpo de um erro. E um corpo sem Password no PUT significa "não mexa na
+  // senha", exatamente como no backup - o painel não a devolve, então "ausente"
+  // não pode virar "apagada".
+  _syncRoutes() {
+    const guard = (res) => {
+      if (!this.syncManager) { res.status(503).json({ error: 'Sync manager unavailable' }); return false; }
+      return true;
+    };
+    const semSenha = (profile) => Object.assign({}, profile, { Password: undefined });
+    const pastaDe = (body) => (body && (body.dir || body.path || body.folder)) || '';
+    // O motor de destino trabalha no formato dele (path/host/port/user/password)
+    // - o mesmo que syncManager monta na execução, para testar a conexão pelas
+    // mesmas regras que vão valer na hora de rodar.
+    const destinoDe = (fonte) => ({
+      path: fonte.DestPath || fonte.path || '',
+      host: fonte.Host || fonte.host || '',
+      port: fonte.Port || fonte.port || null,
+      user: fonte.User || fonte.user || '',
+      password: fonte.Password || fonte.password || '',
+    });
+
+    this.app.get('/api/sync', this._need('sync:view'), (req, res) => {
+      if (!guard(res)) return;
+      const data = this.syncManager.getAllProfiles().map(semSenha);
+      res.json({ success: true, data, count: data.length });
+    });
+
+    // Literais antes de '/api/sync/:id': o Express casa na ordem de registro, e
+    // 'engines' seria lido como id.
+    this.app.get('/api/sync/engines', this._need('sync:view'), (req, res) => {
+      if (!guard(res)) return;
+      const data = require('./sync/engines').list();
+      res.json({ success: true, data, count: data.length });
+    });
+
+    // Analisar, simular, previsualizar e testar conexão só LEEM: percorrem o
+    // disco (ou abrem uma conexão) e nada é apagado. Por isso pedem a leitura da
+    // tela - igual ao test-connection de backup.
+    this.app.post('/api/sync/analyze', this._need('sync:view'), (req, res) => {
+      if (!guard(res)) return;
+      const body = req.body || {};
+      try {
+        res.json({
+          success: true,
+          data: this.syncManager.analyzeFolder(pastaDe(body), {
+            useNames: body.useNames,
+            useMetadata: body.useMetadata,
+            extensions: body.extensions || body.FileExtensions,
+          }),
+        });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    this.app.post('/api/sync/plan', this._need('sync:view'), async (req, res) => {
+      if (!guard(res)) return;
+      const body = Object.assign({}, req.body || {});
+      // Rascunho: ou vem no corpo, ou vem como um perfil salvo que o painel
+      // ajustou antes de simular. A senha usada é a do perfil - e não volta na
+      // resposta, que só traz o que seria copiado ou apagado.
+      let draft = (body.draft && typeof body.draft === 'object') ? Object.assign({}, body.draft) : body;
+      if (body.profileId) {
+        const saved = this.syncManager.getProfile(body.profileId);
+        if (!saved) return res.status(404).json({ error: 'Sync profile not found' });
+        draft = Object.assign({}, saved, draft);
+      }
+      try {
+        res.json({ success: true, data: await this.syncManager.previewSyncPlan(draft) });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    this.app.post('/api/sync/retention/preview', this._need('sync:view'), (req, res) => {
+      if (!guard(res)) return;
+      const body = req.body || {};
+      try {
+        res.json({
+          success: true,
+          data: this.syncManager.previewRetention(pastaDe(body), body.Retention || body.retention || {}),
+        });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    this.app.post('/api/sync/test-connection', this._need('sync:view'), async (req, res) => {
+      if (!guard(res)) return;
+      const body = req.body || {};
+      // O que veio no corpo vence o perfil salvo: o painel está testando o que a
+      // pessoa acabou de digitar, não o que ficou gravado.
+      let fonte = body;
+      if (body.profileId) {
+        const saved = this.syncManager.getProfile(body.profileId);
+        if (!saved) return res.status(404).json({ error: 'Sync profile not found' });
+        fonte = Object.assign({}, saved, body);
+      }
+      const engineId = body.Engine || body.engine || fonte.Engine || 'local';
+      try {
+        const dest = destinoDe(fonte);
+        const result = await require('./sync/engines').get(engineId).testConnection(dest);
+        this._audit(req, 'SYNC_CONNECTION_TESTED_WEB', {
+          targetType: 'sync', target: body.profileId || dest.path,
+          after: { engine: engineId, success: !!(result && result.success) },
+        });
+        res.json({ success: true, data: result });
+      } catch (e) {
+        this.logger.log('WARN', `Sync connection test failed: ${e.message}`);
+        res.status(502).json({ error: e.message });
+      }
+    });
+
+    this.app.get('/api/sync/:id', this._need('sync:view'), (req, res) => {
+      if (!guard(res)) return;
+      const profile = this.syncManager.getProfile(req.params.id);
+      if (!profile) return res.status(404).json({ error: 'Sync profile not found' });
+      res.json({ success: true, data: semSenha(profile) });
+    });
+
+    this.app.post('/api/sync', this._need('sync:write'), (req, res) => {
+      if (!guard(res)) return;
+      const body = req.body || {};
+      if (!body.Name) return res.status(400).json({ error: 'Name is required' });
+      const result = this.syncManager.createProfile(body);
+      if (result && result.success === false) return res.status(400).json({ error: result.message });
+      this._audit(req, 'SYNC_PROFILE_CREATED_WEB', {
+        targetType: 'sync', target: (result && result.Id) || body.Name,
+        before: null, after: { Name: body.Name, SourcePath: body.SourcePath, DestPath: body.DestPath, Engine: result && result.Engine },
+      });
+      res.status(201).json({ success: true, data: semSenha(result) });
+    });
+
+    this.app.put('/api/sync/:id', this._need('sync:write'), (req, res) => {
+      if (!guard(res)) return;
+      const existing = this.syncManager.getProfile(req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Sync profile not found' });
+
+      const data = Object.assign({}, existing, req.body, { Id: req.params.id });
+      // Ausente, vazio ou null é "não mexa na senha": o painel não a devolve, e
+      // um null vindo do formulário não pode virar senha apagada.
+      if (req.body.Password == null || req.body.Password === '') data.Password = existing.Password;
+
+      const result = this.syncManager.updateProfile(data);
+      if (!result) return res.status(404).json({ error: 'Sync profile not found' });
+      this._audit(req, 'SYNC_PROFILE_UPDATED_WEB', {
+        targetType: 'sync', target: req.params.id,
+        before: { Name: existing.Name, SourcePath: existing.SourcePath, DestPath: existing.DestPath, CronExpression: existing.CronExpression, Enabled: existing.Enabled },
+        after: { Name: data.Name, SourcePath: data.SourcePath, DestPath: data.DestPath, CronExpression: data.CronExpression, Enabled: data.Enabled },
+      });
+      res.json({ success: true, data: semSenha(result) });
+    });
+
+    this.app.delete('/api/sync/:id', this._need('sync:delete'), (req, res) => {
+      if (!guard(res)) return;
+      const existing = this.syncManager.getProfile(req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Sync profile not found' });
+      this.syncManager.deleteProfile(req.params.id);
+      this._audit(req, 'SYNC_PROFILE_DELETED_WEB', {
+        targetType: 'sync', target: req.params.id, before: { Name: existing.Name, SourcePath: existing.SourcePath }, after: null,
+      });
+      res.json({ success: true, message: `Sync profile "${existing.Name}" deleted` });
+    });
+
+    // Executar copia e apaga no destino (mirror + retenção): é 'run', não
+    // 'write'. Só quem pode executar chega perto.
+    this.app.post('/api/sync/:id/run', this._need('sync:run'), async (req, res) => {
+      if (!guard(res)) return;
+      const profile = this.syncManager.getProfile(req.params.id);
+      if (!profile) return res.status(404).json({ error: 'Sync profile not found' });
+      try {
+        const result = await this.syncManager.executeSync(req.params.id);
+        this._audit(req, 'SYNC_EXECUTED_WEB', {
+          targetType: 'sync', target: req.params.id,
+          after: { profile: profile.Name, success: !!(result && result.success), copied: result && result.copied, deleted: result && result.deleted },
+        });
+        res.json({ success: true, data: result });
+      } catch (e) {
+        this.logger.error('Web sync execution failed', e);
+        res.status(500).json({ error: e.message });
+      }
+    });
+  }
+
+  // ─── Retenção (agenda de limpeza de uma pasta) ───
+  //
+  // Executar apaga arquivos de verdade - mesmo peso do sync, mesmo 'run'.
+  _retentionRoutes() {
+    const guard = (res) => {
+      if (!this.retentionManager) { res.status(503).json({ error: 'Retention manager unavailable' }); return false; }
+      return true;
+    };
+
+    this.app.get('/api/retention', this._need('retention:view'), (req, res) => {
+      if (!guard(res)) return;
+      const data = this.retentionManager.getAllProfiles();
+      res.json({ success: true, data, count: data.length });
+    });
+
+    this.app.get('/api/retention/:id', this._need('retention:view'), (req, res) => {
+      if (!guard(res)) return;
+      const profile = this.retentionManager.getProfile(req.params.id);
+      if (!profile) return res.status(404).json({ error: 'Retention profile not found' });
+      res.json({ success: true, data: profile });
+    });
+
+    this.app.post('/api/retention', this._need('retention:write'), (req, res) => {
+      if (!guard(res)) return;
+      let created;
+      try {
+        created = this.retentionManager.createProfile(req.body);
+      } catch (e) {
+        // Validação de nome, pasta e política: é erro do pedido, não do servidor.
+        return res.status(400).json({ error: e.message });
+      }
+      this._audit(req, 'RETENTION_PROFILE_CREATED_WEB', {
+        targetType: 'retention-profile', target: created.Id,
+        before: null, after: { Name: created.Name, FolderPath: created.FolderPath, CronExpression: created.CronExpression },
+      });
+      res.status(201).json({ success: true, data: created });
+    });
+
+    this.app.put('/api/retention/:id', this._need('retention:write'), (req, res) => {
+      if (!guard(res)) return;
+      const existing = this.retentionManager.getProfile(req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Retention profile not found' });
+      let updated;
+      try {
+        updated = this.retentionManager.updateProfile(Object.assign({}, req.body, { Id: req.params.id }));
+      } catch (e) {
+        return res.status(400).json({ error: e.message });
+      }
+      if (!updated) return res.status(404).json({ error: 'Retention profile not found' });
+      this._audit(req, 'RETENTION_PROFILE_UPDATED_WEB', {
+        targetType: 'retention-profile', target: req.params.id,
+        before: { Name: existing.Name, FolderPath: existing.FolderPath, CronExpression: existing.CronExpression, Enabled: existing.Enabled },
+        after: { Name: updated.Name, FolderPath: updated.FolderPath, CronExpression: updated.CronExpression, Enabled: updated.Enabled },
+      });
+      res.json({ success: true, data: updated });
+    });
+
+    this.app.delete('/api/retention/:id', this._need('retention:delete'), (req, res) => {
+      if (!guard(res)) return;
+      const existing = this.retentionManager.getProfile(req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Retention profile not found' });
+      try {
+        this.retentionManager.deleteProfile(req.params.id);
+      } catch (e) {
+        return res.status(400).json({ error: e.message });
+      }
+      this._audit(req, 'RETENTION_PROFILE_DELETED_WEB', {
+        targetType: 'retention-profile', target: req.params.id, before: { Name: existing.Name, FolderPath: existing.FolderPath }, after: null,
+      });
+      res.json({ success: true, message: `Retention profile "${existing.Name}" deleted` });
+    });
+
+    // Rodar a agenda é o botão que apaga: cada arquivo sai daqui com nome do
+    // autor e IP no log de auditoria.
+    this.app.post('/api/retention/:id/run', this._need('retention:run'), async (req, res) => {
+      if (!guard(res)) return;
+      const profile = this.retentionManager.getProfile(req.params.id);
+      if (!profile) return res.status(404).json({ error: 'Retention profile not found' });
+      try {
+        const result = await this.retentionManager.runProfile(req.params.id);
+        this._audit(req, 'RETENTION_EXECUTED_WEB', {
+          targetType: 'retention-profile', target: req.params.id,
+          after: { profile: profile.Name, folder: profile.FolderPath, ok: !!(result && result.ok), deleted: result && result.deleted },
+        });
+        res.json({ success: true, data: result });
+      } catch (e) {
+        this.logger.error('Web retention execution failed', e);
         res.status(500).json({ error: e.message });
       }
     });
@@ -715,7 +1021,9 @@ class ApiServer {
       restart: { metodo: 'restartService', audit: 'SERVICE_RESTARTED_WEB' },
     };
 
-    this.app.post('/api/services/:name/:action', (req, res) => {
+    // Parar e reiniciar um serviço derrubam o que roda na máquina: é 'run',
+    // não 'write'. Só quem pode executar chega perto.
+    this.app.post('/api/services/:name/:action', this._need('services:run'), (req, res) => {
       if (!guard(res)) return;
       const acao = ACOES[req.params.action];
       if (!acao) return res.status(400).json({ error: 'Unknown action' });
@@ -732,7 +1040,7 @@ class ApiServer {
       res.json({ success: true, message: result.message });
     });
 
-    this.app.delete('/api/services/:name', (req, res) => {
+    this.app.delete('/api/services/:name', this._need('services:delete'), (req, res) => {
       if (!guard(res)) return;
       const nome = req.params.name;
       const servico = (this.serviceManager.getAllServices() || []).find(s => s.Name === nome);
@@ -756,19 +1064,19 @@ class ApiServer {
       return true;
     };
 
-    this.app.get('/api/runs', (req, res) => {
+    this.app.get('/api/runs', this._need('runs:view'), (req, res) => {
       if (!guard(res)) return;
       res.json({ success: true, data: this.runRegistry.active(), recent: this.runRegistry.recent() });
     });
 
-    this.app.get('/api/runs/target/:targetId', (req, res) => {
+    this.app.get('/api/runs/target/:targetId', this._need('runs:view'), (req, res) => {
       if (!guard(res)) return;
       res.json({ success: true, data: this.runRegistry.activeFor(req.params.targetId) });
     });
 
     // Depois de /target/: o Express casa na ordem de registro, e :id casaria
     // com a palavra "target" primeiro.
-    this.app.get('/api/runs/:id', (req, res) => {
+    this.app.get('/api/runs/:id', this._need('runs:view'), (req, res) => {
       if (!guard(res)) return;
       const sinceSeq = parseInt(req.query.since, 10) || 0;
       const detail = this.runRegistry.detail(req.params.id, sinceSeq);
@@ -792,7 +1100,7 @@ class ApiServer {
 
     const MAX_BYTES = 8 * 1024 * 1024;
 
-    this.app.get('/api/scripts', (req, res) => {
+    this.app.get('/api/scripts', this._need('scripts:view'), (req, res) => {
       const dir = raiz();
       let arquivos = [];
       try {
@@ -807,7 +1115,7 @@ class ApiServer {
       res.json({ success: true, data: arquivos, count: arquivos.length, dir });
     });
 
-    this.app.get('/api/scripts/:name', (req, res) => {
+    this.app.get('/api/scripts/:name', this._need('scripts:view'), (req, res) => {
       const nome = security.safeFileName(req.params.name);
       if (!nome) return res.status(400).json({ error: 'Invalid file name' });
       const full = security.safeJoin(raiz(), nome);
@@ -818,7 +1126,7 @@ class ApiServer {
     // O corpo vem em base64 num JSON: evita uma dependência de multipart e
     // deixa o limite de tamanho explícito nesta rota, em vez de afrouxar o
     // limite global por causa de uma só.
-    this.app.post('/api/scripts', express.json({ limit: '12mb' }), (req, res) => {
+    this.app.post('/api/scripts', this._need('scripts:write'), express.json({ limit: '12mb' }), (req, res) => {
       const nome = security.safeFileName((req.body || {}).name);
       if (!nome) {
         return res.status(400).json({
@@ -859,7 +1167,7 @@ class ApiServer {
       res.status(existia ? 200 : 201).json({ success: true, data: { name: nome, path: full, size: buffer.length } });
     });
 
-    this.app.delete('/api/scripts/:name', (req, res) => {
+    this.app.delete('/api/scripts/:name', this._need('scripts:delete'), (req, res) => {
       const nome = security.safeFileName(req.params.name);
       if (!nome) return res.status(400).json({ error: 'Invalid file name' });
       const full = security.safeJoin(raiz(), nome);
@@ -883,7 +1191,7 @@ class ApiServer {
 
   // ─── Everything else ───
   _miscRoutes() {
-    this.app.get('/api/logs', (req, res) => {
+    this.app.get('/api/logs', this._need('logs:view'), (req, res) => {
       const limit = parseInt(req.query.limit, 10) || 200;
       // From disk, so the web UI also sees what the service did.
       const logs = this.logger.getRecentLogsFromDisk
@@ -892,7 +1200,30 @@ class ApiServer {
       res.json({ success: true, data: logs, count: logs.length });
     });
 
-    this.app.get('/api/services', (req, res) => {
+    this.app.get('/api/logs/errors', this._need('logs:view'), (req, res) => {
+      const limit = parseInt(req.query.limit, 10) || 300;
+      const read = primary => typeof this.logger[primary] === 'function'
+        ? this.logger[primary](limit)
+        : (typeof this.logger[primary.replace('FromDisk', '')] === 'function' ? this.logger[primary.replace('FromDisk', '')](limit) : []);
+      const data = read('getRecentErrorsFromDisk');
+      res.json({ success: true, data: data || [], count: (data || []).length });
+    });
+
+    this.app.get('/api/logs/audit', this._need('logs:view'), (req, res) => {
+      const limit = parseInt(req.query.limit, 10) || 300;
+      const read = primary => typeof this.logger[primary] === 'function'
+        ? this.logger[primary](limit)
+        : (typeof this.logger[primary.replace('FromDisk', '')] === 'function' ? this.logger[primary.replace('FromDisk', '')](limit) : []);
+      const data = read('getRecentAuditFromDisk');
+      res.json({ success: true, data: data || [], count: (data || []).length });
+    });
+
+    this.app.get('/api/logs/stats', this._need('logs:view'), (req, res) => {
+      const stats = typeof this.logger.getStats === 'function' ? this.logger.getStats() : {};
+      res.json({ success: true, data: stats });
+    });
+
+    this.app.get('/api/services', this._need('services:view'), (req, res) => {
       const services = this.serviceManager ? this.serviceManager.getAllServices() : [];
       res.json({ success: true, data: services, count: services.length });
     });
@@ -908,7 +1239,7 @@ class ApiServer {
       });
     });
 
-    this.app.get('/api/calendar', (req, res) => {
+    this.app.get('/api/calendar', this._need('calendar:view'), (req, res) => {
       try {
         const calendar = require('./calendarData');
         const from = new Date(req.query.from || Date.now() - 7 * 86400000);
@@ -1089,6 +1420,7 @@ th{color:var(--text2);text-transform:uppercase;font-size:10px;letter-spacing:.5p
   <h2 id="auth">Authentication</h2>
   <p style="font-size:13px;color:var(--text2)">If an API key is configured in the desktop app (Settings → API Key), include it in every request:</p>
   <pre>curl -H "X-API-Key: YOUR_KEY" http://localhost:${this.port}/api/tasks</pre>
+  <p style="font-size:13px;color:var(--text2)">A browser session signed in with GitHub can be limited per screen (view / write / run / delete) in the <code>WebUserPermissions</code> setting; a call outside the account's scopes answers <code>403 Forbidden</code> with the scope it needed. API key requests are not limited that way.</p>
 
   <h2 id="tasks">Tasks</h2>
 

@@ -1,5 +1,5 @@
 // main.js - Electron Main Process (with System Tray + Autostart + Audit Logging + Service Mode)
-const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, Notification, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { execSync } = require('child_process');
@@ -17,6 +17,7 @@ const RetentionManager = require('./retentionManager');
 const KyrionService = require('./kyrionService');
 const paths = require('./paths');
 const { SchedulerCore, ROLE_GUI, readOwner } = require('./schedulerCore');
+const WebPermissions = require('./webPermissions');
 const RunRegistry = require('./runRegistry');
 
 // ─── Single instance ───
@@ -47,6 +48,7 @@ let scheduler;
 let runs;
 let wrapperGenerator;
 let apiServer;
+let webPermissions;
 let backupManager;
 let syncManager;
 let retentionManager;
@@ -278,6 +280,7 @@ function initComponents() {
   cronParser = new CronParser();
   logger = new Logger(logsDir);
   config = new ConfigManager(configDir, 'default');
+  webPermissions = new WebPermissions(config, logger);
   // Tracks in-flight runs so the UI can show progress and live output.
   runs = new RunRegistry();
   taskManager = new TaskManager(config, logger, cronParser, runs);
@@ -310,7 +313,10 @@ function syncWebInterface() {
   const shouldHost = enabled && scheduler && scheduler.isOwner;
 
   if (shouldHost && (!apiServer || !apiServer.isRunning())) {
-    apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator, backupManager);
+    // Sync e retenção vão junto: sem eles as telas do painel respondem 503.
+    apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator, backupManager, {
+      syncManager, retentionManager, permissions: webPermissions,
+    });
     apiServer.start()
       .then((info) => logger.log('INFO', `Web interface started on ${info.url}`))
       .catch((err) => logger.error('Web interface failed to start', err));
@@ -952,6 +958,39 @@ function registerIPC() {
     }
   });
 
+  // ─── Local Backup Artifacts ───
+  // The renderer sends a profile id and a file NAME, never a path. The path is
+  // rebuilt here from the profile's own folder and checked, so a tampered
+  // history file or a hostile renderer cannot aim Explorer somewhere else. No
+  // `explorer.exe /select` on the command line: the argument would be
+  // re-parsed by the shell, and shell.* takes the path as a value.
+  ipcMain.handle('reveal-backup-artifact', (e, profileId, name) => {
+    try {
+      const target = require('./backupArtifacts').findArtifact(backupManager, profileId, name);
+      if (!target.ok) return target;
+      shell.showItemInFolder(target.filePath);
+      logger.audit('BACKUP_ARTIFACT_REVEALED', {
+        targetType: 'backup', target: profileId, after: { file: target.fileName }
+      });
+      return { ok: true, fileName: target.fileName, folder: target.folder };
+    } catch (err) {
+      return { ok: false, reason: 'artifact.notFound' };
+    }
+  });
+  ipcMain.handle('open-backup-folder', async (e, profileId) => {
+    try {
+      const target = require('./backupArtifacts').findFolder(backupManager, profileId);
+      if (!target.ok) return target;
+      // openPath resolves with an error string instead of throwing, and a
+      // non-empty one means Explorer never got there.
+      const failure = await shell.openPath(target.folder);
+      if (failure) return { ok: false, reason: 'artifact.folderNotFound' };
+      return { ok: true, folder: target.folder };
+    } catch (err) {
+      return { ok: false, reason: 'artifact.folderNotFound' };
+    }
+  });
+
   // ─── Backup NSSM Deployment ───
   ipcMain.handle('deploy-backup-nssm', async (e, profileId) => {
     try {
@@ -1042,7 +1081,9 @@ function registerIPC() {
   ipcMain.handle('api-server-start', async (e, port) => {
     try {
       if (apiServer && apiServer.isRunning()) return { success: false, message: 'API server already running' };
-      apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator, backupManager);
+      apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator, backupManager, {
+        syncManager, retentionManager, permissions: webPermissions,
+      });
       const result = await apiServer.start(port);
       config.setSetting('ApiEnabled', true);
       if (port) config.setSetting('ApiPort', port);
@@ -1244,7 +1285,7 @@ function registerIPC() {
   // ─── Web access control (GitHub allowlist) ───
   ipcMain.handle('get-web-access', () => {
     const raw = config.getSetting('WebAllowedUsers', []);
-    const users = Array.isArray(raw) ? raw : String(raw || '').split(/[\s,;]+/).filter(Boolean);
+    const users = WebPermissions.normalizeList(raw);
     return {
       clientId: config.getSetting('GithubClientId', ''),
       // Never send the secret back to the renderer; only whether one is set.
@@ -1253,6 +1294,12 @@ function registerIPC() {
       bindAll: config.getSetting('ApiBindAll', false),
       port: config.getSetting('ApiPort', 7600),
       users,
+      permissions: {
+        screens: WebPermissions.SCREENS,
+        actions: WebPermissions.ACTIONS,
+        table: webPermissions.table(),
+        users: Object.fromEntries(users.map(login => [login, webPermissions.forLogin(login).list()])),
+      },
     };
   });
 
@@ -1279,9 +1326,8 @@ function registerIPC() {
     if (!/^[A-Za-z0-9-]{1,39}$/.test(name)) {
       return { success: false, message: 'Login do GitHub inválido' };
     }
-    const raw = config.getSetting('WebAllowedUsers', []);
-    const users = Array.isArray(raw) ? raw.slice() : [];
-    if (users.some(u => u.toLowerCase() === name.toLowerCase())) {
+    const users = WebPermissions.normalizeList(config.getSetting('WebAllowedUsers', []));
+    if (users.some(u => u === name.toLowerCase())) {
       return { success: false, message: 'Esse login já está na lista' };
     }
     users.push(name);
@@ -1292,13 +1338,38 @@ function registerIPC() {
 
   ipcMain.handle('remove-web-user', (e, login) => {
     const name = String(login || '').trim();
-    const raw = config.getSetting('WebAllowedUsers', []);
-    const users = (Array.isArray(raw) ? raw : []).filter(u => u.toLowerCase() !== name.toLowerCase());
+    const users = WebPermissions.normalizeList(config.getSetting('WebAllowedUsers', []))
+      .filter(u => u !== name.toLowerCase());
     config.setSetting('WebAllowedUsers', users);
+    const table = webPermissions.table();
+    if (table && typeof table === 'object' && !Array.isArray(table)) {
+      delete table[name.toLowerCase()];
+      config.setSetting('WebUserPermissions', table);
+    }
     // Kick the account out now rather than letting its session run its course.
     if (apiServer && apiServer.auth) apiServer.auth.revokeUser(name);
     logger.audit('WEB_USER_REVOKED', { targetType: 'web', target: name, before: { login: name } });
     return { success: true, users };
+  });
+
+  ipcMain.handle('set-web-user-permissions', (e, login, scopes) => {
+    const name = String(login || '').trim().replace(/^@/, '').toLowerCase();
+    if (!name) return { success: false, message: 'Informe um login do GitHub' };
+    const allowed = WebPermissions.normalizeList(config.getSetting('WebAllowedUsers', []));
+    if (!allowed.includes(name)) return { success: false, message: 'O login não está na lista de acesso' };
+    const requested = WebPermissions.normalizeList(scopes);
+    if (requested.some(scope => !WebPermissions.isValidScope(scope))) {
+      return { success: false, message: 'Contém escopo desconhecido' };
+    }
+    const table = webPermissions.table() && typeof webPermissions.table() === 'object' && !Array.isArray(webPermissions.table())
+      ? { ...webPermissions.table() }
+      : {};
+    table[name] = requested;
+    config.setSetting('WebUserPermissions', table);
+    logger.audit('WEB_USER_PERMISSIONS_CHANGED', {
+      targetType: 'web', target: name, after: { login: name, scopes: requested },
+    });
+    return { success: true, permissions: webPermissions.summarize(name) };
   });
 
   ipcMain.handle('get-web-sessions', () => {

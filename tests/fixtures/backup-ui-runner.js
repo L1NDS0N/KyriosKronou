@@ -19,6 +19,8 @@ app.whenReady().then(async () => {
       let activeStats = 0;
       let maxActiveStats = 0;
       let mysqldumpChecks = 0;
+      const revealCalls = [];
+      const folderCalls = [];
       window.api = {
         getBackupProfiles: async () => [
           { Id: 'legacy', Name: 'Legacy profile', Host: 'localhost', Port: 3306, BackupPath: 'C:/Backups', CronExpression: '0 2 * * *', Databases: ['app'], Enabled: true },
@@ -36,6 +38,29 @@ app.whenReady().then(async () => {
         },
         createBackupProfile: async () => ({ success: false, message: 'Destination is read-only' }),
         updateBackupProfile: async () => ({ success: true }),
+        getBackupHistory: async () => ({ success: true, history: [
+          {
+            Id: 'run-1', ProfileId: 'normal', Timestamp: new Date(2026, 0, 2, 3, 4, 5).toISOString(),
+            Status: 'Partial', Duration: '1.2s', Databases: ['app', 'billing', 'legacy'],
+            TotalSize: 10, TotalSizeHuman: '1.0 KB', LogPath: 'C:/logs/backup.log',
+            Results: [
+              { database: 'app', success: true, sizeHuman: '1.0 KB', fileName: 'app_20260102_030405.sql', filePath: 'D:/Backups/app_20260102_030405.sql', remoteOnly: false },
+              { database: 'billing', success: true, sizeHuman: 'no servidor', fileName: '', filePath: '', remoteOnly: true },
+              { database: 'legacy', success: false, sizeHuman: '0 B', message: 'mysqldump exited with 2', fileName: '', filePath: '', remoteOnly: false }
+            ]
+          }
+        ] }),
+        revealBackupArtifact: async (profileId, name) => {
+          revealCalls.push({ profileId, name });
+          // The file was removed after upload (KeepLocal off).
+          if (name === 'app_20260102_030405.sql') return { ok: false, reason: 'artifact.notFound' };
+          return { ok: true, fileName: name };
+        },
+        openBackupFolder: async (profileId) => {
+          folderCalls.push(profileId);
+          if (profileId === 'legacy') return { ok: false, reason: 'artifact.folderNotFound' };
+          return { ok: true, folder: 'D:/Backups' };
+        },
       };
 
       await backupPage.load();
@@ -47,7 +72,25 @@ app.whenReady().then(async () => {
         statusHost: !!document.getElementById('mysqldump-status'),
       };
 
+      window.__toasts.length = 0;
+      await backupPage.showHistory('normal');
+      const artifactButtons = [...document.querySelectorAll('[data-backup-artifact]')];
+      const artifactLabels = artifactButtons.map(b => b.textContent.trim());
+      artifactButtons[0].click();
+      await new Promise(resolve => setTimeout(resolve, 30));
+      artifactButtons[1].click();
+      await new Promise(resolve => setTimeout(resolve, 30));
+      const history = {
+        buttons: artifactButtons.length,
+        artifactLabels,
+        revealCalls,
+        folderCalls,
+        rowToggled: document.querySelector('.bh-entry').classList.contains('expanded'),
+        toasts: window.__toasts.map(t => t.type),
+      };
+
       backupPage.showCreateModal();
+      window.__toasts.length = 0;
       backupPage.currentStep = 4;
       backupPage._renderWizard();
       backupPage.draft.BackupPath = 'E:/Backups';
@@ -59,6 +102,7 @@ app.whenReady().then(async () => {
 
       return {
         list,
+        history,
         save: {
           modalOpen: !document.getElementById('modal-overlay').classList.contains('hidden'),
           hideCalls: window.__hideCalls,

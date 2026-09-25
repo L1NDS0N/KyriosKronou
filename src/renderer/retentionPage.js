@@ -702,6 +702,7 @@ class RetentionPage {
           <span class="badge ${statusClass}">${retEsc(status || i18n.t('retention.neverRun'))}</span>
           <label class="toggle-switch"><input type="checkbox" ${p.Enabled ? 'checked' : ''} onchange="retentionPage.toggleScheduleProfile('${retEsc(p.Id)}', this.checked)"><span class="toggle-slider"></span></label>
           <button class="btn-outline btn-sm" onclick="retentionPage.runScheduleProfile('${retEsc(p.Id)}')"><i data-lucide="play"></i> ${retEsc(i18n.t('retention.runProfile'))}</button>
+          <button class="btn-secondary-sm" onclick="retentionPage.showRetentionHistory('${retEsc(p.Id)}')" title="${retEsc(i18n.t('history.title'))}"><i data-lucide="history"></i></button>
           <button class="btn-secondary-sm" onclick="retentionPage.editScheduleProfile('${retEsc(p.Id)}')" title="${retEsc(i18n.t('profile.edit'))}"><i data-lucide="pencil"></i></button>
           <button class="btn-danger" onclick="retentionPage.deleteScheduleProfile('${retEsc(p.Id)}')" title="${retEsc(i18n.t('profile.delete'))}"><i data-lucide="trash-2"></i></button>
         </div>
@@ -754,9 +755,20 @@ class RetentionPage {
     const d = this.scheduleDraft;
     showModal(`
       <h2><i data-lucide="calendar-clock"></i> ${retEsc(i18n.t(this.editingProfileId ? 'retention.editProfile' : 'retention.newProfile'))}</h2>
-      <label class="form-label">${retEsc(i18n.t('retention.profileName'))}</label>
+      <div class="modal-steps">
+        <div class="modal-step active">${retEsc(i18n.t('retention.profileStepPolicy'))}</div>
+        <div class="modal-step active">${retEsc(i18n.t('retention.profileStepSchedule'))}</div>
+        <div class="modal-step active">${retEsc(i18n.t('retention.profileStepEnable'))}</div>
+      </div>
+      <div class="modal-help"><i data-lucide="shield-alert"></i><span>${retEsc(i18n.t('retention.profileHelp'))}</span></div>
+      <div class="modal-summary">
+        <div class="modal-summary-item"><span class="modal-summary-label">${retEsc(i18n.t('retention.folderLabel'))}</span><span class="modal-summary-value mono">${retEsc(this.folder)}</span></div>
+        <div class="modal-summary-item"><span class="modal-summary-label">${retEsc(i18n.t('retention.colDelete'))}</span><span class="modal-summary-value">${this.preview && this.preview.delete ? this.preview.delete.length : 0}</span></div>
+        <div class="modal-summary-item"><span class="modal-summary-label">${retEsc(i18n.t('retention.summaryKeep'))}</span><span class="modal-summary-value">${this.preview && this.preview.kept ? this.preview.kept.length : 0}</span></div>
+      </div>
+      <label class="form-label" data-tip="${retEsc(i18n.t('retention.tipProfileName'))}">${retEsc(i18n.t('retention.profileName'))}</label>
       <input type="text" class="form-input" id="ret-profile-name" value="${retEsc(d.Name)}" oninput="retentionPage.scheduleDraft.Name=this.value">
-      <label class="form-label" style="margin-top:12px">${retEsc(i18n.t('summary.schedule'))}</label>
+      <label class="form-label" style="margin-top:12px" data-tip="${retEsc(i18n.t('retention.tipProfileCron'))}">${retEsc(i18n.t('summary.schedule'))}</label>
       <input type="text" class="form-input mono" id="ret-profile-cron" value="${retEsc(d.CronExpression)}" oninput="retentionPage.scheduleDraft.CronExpression=this.value">
       <label class="check-row" style="margin-top:14px"><input type="checkbox" ${d.Enabled ? 'checked' : ''} onchange="retentionPage.scheduleDraft.Enabled=this.checked"><span>${retEsc(i18n.t('wizard.enableProfile'))}</span></label>
       <div class="modal-actions"><button class="btn-ghost" onclick="hideModal()">${retEsc(i18n.t('taskModal.cancel'))}</button><button class="btn-glow" data-retention-save onclick="retentionPage.saveScheduleProfile()" ${this.preview && this.preview.ok && this.previewKey === this._currentPreviewKey() ? '' : 'disabled'}>${retEsc(i18n.t('retention.saveProfile'))}</button></div>
@@ -797,6 +809,53 @@ class RetentionPage {
     } catch (e) {
       showToast(e.message || i18n.t('retention.profileSaveFailed'), 'error');
     }
+  }
+
+  showRetentionHistory(id) {
+    const profile = this.profiles.find(item => item.Id === id);
+    if (!profile) return;
+    const entries = Array.isArray(profile.History) ? profile.History : [];
+    const rows = entries.length ? entries.map((entry, index) => `
+      <button class="th-entry row-clickable" data-retention-history-index="${index}">
+        <div class="th-row">
+          <span class="th-icon">${entry.Status === 'Success' ? '✅' : entry.Status === 'Partial' ? '⚠️' : '❌'}</span>
+          <span class="th-time">${retEsc(new Date(entry.Timestamp).toLocaleString())}</span>
+          <span class="th-status badge badge-${entry.Status === 'Success' ? 'active' : entry.Status === 'Partial' ? 'warn' : 'error'}">${retEsc(entry.Status)}</span>
+          <i data-lucide="chevron-right" class="th-chevron"></i>
+        </div>
+      </button>`).join('') : `<div class="modal-empty">${retEsc(i18n.t('retention.noRunHistory'))}</div>`;
+    showModal(`
+      <h2><i data-lucide="history"></i> ${retEsc(profile.Name)} &mdash; ${retEsc(i18n.t('history.title'))}</h2>
+      <div class="modal-summary">
+        <div class="modal-summary-item"><span class="modal-summary-label">${retEsc(i18n.t('retention.folderLabel'))}</span><span class="modal-summary-value mono">${retEsc(profile.FolderPath)}</span></div>
+        <div class="modal-summary-item"><span class="modal-summary-label">${retEsc(i18n.t('history.entries'))}</span><span class="modal-summary-value">${entries.length}</span></div>
+      </div>
+      <div class="modal-help"><i data-lucide="mouse-pointer-click"></i><span>${retEsc(i18n.t('history.clickForDetail'))}</span></div>
+      <div class="task-history-list">${rows}</div>
+      <div class="modal-actions"><button class="btn-ghost" onclick="hideModal()">${retEsc(i18n.t('backup.close'))}</button></div>
+    `, true);
+    const list = document.querySelector('.task-history-list');
+    if (list) list.onclick = (event) => {
+      const row = event.target.closest('[data-retention-history-index]');
+      if (row) this.showRetentionRunDetail(id, Number(row.dataset.retentionHistoryIndex));
+    };
+    if (window.lucide) lucide.createIcons();
+  }
+
+  showRetentionRunDetail(id, index = 0) {
+    const profile = this.profiles.find(item => item.Id === id);
+    if (!profile) return;
+    const historyEntry = Array.isArray(profile.History) ? profile.History[index] : null;
+    const source = historyEntry || profile.LastResult || {};
+    showRunDetail({
+      Name: profile.Name,
+      Status: historyEntry ? historyEntry.Status : profile.LastStatus,
+      Timestamp: historyEntry ? historyEntry.Timestamp : profile.LastRun,
+      FolderPath: profile.FolderPath,
+      CronExpression: profile.CronExpression,
+      Message: source.Error || JSON.stringify(source, null, 2),
+      Results: source.Folders,
+    }, 'retention');
   }
 
   async toggleScheduleProfile(id, enabled) {

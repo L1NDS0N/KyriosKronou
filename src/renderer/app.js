@@ -4,6 +4,9 @@ let allHistory = [];
 let currentFilter = 'all';
 let smartCron = null;
 let autoRefreshTimer = null;
+// Rows currently drawn in the dashboard activity table, so a click can hand
+// the original entry to the detail modal without re-encoding it in markup.
+let recentActivityRows = [];
 
 
 // ============================================================
@@ -224,27 +227,37 @@ async function refreshDashboard() {
     // ─── Recent activity: tasks and backups on one timeline ───
     const rows = [];
     for (const h of allHistory.slice(0, 10)) {
-      rows.push({ ts: h.Timestamp, what: h.TaskName, kind: i18n.t('dash.kindTask'), ok: h.Status === 'Success', status: h.Status, duration: h.Duration });
+      rows.push({ ts: h.Timestamp, what: h.TaskName, kind: i18n.t('dash.kindTask'), ok: h.Status === 'Success', status: h.Status, duration: h.Duration, entry: h, entryKind: 'task' });
     }
     for (const h of backupHistory.slice(0, 10)) {
-      rows.push({ ts: h.Timestamp, what: h.ProfileName, kind: i18n.t('dash.kindBackup'), ok: h.Status === 'Success', status: h.Status, duration: h.Duration });
+      rows.push({ ts: h.Timestamp, what: h.ProfileName, kind: i18n.t('dash.kindBackup'), ok: h.Status === 'Success', status: h.Status, duration: h.Duration, entry: h, entryKind: 'backup' });
     }
     rows.sort((a, b) => new Date(b.ts) - new Date(a.ts));
 
+    recentActivityRows = rows.slice(0, 10);
+
     const tbody = document.getElementById('recent-body');
     const empty = document.getElementById('recent-empty');
-    if (!rows.length) {
+    if (!recentActivityRows.length) {
       tbody.innerHTML = '';
       empty.style.display = 'block';
     } else {
       empty.style.display = 'none';
-      tbody.innerHTML = rows.slice(0, 10).map(r =>
-        '<tr>' +
-        '<td>' + formatTime(r.ts) + '</td>' +
-        '<td>' + escHtml(r.what || '-') + ' <span class="badge badge-info" style="font-size:9px">' + r.kind + '</span></td>' +
+      tbody.innerHTML = recentActivityRows.map((r, i) =>
+        '<tr class="row-clickable" data-activity-index="' + i + '" title="' + escAttr(i18n.t('dash.activityClickHint')) + '">' +
+        '<td>' + escHtml(formatTime(r.ts)) + '</td>' +
+        '<td>' + escHtml(r.what || '-') + ' <span class="badge badge-info" style="font-size:9px">' + escHtml(r.kind) + '</span></td>' +
         '<td><span class="badge badge-' + (r.ok ? 'success' : 'error') + '">' + escHtml(r.status) + '</span></td>' +
         '<td>' + escHtml(r.duration || '-') + '</td>' +
         '</tr>').join('');
+      // Delegated, so the raw entry is passed as data and never re-escaped
+      // into an inline handler.
+      tbody.onclick = (e) => {
+        const row = e.target.closest('[data-activity-index]');
+        if (!row) return;
+        const item = recentActivityRows[+row.dataset.activityIndex];
+        if (item) showRunDetail(item.entry, item.entryKind);
+      };
     }
 
     lucide.createIcons();
@@ -414,7 +427,7 @@ function renderTasks() {
   list.innerHTML = filtered.map(t => {
     return `
     <div class="task-card clickable ${t.Enabled ? '' : 'task-disabled'}"
-         onclick="editTask('${t.Id}')" title="${escHtml(i18n.t('tasks.clickToEdit'))}">
+         onclick="editTask('${escHandler(t.Id)}')" title="${escHtml(i18n.t('tasks.clickToEdit'))}">
       <div class="task-info">
         <div class="task-name">${escHtml(t.Name)}
           ${window.RunMonitor ? RunMonitor.runningBadge(t.Id) : ''}
@@ -425,12 +438,12 @@ function renderTasks() {
       </div>
       <div class="task-actions" onclick="event.stopPropagation()">
         <label class="toggle-switch" title="${escHtml(i18n.t('tasks.toggleEnabled'))}" style="margin-right:4px">
-          <input type="checkbox" ${t.Enabled ? 'checked' : ''} onchange="toggleTaskEnabled('${t.Id}', this.checked)">
+          <input type="checkbox" ${t.Enabled ? 'checked' : ''} onchange="toggleTaskEnabled('${escHandler(t.Id)}', this.checked)">
           <span class="toggle-slider"></span>
         </label>
-        <button class="btn-glow btn-sm" onclick="runTask('${t.Id}')"><i data-lucide="play"></i>${i18n.t('tasks.run')}</button>
-        <button class="btn-secondary-sm" onclick="showTaskHistory('${t.Id}')" title="${escHtml(i18n.t('profile.history'))}"><i data-lucide="history"></i></button>
-        <button class="btn-danger" onclick="deleteTask('${t.Id}','${escHtml(t.Name)}')" title="${escHtml(i18n.t('profile.delete'))}"><i data-lucide="trash-2"></i></button>
+        <button class="btn-glow btn-sm" onclick="runTask('${escHandler(t.Id)}')"><i data-lucide="play"></i>${i18n.t('tasks.run')}</button>
+        <button class="btn-secondary-sm" onclick="showTaskHistory('${escHandler(t.Id)}')" title="${escHtml(i18n.t('profile.history'))}"><i data-lucide="history"></i></button>
+        <button class="btn-danger" onclick="deleteTask('${escHandler(t.Id)}','${escHandler(t.Name)}')" title="${escHtml(i18n.t('profile.delete'))}"><i data-lucide="trash-2"></i></button>
       </div>
     </div>`;
   }).join('');
@@ -443,32 +456,58 @@ function renderTasks() {
 document.getElementById('search-tasks').addEventListener('input', renderTasks);
 
 // ─── Quick Create Panel ───
-let quickPreviewTimer = null;
+//
+// Off by default: the textarea is a power-user shortcut, and a panel of empty
+// syntax instructions sitting above the task list pushed the actual work down
+// the screen. The choice is remembered, so it opens only where it was left.
+const QUICK_CREATE_KEY = 'tasks.quickCreate';
+
+function applyQuickCreateState(open, persist) {
+  const panel = document.getElementById('quick-create-panel');
+  const btn = document.getElementById('btn-toggle-quick');
+  if (!panel || !btn) return;
+  panel.classList.toggle('hidden', !open);
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (persist) {
+    try { localStorage.setItem(QUICK_CREATE_KEY, open ? 'true' : 'false'); } catch (e) { /* private mode */ }
+  }
+  if (open) {
+    renderQuickTasks();
+    const input = document.getElementById('quick-input');
+    if (input && input.value.trim()) updateQuickPreview();
+  }
+  lucide.createIcons();
+}
+
 document.getElementById('btn-toggle-quick').addEventListener('click', () => {
   const panel = document.getElementById('quick-create-panel');
-  panel.classList.toggle('hidden');
-  lucide.createIcons();
-  if (!panel.classList.contains('hidden')) {
-    renderQuickTasks();
-    document.getElementById('quick-input').focus();
+  const open = panel.classList.contains('hidden');
+  applyQuickCreateState(open, true);
+  if (open) {
+    const input = document.getElementById('quick-input');
+    if (input) input.focus();
   }
 });
+
+let quickCreateOpen = false;
+try { quickCreateOpen = localStorage.getItem(QUICK_CREATE_KEY) === 'true'; } catch (e) { quickCreateOpen = false; }
+applyQuickCreateState(quickCreateOpen, false);
 
 function renderQuickTasks() {
   const container = document.getElementById('quick-tasks-list');
   if (!container) return;
   if (allTasks.length === 0) { container.innerHTML = ''; return; }
 
-  let html = `<div class="quick-tasks-header"><i data-lucide="list"></i> Existing Tasks <span class="quick-tasks-count">${allTasks.length}</span></div>`;
+  let html = `<div class="quick-tasks-header"><i data-lucide="list"></i> ${escHtml(i18n.t('quick.existingTasks'))} <span class="quick-tasks-count">${allTasks.length}</span></div>`;
   html += allTasks.map(t => {
     const line = `${t.CronExpression} | ${t.Name} | ${t.ScriptPath || ''}${t.Arguments ? ' | ' + t.Arguments : ''}${t.Description ? ' | ' + t.Description : ''}`;
     return `
-    <div class="quick-task-row" onclick="loadTaskToEditor('${escAttr(line)}', '${t.Id}')" title="Click to load into editor">
+    <div class="quick-task-row" onclick="loadTaskToEditor('${escHandler(line)}', '${escHandler(t.Id)}')" data-tip="${escAttr(i18n.t('quick.clickToLoad'))}">
       <span class="qtr-dot ${t.Enabled ? 'active' : 'disabled'}"></span>
       <span class="qtr-name">${escHtml(t.Name)}</span>
       <span class="qtr-cron">${escHtml(t.CronExpression)}</span>
       <span class="qtr-script">${escHtml(t.ScriptPath)}</span>
-      <span class="qtr-edit-hint"><i data-lucide="arrow-left" style="width:11px;height:11px;"></i> load</span>
+      <span class="qtr-edit-hint"><i data-lucide="arrow-left" style="width:11px;height:11px;"></i> ${escHtml(i18n.t('quick.load'))}</span>
     </div>`;
   }).join('');
   container.innerHTML = html;
@@ -488,49 +527,82 @@ function loadTaskToEditor(line, taskId) {
   textarea.focus();
   // Trigger preview update
   textarea.dispatchEvent(new Event('input'));
-  showToast('Task loaded into editor', 'info');
+  showToast(i18n.t('quick.loaded'), 'info');
 }
+
+let quickPreviewTimer = null;
+let quickPreviewToken = 0;
 
 document.getElementById('quick-input').addEventListener('input', () => {
   clearTimeout(quickPreviewTimer);
-  quickPreviewTimer = setTimeout(() => {
-    const text = document.getElementById('quick-input').value;
-    const parser = new CronParser();
-    const results = parseQuickLines(text, parser);
-    renderQuickPreview(results);
-  }, 200);
+  quickPreviewTimer = setTimeout(() => updateQuickPreview(), 250);
 });
+
+/**
+ * Preview is asynchronous now: validating a cron means asking the main process,
+ * which is the only place the parser lives. A slow answer for an old keystroke
+ * must not overwrite a newer one, hence the token.
+ */
+async function updateQuickPreview() {
+  const input = document.getElementById('quick-input');
+  if (!input) return;
+  const text = input.value;
+  const token = ++quickPreviewToken;
+  if (!text.trim()) { renderQuickPreview([]); return; }
+
+  const results = await parseQuickLines(text);
+  if (token !== quickPreviewToken) return;
+  renderQuickPreview(results);
+}
 
 document.getElementById('btn-quick-clear').addEventListener('click', () => {
   document.getElementById('quick-input').value = '';
+  quickPreviewToken++;
   renderQuickPreview([]);
 });
 
 document.getElementById('btn-quick-create').addEventListener('click', async () => {
-  const text = document.getElementById('quick-input').value;
-  if (!text.trim()) { showToast('Enter at least one task', 'warning'); return; }
-  const parser = new CronParser();
-  const results = parseQuickLines(text, parser);
-  const valid = results.filter(r => r.valid);
-  if (valid.length === 0) { showToast('No valid tasks to create', 'error'); return; }
+  const input = document.getElementById('quick-input');
+  const text = input ? input.value : '';
+  if (!text.trim()) { showToast(i18n.t('quick.emptyPrompt'), 'warning'); return; }
 
+  const results = await parseQuickLines(text);
+  const valid = results.filter(r => r.valid);
+  if (valid.length === 0) { showToast(i18n.t('quick.noValid'), 'error'); return; }
+
+  const btn = document.getElementById('btn-quick-create');
+  btn.disabled = true;
   let created = 0;
-  for (const r of valid) {
-    await window.api.addTask({
-      Name: r.name,
-      CronExpression: r.cron,
-      ScriptPath: r.script,
-      Arguments: r.args,
-      Description: r.description,
-      Enabled: true
-    });
-    created++;
+  let failed = 0;
+  try {
+    for (const r of valid) {
+      const result = await window.api.addTask({
+        Name: r.name,
+        CronExpression: r.cron,
+        ScriptPath: r.script,
+        Arguments: r.args,
+        Description: r.description,
+        Enabled: true
+      });
+      // A refusal from the main process must not be reported as a success.
+      if (result && result.success === false) { failed++; continue; }
+      created++;
+    }
+  } finally {
+    btn.disabled = false;
   }
-  showToast(`Created ${created} task${created > 1 ? 's' : ''}`, 'success');
-  document.getElementById('quick-input').value = '';
-  renderQuickPreview([]);
-  refreshTasks();
-  refreshDashboard();
+
+  if (created > 0) {
+    showToast(i18n.t('quick.created', { n: created }), 'success');
+    input.value = '';
+    quickPreviewToken++;
+    renderQuickPreview([]);
+    swrInvalidate('tasks');
+    refreshTasks();
+    refreshDashboard();
+  }
+  if (failed > 0) showToast(i18n.t('quick.createFailed', { n: failed }), 'error');
+  if (created === 0 && failed === 0) showToast(i18n.t('quick.noValid'), 'error');
 });
 
 document.getElementById('btn-new-task').addEventListener('click', () => showTaskDialog());
@@ -582,25 +654,39 @@ function showTaskDialog(task = null) {
       ? `<i data-lucide="pencil"></i> ${T('taskModal.editTitle')}`
       : `<i data-lucide="plus-circle"></i> ${T('taskModal.newTitle')}`}</h2>
 
-    <div class="form-section">
+    <div class="modal-steps" role="list">
+      <div class="modal-step active" role="listitem">${T('taskModal.stepIdentity')}</div>
+      <div class="modal-step" role="listitem">${T('taskModal.stepSchedule')}</div>
+      <div class="modal-step" role="listitem">${T('taskModal.stepCommand')}</div>
+      <div class="modal-step" role="listitem">${T('taskModal.stepOptions')}</div>
+    </div>
+
+    <div class="modal-help">
+      <i data-lucide="lightbulb"></i>
+      <span>${T('taskModal.formHelp')}</span>
+    </div>
+
+    <div class="modal-summary" id="task-dialog-summary"></div>
+
+    <div class="form-section" data-step="identity">
       <div class="form-group">
-        <label class="form-label" for="dlg-name">${T('taskModal.name')} *</label>
+        <label class="form-label" for="dlg-name" data-tip="${T('taskModal.tipName')}">${T('taskModal.name')} *</label>
         <input type="text" class="form-input" id="dlg-name" value="${isEdit ? escAttr(task.Name) : ''}" placeholder="${T('taskModal.namePlaceholder')}">
       </div>
     </div>
 
-    <div class="form-section">
-      <div class="form-section-title"><i data-lucide="clock"></i> ${T('taskModal.scheduleSection')}</div>
+    <div class="form-section" data-step="schedule">
+      <div class="form-section-title" data-tip="${T('taskModal.tipSchedule')}"><i data-lucide="clock"></i> ${T('taskModal.scheduleSection')}</div>
       <div id="smart-cron-container"></div>
     </div>
 
-    <div class="form-section">
-      <div class="form-section-title"><i data-lucide="terminal"></i> ${T('taskModal.whatSection')}</div>
+    <div class="form-section" data-step="command">
+      <div class="form-section-title" data-tip="${T('taskModal.tipCommand')}"><i data-lucide="terminal"></i> ${T('taskModal.whatSection')}</div>
       <div class="script-mode-tabs">
-        <button class="script-mode-tab ${!hasInline ? 'active' : ''}" id="tab-file" onclick="scriptEditorSwitchMode('file')">
+        <button type="button" class="script-mode-tab ${!hasInline ? 'active' : ''}" id="tab-file" onclick="scriptEditorSwitchMode('file')">
           <i data-lucide="file-input"></i> ${T('taskModal.tabFile')}
         </button>
-        <button class="script-mode-tab ${hasInline ? 'active' : ''}" id="tab-editor" onclick="scriptEditorSwitchMode('editor')">
+        <button type="button" class="script-mode-tab ${hasInline ? 'active' : ''}" id="tab-editor" onclick="scriptEditorSwitchMode('editor')">
           <i data-lucide="code-2"></i> ${T('taskModal.tabEditor')}
         </button>
       </div>
@@ -608,7 +694,7 @@ function showTaskDialog(task = null) {
       <div id="script-mode-file">
         <div class="input-row">
           <input type="text" class="form-input" id="dlg-script" data-path-input data-path-kind="file" data-path-ext=".ps1,.bat,.cmd,.exe,.vbs,.py" value="${isEdit ? escAttr(task.ScriptPath || '') : ''}" placeholder="C:\\Scripts\\backup.ps1">
-          <button class="btn-outline" onclick="browseScript()"><i data-lucide="folder-open"></i> ${T('taskModal.browse')}</button>
+          <button class="btn-outline" type="button" onclick="browseScript()"><i data-lucide="folder-open"></i> ${T('taskModal.browse')}</button>
         </div>
         <div class="form-hint">${i18n.t('taskModal.supported', {
           ps1: '<code>.ps1</code>', bat: '<code>.bat</code>', cmd: '<code>.cmd</code>', exe: '<code>.exe</code>',
@@ -625,27 +711,27 @@ function showTaskDialog(task = null) {
 
       <div class="form-row" style="margin-top:14px">
         <div class="form-group">
-          <label class="form-label" for="dlg-args">${T('taskModal.arguments')}</label>
+          <label class="form-label" for="dlg-args" data-tip="${T('taskModal.tipArgs')}">${T('taskModal.arguments')}</label>
           <input type="text" class="form-input" id="dlg-args" value="${isEdit ? escAttr(task.Arguments || '') : ''}" placeholder="${T('taskModal.argumentsPlaceholder')}">
         </div>
         <div class="form-group">
-          <label class="form-label" for="dlg-workdir">${T('taskModal.workdir')}</label>
+          <label class="form-label" for="dlg-workdir" data-tip="${T('taskModal.tipWorkdir')}">${T('taskModal.workdir')}</label>
           <input type="text" class="form-input" id="dlg-workdir" data-path-input data-path-kind="directory" value="${isEdit ? escAttr(task.WorkingDirectory || '') : ''}" placeholder="${T('taskModal.optional')}">
         </div>
       </div>
     </div>
 
-    <div class="form-section">
-      <div class="form-section-title"><i data-lucide="settings-2"></i> ${T('taskModal.optionsSection')}</div>
+    <div class="form-section" data-step="options">
+      <div class="form-section-title" data-tip="${T('taskModal.tipOptions')}"><i data-lucide="settings-2"></i> ${T('taskModal.optionsSection')}</div>
       <div class="form-group">
-        <label class="form-label" for="dlg-desc">${T('taskModal.description')}</label>
+        <label class="form-label" for="dlg-desc" data-tip="${T('taskModal.tipDescription')}">${T('taskModal.description')}</label>
         <div class="script-mode-summary">
           <span id="task-description-summary">${_taskDescriptionText ? T('richText.editedDescription') : T('richText.emptyDescription')}</span>
           <button class="btn-outline btn-sm" type="button" id="btn-edit-description" onclick="editTaskDescription()"><i data-lucide="text"></i> ${T('richText.edit')}</button>
         </div>
         <div id="task-description-preview" class="task-desc rich-text-preview"></div>
       </div>
-      <label class="check-row" for="dlg-enabled">
+      <label class="check-row" for="dlg-enabled" data-tip="${T('taskModal.tipEnabled')}">
         <input type="checkbox" id="dlg-enabled" ${isEdit && !task.Enabled ? '' : 'checked'}>
         <span>${T('taskModal.enabled')}
           <span class="check-hint">${T('taskModal.enabledHint')}</span>
@@ -654,22 +740,63 @@ function showTaskDialog(task = null) {
     </div>
 
     <div class="modal-actions">
-      <button class="btn-ghost" onclick="hideModal()">${T('taskModal.cancel')}</button>
-      <button class="btn-glow" id="btn-save-task" onclick="saveTask(${isEdit ? `'${task.Id}'` : 'null'})">${isEdit
+      <button class="btn-ghost" type="button" onclick="hideModal()">${T('taskModal.cancel')}</button>
+      <button class="btn-glow" type="button" id="btn-save-task" onclick="saveTask(${isEdit ? `'${escHandler(task.Id)}'` : 'null'})">${isEdit
         ? `<i data-lucide="save"></i> ${T('taskModal.save')}`
         : `<i data-lucide="plus"></i> ${T('taskModal.create')}`}</button>
     </div>
-  `);
+  `, true);
 
   // Smart cron
-  smartCron = new SmartCronInput('#smart-cron-container', { value: cron });
+  smartCron = new SmartCronInput('#smart-cron-container', { value: cron, excludeId: isEdit ? task.Id : null, onChange: updateTaskDialogSummary });
 
   scriptEditorSwitchMode(_scriptMode, false);
   simpleRichText.renderPreview(document.getElementById('task-description-preview'), { Description: _taskDescriptionText, DescriptionHtml: _taskDescriptionHtml });
 
+  ['dlg-name', 'dlg-script', 'dlg-args', 'dlg-workdir', 'dlg-enabled'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', updateTaskDialogSummary);
+    if (el) el.addEventListener('change', updateTaskDialogSummary);
+  });
+  updateTaskDialogSummary();
+
   // Enter to save
   document.getElementById('dlg-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('btn-save-task').click(); });
   lucide.createIcons();
+}
+
+/**
+ * What this task will be, restated while it is being written. The fields are
+ * spread over four sections; without this the operator cannot see the result
+ * without scrolling back up.
+ */
+function updateTaskDialogSummary() {
+  const host = document.getElementById('task-dialog-summary');
+  if (!host) return;
+  const T = (k) => escHtml(i18n.t(k));
+  const value = (id) => {
+    const el = document.getElementById(id);
+    return el ? String(el.value || '').trim() : '';
+  };
+  const name = value('dlg-name') || T('taskModal.summaryUnnamed');
+  const cron = (smartCron && smartCron.getValue()) || '';
+  const command = _scriptMode === 'editor'
+    ? `${_scriptType.toUpperCase()} · ${T('taskModal.summaryInline')}`
+    : value('dlg-script') || T('taskModal.summaryNoCommand');
+  const args = value('dlg-args');
+  const enabled = document.getElementById('dlg-enabled') && document.getElementById('dlg-enabled').checked;
+
+  const cell = (key, label, valueHtml) =>
+    `<div class="modal-summary-item" data-summary="${key}">
+       <span class="modal-summary-label">${label}</span>
+       <span class="modal-summary-value">${valueHtml}</span>
+     </div>`;
+
+  host.innerHTML =
+    cell('name', T('taskModal.name'), escHtml(name)) +
+    cell('cron', T('history.colCron'), `<code>${escHtml(cron || '-')}</code>`) +
+    cell('command', T('taskModal.summaryCommand'), escHtml(command) + (args ? ` <span style="color:var(--text3)">${escHtml(args)}</span>` : '')) +
+    cell('state', T('history.state'), T(enabled ? 'tasks.enabled' : 'tasks.disabled'));
 }
 
 // Script mode switching
@@ -690,6 +817,7 @@ function scriptEditorSwitchMode(mode, openEditor = true) {
   if (editorTab) editorTab.classList.toggle('active', mode === 'editor');
   if (filePanel) filePanel.style.display = mode === 'file' ? '' : 'none';
   if (editorPanel) editorPanel.style.display = mode === 'editor' ? '' : 'none';
+  if (typeof updateTaskDialogSummary === 'function') updateTaskDialogSummary();
   if (mode !== 'editor' || !openEditor) return;
   scriptEditor.open({
     content: _scriptContent,
@@ -725,6 +853,11 @@ async function saveTask(editId) {
   const btn = document.getElementById('btn-save-task');
 
   try {
+    // The parser lives in the main process, so its answer is the one that
+    // decides whether the task may be saved.
+    const cronOk = await window.api.validateCron(cron);
+    if (!cronOk) { showToast(i18n.t('toast.invalidCron'), 'error'); return; }
+
     let scriptPath = '';
     let scriptContent = '';
     let scriptType = '';
@@ -779,56 +912,197 @@ async function saveTask(editId) {
   }
 }
 
+// ─── Task history ───
+//
+// The list is a preview, not the record: it draws the most recent N runs and
+// every row opens the full entry in its own modal, instead of stretching a
+// scroll container with thousands of blocks (which is what made the entries
+// collapse into each other).
+const HISTORY_PAGE = 50;
+let historyModalTask = null;
+let historyModalEntries = [];
+let historyModalLimit = HISTORY_PAGE;
+
 async function showTaskHistory(taskId) {
   const task = allTasks.find(t => t.Id === taskId);
   if (!task) return;
-  // Ensure history is loaded
-  if (!allHistory || allHistory.length === 0) {
-    allHistory = await window.api.getHistory();
-  }
-  const entries = allHistory.filter(h => h.TaskId === taskId);
 
-  const statusIcon = (s) => s === 'Success' ? '<span style="color:var(--green)">&#10003;</span>' : '<span style="color:var(--red)">&#10007;</span>';
-  const fmtTime = (ts) => {
-    try { const d = new Date(ts); return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR'); } catch { return ts; }
-  };
+  // Always refetch: the cached copy is what the dashboard loaded, and it is
+  // older than the run the user just triggered.
+  try { allHistory = (await window.api.getHistory()) || []; }
+  catch (e) { allHistory = []; }
 
-  const rows = entries.length > 0 ? entries.map((e, i) => `
-    <div class="th-entry" onclick="this.classList.toggle('th-expanded')">
-      <div class="th-row">
-        <span class="th-icon">${statusIcon(e.Status)}</span>
-        <span class="th-time">${fmtTime(e.Timestamp)}</span>
-        <span class="th-duration">${e.Duration || '-'}</span>
-        <span class="th-status badge badge-${e.Status === 'Success' ? 'active' : 'error'}">${e.Status}</span>
-        <i data-lucide="chevron-down" class="th-chevron"></i>
-      </div>
-      <div class="th-output">
-        <div class="th-output-label">Output / Error</div>
-        <pre class="th-output-text">${escHtml(e.Message || 'No output')}</pre>
-      </div>
-    </div>
-  `).join('') : '<div style="text-align:center;padding:24px;color:var(--text3)"><i data-lucide="history" style="width:32px;height:32px;margin-bottom:8px;opacity:.3"></i><p>No execution history yet</p></div>';
+  historyModalTask = task;
+  historyModalEntries = allHistory.filter(h => h.TaskId === taskId);
+  historyModalLimit = HISTORY_PAGE;
+  renderTaskHistoryModal();
+}
+
+function historyStatusIcon(status) {
+  return status === 'Success'
+    ? '<span style="color:var(--green)">&#10003;</span>'
+    : '<span style="color:var(--red)">&#10007;</span>';
+}
+
+function renderTaskHistoryModal() {
+  const task = historyModalTask;
+  if (!task) return;
+  const T = (k, p) => escHtml(i18n.t(k, p));
+  const entries = historyModalEntries;
+  const shown = entries.slice(0, historyModalLimit);
+  const remaining = entries.length - shown.length;
+
+  const rows = shown.length ? shown.map((e, i) => `
+    <button type="button" class="th-entry" data-history-index="${i}">
+      <span class="th-row">
+        <span class="th-icon">${historyStatusIcon(e.Status)}</span>
+        <span class="th-time">${escHtml(formatTime(e.Timestamp))}</span>
+        <span class="th-duration">${escHtml(e.Duration || '-')}</span>
+        <span class="badge badge-${e.Status === 'Success' ? 'success' : 'error'}">${escHtml(e.Status || '-')}</span>
+        <i data-lucide="chevron-right" class="th-chevron"></i>
+      </span>
+    </button>`).join('')
+    : `<div class="modal-empty"><i data-lucide="history"></i><p>${T('history.noHistory')}</p></div>`;
 
   showModal(`
-    <h2><i data-lucide="history"></i> ${escHtml(task.Name)} - History</h2>
-    <div style="display:flex;gap:12px;margin:8px 0 12px;font-size:11px;color:var(--text3)">
-      <span>Cron: <code style="color:var(--text2)">${escHtml(task.CronExpression)}</code></span>
-      <span>Script: <code style="color:var(--text2)">${escHtml(task.ScriptPath || 'inline')}</code></span>
-      <span>Entries: <strong style="color:var(--text2)">${entries.length}</strong></span>
+    <h2><i data-lucide="history"></i> ${escHtml(task.Name)} <span class="modal-title-sub">${T('history.title')}</span></h2>
+
+    <div class="modal-summary" id="task-history-summary"></div>
+
+    <div class="modal-help">
+      <i data-lucide="info"></i>
+      <span>${T('history.clickForDetail')}</span>
     </div>
-    <div class="task-history-list" style="max-height:400px;overflow-y:auto">
+
+    <div class="task-history-list" id="task-history-list" style="max-height:min(48vh,420px);overflow-y:auto">
       ${rows}
     </div>
+
     <div class="modal-actions">
-      <button class="btn-ghost" onclick="hideModal()">Close</button>
-      ${entries.length > 0 ? `<button class="btn-outline btn-sm" onclick="exportTaskHistory('${taskId}')"><i data-lucide="download"></i> Export CSV</button>` : ''}
+      <span class="modal-foot-note">${T(remaining > 0 ? 'history.showingLast' : 'history.totalEntries', { n: shown.length, total: entries.length })}</span>
+      ${remaining > 0 ? `<button class="btn-outline btn-sm" id="task-history-more"><i data-lucide="chevrons-down"></i> ${T('history.loadMore', { n: Math.min(remaining, HISTORY_PAGE) })}</button>` : ''}
+      ${entries.length > 0 ? `<button class="btn-outline btn-sm" onclick="exportTaskHistory('${escHandler(task.Id)}')"><i data-lucide="download"></i> ${T('history.exportCsv')}</button>` : ''}
+      <button class="btn-ghost" onclick="hideModal()">${T('common.close')}</button>
     </div>
-  `);
+  `, true);
+
+  const list = document.getElementById('task-history-list');
+  if (list) {
+    list.onclick = (e) => {
+      const row = e.target.closest('[data-history-index]');
+      if (row) showRunDetail(historyModalEntries[+row.dataset.historyIndex], 'task');
+    };
+  }
+  const more = document.getElementById('task-history-more');
+  if (more) {
+    more.onclick = () => { historyModalLimit += HISTORY_PAGE; renderTaskHistoryModal(); };
+  }
+  // Paging rebuilds the modal, so the summary has to be painted again.
+  refreshHistoryModalSummary();
+}
+
+/** The summary needs the next run, which only the main process can compute. */
+async function refreshHistoryModalSummary() {
+  const task = historyModalTask;
+  const host = document.getElementById('task-history-summary');
+  if (!task || !host) return;
+  renderHistorySummary(host, task, historyModalEntries);
+  try {
+    const next = await window.api.getNextRun(task.CronExpression);
+    if (historyModalTask !== task || !document.getElementById('task-history-summary')) return;
+    const cell = host.querySelector('[data-summary="next"] .modal-summary-value');
+    if (cell) cell.textContent = next ? formatTime(next) : i18n.t('dash.nothingScheduled');
+  } catch (e) { /* the next run is a nicety, not a reason to fail the modal */ }
+}
+
+function renderHistorySummary(host, task, entries) {
+  const T = (k, p) => escHtml(i18n.t(k, p));
+  const failed = entries.filter(e => e.Status !== 'Success').length;
+  const cell = (key, label, value) =>
+    `<div class="modal-summary-item" data-summary="${key}">
+       <span class="modal-summary-label">${label}</span>
+       <span class="modal-summary-value">${value}</span>
+     </div>`;
+
+  host.innerHTML =
+    cell('cron', T('history.colCron'), `<code>${escHtml(task.CronExpression || '-')}</code>`) +
+    cell('script', T('history.colScript'), escHtml(task.ScriptPath || T('history.inlineScript'))) +
+    cell('next', T('dash.nextRun'), escHtml(i18n.t('dash.loadingShort'))) +
+    cell('runs', T('history.entries'), `${entries.length} ${T('history.entriesUnit')}` +
+      (failed ? ` <span style="color:var(--red)">· ${T('history.failedCount', { n: failed })}</span>` : '')) +
+    cell('state', T('history.state'), task.Enabled === false ? T('tasks.disabled') : T('tasks.enabled'));
+}
+
+/**
+ * One execution, in full. Reached from the task history, from the dashboard
+ * activity list and from the history screen, so the three agree on what a run
+ * looks like instead of each growing its own truncated row.
+ */
+function showRunDetail(entry, kind) {
+  if (!entry) return;
+  const T = (k, p) => escHtml(i18n.t(k, p));
+  const kindName = kind || entry._type || 'task';
+  const isBackup = kindName === 'backup';
+  const kindLabel = kindName === 'backup' ? 'dash.kindBackup' : kindName === 'sync' ? 'dash.kindSync' : kindName === 'retention' ? 'dash.kindRetention' : 'dash.kindTask';
+  const at = entry.Timestamp || entry.timestamp;
+  const status = entry.Status || entry.status;
+  const duration = entry.Duration || entry.duration;
+  const name = entry.TaskName || entry.ProfileName || entry.Name || '-';
+  const message = entry.Message != null ? entry.Message : (entry.Output || entry.message || '');
+  const ok = status === 'Success';
+
+  const facts = [
+    ['when', T('history.colTime'), escHtml(at ? formatTime(at) : '-')],
+    ['what', T('history.colWhat'), escHtml(name) + ` <span class="badge badge-info" style="font-size:9px">${T(kindLabel)}</span>`],
+    ['status', T('history.colStatus'), `<span class="badge badge-${ok ? 'success' : 'error'}">${escHtml(status || '-')}</span>`],
+    ['duration', T('history.colDuration'), escHtml(duration || '-')],
+  ];
+  if (isBackup && entry.Databases) {
+    facts.push(['databases', T('backup.databases'), escHtml([].concat(entry.Databases).join(', '))]);
+  }
+  if (entry.TotalSizeHuman) {
+    facts.push(['size', T('backup.sizeLabel'), escHtml(entry.TotalSizeHuman)]);
+  }
+  if (entry.FolderPath) facts.push(['folder', T('history.folder'), escHtml(entry.FolderPath)]);
+  if (entry.CronExpression) facts.push(['cron', T('history.colCron'), escHtml(entry.CronExpression)]);
+
+  const output = String(message == null ? '' : message).trim();
+  const blocks = [];
+  if (output) blocks.push(`<div class="th-output-label">${T('history.outputLabel')}</div><pre class="th-output-text">${escHtml(output)}</pre>`);
+  if (entry.ErrorMessage) blocks.push(`<div class="th-output-label">${T('history.errorLabel')}</div><pre class="th-output-text">${escHtml(entry.ErrorMessage)}</pre>`);
+  // A backup carries its report per database; the whole record is in there.
+  if (Array.isArray(entry.Results) && entry.Results.length) {
+    blocks.push(`<div class="th-output-label">${T('history.resultsLabel')}</div><pre class="th-output-text">${escHtml(JSON.stringify(entry.Results, null, 2))}</pre>`);
+  }
+  if (!blocks.length) blocks.push(`<div class="th-output-label">${T('history.outputLabel')}</div><pre class="th-output-text">${T('history.noOutput')}</pre>`);
+
+  showModal(`
+    <h2><i data-lucide="${ok ? 'check-circle-2' : 'alert-triangle'}"></i> ${escHtml(name)}</h2>
+
+    <div class="modal-summary">
+      ${facts.map(([key, label, value]) => `
+        <div class="modal-summary-item" data-summary="${key}">
+          <span class="modal-summary-label">${label}</span>
+          <span class="modal-summary-value">${value}</span>
+        </div>`).join('')}
+    </div>
+
+    <div class="modal-help">
+      <i data-lucide="terminal"></i>
+      <span>${T('history.detailHelp')}</span>
+    </div>
+
+    <div class="run-detail-output">${blocks.join('')}</div>
+
+    <div class="modal-actions">
+      <button class="btn-ghost" type="button" onclick="hideModal()">${T('common.close')}</button>
+    </div>
+  `, true);
   lucide.createIcons();
 }
 
 function exportTaskHistory(taskId) {
-  const entries = allHistory.filter(h => h.TaskId === taskId);
+  const entries = (allHistory || []).filter(h => h.TaskId === taskId);
   if (entries.length === 0) return;
   const header = 'Timestamp,Status,Duration,Message\n';
   const rows = entries.map(e => {
@@ -853,7 +1127,7 @@ async function deleteTask(id, name) {
     <p style="color:var(--text2);font-size:14px;margin-top:8px;">Are you sure you want to delete "<strong style="color:var(--text)">${escHtml(name)}</strong>"?<br>This action cannot be undone.</p>
     <div class="modal-actions">
       <button class="btn-ghost" onclick="hideModal()">Cancel</button>
-      <button class="btn-danger" onclick="confirmDelete('${id}')"><i data-lucide="trash-2"></i> Delete</button>
+      <button class="btn-danger" onclick="confirmDelete('${escHandler(id)}')"><i data-lucide="trash-2"></i> Delete</button>
     </div>
   `);
 }
@@ -901,7 +1175,7 @@ async function checkTaskServiceStatus(taskId) {
             </div>
             <div class="modal-actions">
               <button class="btn-ghost" onclick="hideModal()">Close</button>
-              <button class="btn-glow" onclick="restartServiceFromBadge('${status.serviceName}')"><i data-lucide="rotate-cw"></i> Restart</button>
+              <button class="btn-glow" onclick="restartServiceFromBadge('${escHandler(status.serviceName)}')"><i data-lucide="rotate-cw"></i> Restart</button>
             </div>
           `);
           lucide.createIcons();
@@ -1043,26 +1317,21 @@ function renderServicesTable(services) {
     const isRunning = s.Status === 'Running';
     const isManaged = s.Name && s.Name.startsWith('Kyrion_');
     const cls = ['svc-row', isManaged ? 'kyrion-managed' : ''].filter(Boolean).join(' ');
-    return `<tr class="${cls}" onclick="editServiceScript('${escAttr(s.Name)}')" title="${escHtml(i18n.t('svc.clickToEdit'))}">
+    return `<tr class="${cls}" onclick="editServiceScript('${escHandler(s.Name)}')" title="${escHtml(i18n.t('svc.clickToEdit'))}">
       <td>${escHtml(s.Name)}${isManaged ? `<span class="badge badge-info" style="font-size:9px;margin-left:6px">${escHtml(i18n.t('svc.managed'))}</span>` : ''}</td>
       <td><span class="badge badge-${isRunning ? 'success' : 'error'}">${escHtml(s.Status)}</span></td>
       <td>${escHtml(s.Application || '-')}</td>
       <td>${escHtml(s.StartupType)}</td>
       <td onclick="event.stopPropagation()">
-        ${!isRunning ? `<button class="btn-secondary-sm" onclick="svcAction('start','${escAttr(s.Name)}')" title="${escHtml(i18n.t('svc.start'))}"><i data-lucide="play"></i></button>` : ''}
-        ${isRunning ? `<button class="btn-secondary-sm" onclick="svcAction('stop','${escAttr(s.Name)}')" title="${escHtml(i18n.t('svc.stop'))}"><i data-lucide="square"></i></button>` : ''}
-        <button class="btn-secondary-sm" onclick="svcAction('restart','${escAttr(s.Name)}')" title="${escHtml(i18n.t('svc.restart'))}"><i data-lucide="rotate-cw"></i></button>
-        <button class="btn-secondary-sm" onclick="cloneService('${escAttr(s.Name)}')" title="${escHtml(i18n.t('svc.clone'))}"><i data-lucide="copy"></i></button>
-        <button class="btn-danger" onclick="svcAction('uninstall','${escAttr(s.Name)}')" title="${escHtml(i18n.t('svc.remove'))}"><i data-lucide="trash-2"></i></button>
+        ${!isRunning ? `<button class="btn-secondary-sm" onclick="svcAction('start','${escHandler(s.Name)}')" title="${escHtml(i18n.t('svc.start'))}"><i data-lucide="play"></i></button>` : ''}
+        ${isRunning ? `<button class="btn-secondary-sm" onclick="svcAction('stop','${escHandler(s.Name)}')" title="${escHtml(i18n.t('svc.stop'))}"><i data-lucide="square"></i></button>` : ''}
+        <button class="btn-secondary-sm" onclick="svcAction('restart','${escHandler(s.Name)}')" title="${escHtml(i18n.t('svc.restart'))}"><i data-lucide="rotate-cw"></i></button>
+        <button class="btn-secondary-sm" onclick="cloneService('${escHandler(s.Name)}')" title="${escHtml(i18n.t('svc.clone'))}"><i data-lucide="copy"></i></button>
+        <button class="btn-danger" onclick="svcAction('uninstall','${escHandler(s.Name)}')" title="${escHtml(i18n.t('svc.remove'))}"><i data-lucide="trash-2"></i></button>
       </td>
     </tr>`;
   }).join('');
   lucide.createIcons();
-}
-
-/** Escape a value being embedded in a single-quoted inline handler. */
-function escAttr(s) {
-  return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
 }
 
 function setServicesRefreshing(on) {
@@ -1285,7 +1554,7 @@ async function editServiceScript(serviceName) {
 
     <div class="modal-actions">
       <button class="btn-ghost" onclick="hideModal()">Cancel</button>
-      <button class="btn-glow" onclick="saveServiceParams('${escAttr(serviceName)}')"><i data-lucide="save"></i> Save</button>
+      <button class="btn-glow" onclick="saveServiceParams('${escHandler(serviceName)}')"><i data-lucide="save"></i> Save</button>
     </div>
   `);
   lucide.createIcons();
@@ -1359,7 +1628,7 @@ async function svcAction(action, name) {
       <p style="color:var(--text3);font-size:12px;margin-top:8px;">This will stop and remove the service. To redeploy, use the Deploy button on the task.</p>
       <div class="modal-actions">
         <button class="btn-ghost" onclick="hideModal()">Cancel</button>
-        <button class="btn-danger" onclick="hideModal();confirmSvcUninstall('${name}')"><i data-lucide="trash-2"></i> Uninstall</button>
+        <button class="btn-danger" onclick="hideModal();confirmSvcUninstall('${escHandler(name)}')"><i data-lucide="trash-2"></i> Uninstall</button>
       </div>
     `);
     lucide.createIcons();
@@ -1484,7 +1753,7 @@ async function showNssmManager() {
   let installOptions = '';
   if (available.length > 0) {
     installOptions = available.map(m => `
-      <button class="btn-glow" style="width:100%;justify-content:center;" onclick="installNssm('${m.name}')">
+      <button class="btn-glow" style="width:100%;justify-content:center;" onclick="installNssm('${escHandler(m.name)}')">
         <i data-lucide="download"></i> Install via ${m.label}
       </button>
     `).join('<div style="height:8px"></div>');
@@ -1597,6 +1866,9 @@ async function downloadNssmManual() {
 // History
 // ============================================================
 let allBackupHistory = [];
+// The merged list currently drawn on the History screen, so a click can hand
+// the entry to the detail modal without re-encoding it in markup.
+let historyScreenRows = [];
 
 async function refreshHistory() {
   setLoading('page-history', true);
@@ -1624,22 +1896,40 @@ function renderHistory() {
   else if (currentFilter === 'week') all = all.filter(h => new Date(h.Timestamp) > new Date(now - 604800000));
   else if (currentFilter === 'month') all = all.filter(h => new Date(h.Timestamp) > new Date(now - 2592000000));
 
+  historyScreenRows = all;
   const tbody = document.getElementById('history-body');
   const empty = document.getElementById('history-empty');
-  if (all.length === 0) { tbody.innerHTML = ''; empty.style.display = 'block'; lucide.createIcons(); return; }
+  if (all.length === 0) { tbody.innerHTML = ''; tbody.onclick = null; empty.style.display = 'block'; lucide.createIcons(); return; }
   empty.style.display = 'none';
-  tbody.innerHTML = all.map(h => {
+  tbody.innerHTML = historyScreenRows.map((h, i) => {
     const isBackup = h._type === 'backup';
-    const typeBadge = isBackup ? '<span class="badge badge-info" style="font-size:9px">backup</span>' : '<span class="badge badge-active" style="font-size:9px">task</span>';
+    const typeBadge = isBackup
+      ? `<span class="badge badge-info" style="font-size:9px">${escHtml(i18n.t('dash.kindBackup'))}</span>`
+      : `<span class="badge badge-active" style="font-size:9px">${escHtml(i18n.t('dash.kindTask'))}</span>`;
     const statusClass = h.Status === 'Success' ? 'success' : 'error';
-    return `<tr style="cursor:${isBackup ? 'pointer' : 'default'}" ${isBackup ? `onclick="backupPage.showHistory('${h.ProfileId}')"` : ''}>
-      <td>${formatTime(h.Timestamp)}</td>
+    return `<tr class="row-clickable" data-history-row="${i}" title="${escAttr(i18n.t('dash.activityClickHint'))}">
+      <td>${escHtml(formatTime(h.Timestamp))}</td>
       <td>${typeBadge} ${escHtml(h.TaskName)}</td>
       <td>${escHtml(h.CronExpression || h.Duration || '')}</td>
-      <td><span class="badge badge-${statusClass}">${h.Status}</span></td>
-      <td>${h.Duration || '-'}</td>
+      <td><span class="badge badge-${statusClass}">${escHtml(h.Status || '-')}</span></td>
+      <td>${escHtml(h.Duration || '-')}</td>
     </tr>`;
   }).join('');
+
+  // Task rows open the run detail; backup rows keep the backup history screen,
+  // which the backup page owns.
+  tbody.onclick = (e) => {
+    const row = e.target.closest('[data-history-row]');
+    if (!row) return;
+    const entry = historyScreenRows[+row.dataset.historyRow];
+    if (!entry) return;
+    if (entry._type === 'backup') {
+      if (entry.ProfileId && window.backupPage) backupPage.showHistory(entry.ProfileId);
+      else showRunDetail(entry, 'backup');
+      return;
+    }
+    showRunDetail(entry, 'task');
+  };
   lucide.createIcons();
 }
 
@@ -1889,8 +2179,32 @@ function formatTime(ts) {
   const d = new Date(ts);
   return d.toLocaleDateString('en-CA') + ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
-function escHtml(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
-function escAttr(s) { return (s || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+function escHtml(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+/** Escape a value that lands inside an HTML attribute (value, title, data-*). */
+function escAttr(s) { return escHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+
+/**
+ * Escape a value that lands inside a single-quoted string literal of an inline
+ * handler, as in onclick="run('...')".
+ *
+ * Backslashes are escaped first, otherwise a Windows path arrives as
+ * C:Scriptsbackup.ps1 (\\b is a backspace) and the whole line silently loses
+ * every folder separator. The ampersand is escaped for the HTML attribute the
+ * literal lives in, and the quote for the JS literal, so a name with an
+ * apostrophe cannot break out of the call.
+ */
+function escHandler(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n');
+}
 async function browseScript() {
   const result = await window.api.openScriptDialog();
   if (result && result.success) document.getElementById('dlg-script').value = result.path;
@@ -2109,6 +2423,8 @@ async function refreshLogs() {
 let logFilters = { text: '', level: '', since: '24h' };
 const LOG_PAGE = 200;
 let logPageSize = LOG_PAGE;
+// The rows currently drawn, resolved by the click handler on the row index.
+let logPageRows = [];
 
 function logsSince() {
   const now = Date.now();
@@ -2260,59 +2576,144 @@ function renderLogsTable() {
   // never destroys it - the previous version did, and the next render then
   // crashed on a null reference.
   if (empty) empty.style.display = rows.length ? 'none' : 'block';
-  if (!rows.length) { wrap.innerHTML = ''; lucide.createIcons(); return; }
+  if (!rows.length) { wrap.innerHTML = ''; logPageRows = []; lucide.createIcons(); return; }
 
   const page = rows.slice(0, logPageSize);
   const more = rows.length - page.length;
+  logPageRows = page;
+
+  // The row keeps only what identifies it; the full entry opens in a modal, so
+  // no cell has to grow a max-height to show the rest.
+  const row = (index, cls, cells) =>
+    `<tr class="${cls} row-clickable" data-log-index="${index}" tabindex="0" title="${escAttr(i18n.t('logs.openDetail'))}">${cells}</tr>`;
 
   let table;
   if (currentLogTab === 'errors') {
-    table = `<table class="logs-table"><thead><tr>
+    table = `<div class="table-wrap table-scroll" data-min="620"><table class="logs-table"><thead><tr>
         <th>${escHtml(i18n.t('logs.colTime'))}</th><th>${escHtml(i18n.t('logs.colLevel'))}</th>
         <th>${escHtml(i18n.t('logs.colMessage'))}</th><th>${escHtml(i18n.t('logs.colDetails'))}</th>
-      </tr></thead><tbody>${page.map(e => `<tr class="log-row-error">
-        <td class="log-ts">${formatTime(e.timestamp)}</td>
+      </tr></thead><tbody>${page.map((e, i) => row(i, 'log-row-error',
+        `<td class="log-ts">${escHtml(formatTime(e.timestamp))}</td>
         <td><span class="log-level error">ERROR</span></td>
         <td class="log-message">${escHtml(e.message)}</td>
-        <td class="log-meta" onclick="this.classList.toggle('expanded')">${e.error ? escHtml(e.error.message) : ''}${e.context ? `<br><span style="color:var(--text3)">${escHtml(JSON.stringify(e.context))}</span>` : ''}</td>
-      </tr>`).join('')}</tbody></table>`;
+        <td class="log-meta">${e.error ? escHtml(e.error.message) : ''}${e.context ? `<br><span style="color:var(--text3)">${escHtml(JSON.stringify(e.context))}</span>` : ''}</td>`
+      )).join('')}</tbody></table></div>`;
   } else if (currentLogTab === 'audit') {
-    table = `<table class="logs-table"><thead><tr>
+    table = `<div class="table-wrap table-scroll" data-min="620"><table class="logs-table"><thead><tr>
         <th>${escHtml(i18n.t('logs.colTime'))}</th><th>${escHtml(i18n.t('logs.colAction'))}</th>
         <th>${escHtml(i18n.t('logs.colActor'))}</th><th>${escHtml(i18n.t('logs.colTarget'))}</th>
         <th>${escHtml(i18n.t('logs.colChange'))}</th>
-      </tr></thead><tbody>${page.map(a => `<tr class="log-row-audit">
-        <td class="log-ts">${formatTime(a.timestamp)}</td>
+      </tr></thead><tbody>${page.map((a, i) => row(i, 'log-row-audit',
+        `<td class="log-ts">${escHtml(formatTime(a.timestamp))}</td>
         <td><span class="log-action">${escHtml(a.action)}</span></td>
         <td class="log-actor">${a.actor ? escHtml(a.actor) : `<span class="muted">${escHtml(i18n.t('logs.system'))}</span>`}${a.ipAddress ? `<br><span class="log-ip">${escHtml(a.ipAddress)}</span>` : ''}</td>
         <td class="log-target">${a.target ? escHtml(String(a.target)) : '-'}</td>
-        <td class="log-meta" onclick="this.classList.toggle('expanded')">${
-          [a.before ? escHtml(i18n.t('logs.before')) + ': ' + escHtml(JSON.stringify(a.before)) : '', a.after ? escHtml(i18n.t('logs.after')) + ': ' + escHtml(JSON.stringify(a.after)) : ''].filter(Boolean).join('<br>') || '-'
-        }</td>
-      </tr>`).join('')}</tbody></table>`;
+        <td class="log-meta">${[
+          a.before ? escHtml(i18n.t('logs.before')) + ': ' + escHtml(JSON.stringify(a.before)) : '',
+          a.after ? escHtml(i18n.t('logs.after')) + ': ' + escHtml(JSON.stringify(a.after)) : '',
+        ].filter(Boolean).join('<br>') || '-'}</td>`
+      )).join('')}</tbody></table></div>`;
   } else {
-    table = `<table class="logs-table"><thead><tr>
+    table = `<div class="table-wrap table-scroll" data-min="620"><table class="logs-table"><thead><tr>
         <th>${escHtml(i18n.t('logs.colTime'))}</th><th>${escHtml(i18n.t('logs.colLevel'))}</th><th>${escHtml(i18n.t('logs.colMessage'))}</th>
-      </tr></thead><tbody>${page.map(l => {
+      </tr></thead><tbody>${page.map((l, i) => {
         const level = (l.level || 'INFO').toLowerCase();
         const rowClass = level === 'error' ? 'log-row-error' : level === 'warn' ? 'log-row-warn' : '';
-        return `<tr class="${rowClass}">
-          <td class="log-ts">${formatTime(l.timestamp)}</td>
+        return row(i, rowClass,
+          `<td class="log-ts">${escHtml(formatTime(l.timestamp))}</td>
           <td><span class="log-level ${level}">${escHtml(l.level || 'INFO')}</span></td>
-          <td class="log-message">${escHtml(l.message)}${l.meta ? `<br><span class="log-meta">${escHtml(JSON.stringify(l.meta))}</span>` : ''}</td>
-        </tr>`;
-      }).join('')}</tbody></table>`;
+          <td class="log-message">${escHtml(l.message)}${l.meta ? `<br><span class="log-meta">${escHtml(JSON.stringify(l.meta))}</span>` : ''}</td>`
+        );
+      }).join('')}</tbody></table></div>`;
   }
 
   // Rendering thousands of rows at once is what made the screen feel stuck.
   if (more > 0) {
-    table += `<button class="btn-ghost logs-more" id="logs-more">${escHtml(i18n.t('logs.loadMore', { n: Math.min(more, LOG_PAGE) }))}</button>`;
+    table += `<button type="button" class="btn-ghost logs-more" id="logs-more">${escHtml(i18n.t('logs.loadMore', { n: Math.min(more, LOG_PAGE) }))}</button>`;
   }
 
   wrap.innerHTML = table;
   const moreBtn = document.getElementById('logs-more');
   if (moreBtn) moreBtn.addEventListener('click', () => { logPageSize += LOG_PAGE; renderLogsTable(); });
 
+  lucide.createIcons();
+}
+
+// One listener for every tab and every page: the host is replaced on each
+// render, the row indexes resolve against whatever is drawn right now.
+(function wireLogRowDetail() {
+  const wrap = document.getElementById('logs-table-wrap');
+  if (!wrap) return;
+  const open = (e) => {
+    const target = e.target.closest('[data-log-index]');
+    if (!target) return;
+    const entry = logPageRows[+target.dataset.logIndex];
+    if (entry) showLogDetail(currentLogTab, entry);
+  };
+  wrap.addEventListener('click', open);
+  wrap.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const target = e.target.closest('[data-log-index]');
+    if (!target) return;
+    e.preventDefault();
+    open(e);
+  });
+})();
+
+/** One log entry in full - the same place the table's truncated cell pointed. */
+function showLogDetail(tab, entry) {
+  if (!entry) return;
+  const T = (k, p) => escHtml(i18n.t(k, p));
+  const facts = [];
+  const blocks = [];
+  const push = (text) => { if (text) blocks.push(text); };
+
+  facts.push(['when', T('logs.colTime'), escHtml(formatTime(entry.timestamp))]);
+
+  if (tab === 'errors') {
+    facts.push(['level', T('logs.colLevel'), '<span class="log-level error">ERROR</span>']);
+    push(`<div class="th-output-label">${T('logs.colMessage')}</div><pre class="th-output-text">${escHtml(entry.message)}</pre>`);
+    if (entry.error && entry.error.message) {
+      push(`<div class="th-output-label">${T('logs.colDetails')}</div><pre class="th-output-text">${escHtml(entry.error.message)}</pre>`);
+    }
+    if (entry.error && entry.error.stack) {
+      push(`<div class="th-output-label">${T('logs.stack')}</div><pre class="th-output-text">${escHtml(entry.error.stack)}</pre>`);
+    }
+    if (entry.context) {
+      push(`<div class="th-output-label">${T('logs.context')}</div><pre class="th-output-text">${escHtml(JSON.stringify(entry.context, null, 2))}</pre>`);
+    }
+  } else if (tab === 'audit') {
+    facts.push(['action', T('logs.colAction'), escHtml(entry.action || '-')]);
+    facts.push(['actor', T('logs.colActor'), escHtml(entry.actor || i18n.t('logs.system')) + (entry.ipAddress ? ` <span class="log-ip">${escHtml(entry.ipAddress)}</span>` : '')]);
+    facts.push(['target', T('logs.colTarget'), escHtml(entry.target ? String(entry.target) : '-')]);
+    if (entry.before) push(`<div class="th-output-label">${T('logs.before')}</div><pre class="th-output-text">${escHtml(JSON.stringify(entry.before, null, 2))}</pre>`);
+    if (entry.after) push(`<div class="th-output-label">${T('logs.after')}</div><pre class="th-output-text">${escHtml(JSON.stringify(entry.after, null, 2))}</pre>`);
+  } else {
+    const level = (entry.level || 'INFO').toUpperCase();
+    facts.push(['level', T('logs.colLevel'), `<span class="log-level ${level.toLowerCase()}">${escHtml(level)}</span>`]);
+    push(`<div class="th-output-label">${T('logs.colMessage')}</div><pre class="th-output-text">${escHtml(entry.message)}</pre>`);
+    if (entry.meta) push(`<div class="th-output-label">${T('logs.meta')}</div><pre class="th-output-text">${escHtml(JSON.stringify(entry.meta, null, 2))}</pre>`);
+  }
+
+  if (!blocks.length) blocks.push(`<pre class="th-output-text">${T('logs.noDetails')}</pre>`);
+
+  showModal(`
+    <h2><i data-lucide="scroll-text"></i> ${T('logs.detailTitle', { tab: T('logs.' + tab) })}</h2>
+
+    <div class="modal-summary">
+      ${facts.map(([key, label, value]) => `
+        <div class="modal-summary-item" data-summary="${key}">
+          <span class="modal-summary-label">${label}</span>
+          <span class="modal-summary-value">${value}</span>
+        </div>`).join('')}
+    </div>
+
+    <div class="run-detail-output">${blocks.join('')}</div>
+
+    <div class="modal-actions">
+      <button class="btn-ghost" type="button" onclick="hideModal()">${T('common.close')}</button>
+    </div>
+  `, true);
   lucide.createIcons();
 }
 
@@ -2388,6 +2789,11 @@ async function refreshWebAccess() {
   if (!list) return;
   try {
     const cfg = await window.api.getWebAccess();
+    if (window.webPermissionsUI) {
+      window.webPermissionsUI.access = cfg;
+      if (!window.webPermissionsUI.selected) window.webPermissionsUI.selected = cfg.users[0] || null;
+      window.webPermissionsUI.render();
+    }
 
     document.getElementById('cfg-gh-client-id').value = cfg.clientId || '';
     document.getElementById('cfg-gh-client-secret').placeholder = cfg.hasClientSecret ? '•••••••• (salvo)' : '••••••••••••';

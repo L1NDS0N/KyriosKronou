@@ -148,6 +148,8 @@ describe('RetentionManager: execution delegates to manual retention', () => {
     expect(calls[0].retentionCfg).to.deep.equal(profile.Retention);
     expect(manager.getProfile(profile.Id)).to.include({ LastStatus: 'Success' });
     expect(manager.getProfile(profile.Id).LastResult.deleted).to.equal(2);
+    expect(manager.getProfile(profile.Id).History).to.have.lengthOf(1);
+    expect(manager.getProfile(profile.Id).History[0]).to.include({ Status: 'Success', Deleted: 2 });
   });
 
   it('uses the real manual retention flow to delete aged content', async () => {
@@ -201,6 +203,7 @@ describe('RetentionManager: execution delegates to manual retention', () => {
     expect(updated.LastRun).to.equal(before.LastRun);
     expect(updated.LastStatus).to.equal('Success');
     expect(updated.LastResult).to.deep.equal(before.LastResult);
+    expect(updated.History).to.deep.equal(before.History);
   });
 
   it('accepts only an ID and prevents concurrent execution of the same profile', async () => {

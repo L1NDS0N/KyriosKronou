@@ -155,27 +155,32 @@ class SyncPage {
     let r;
     try { r = await window.api.getSyncHistory(id); } catch (e) { return; }
     const entries = (r && r.history) || [];
-    const rows = entries.length ? entries.map(e => `
-      <div class="th-entry" onclick="this.classList.toggle('th-expanded')">
+    const rows = entries.length ? entries.map((e, i) => `
+      <div class="th-entry row-clickable" data-sync-history-index="${i}">
         <div class="th-row">
           <span class="th-icon">${e.Status === 'Success' ? '✅' : '❌'}</span>
           <span class="th-time">${new Date(e.Timestamp).toLocaleString()}</span>
           <span class="th-duration">${syncEsc(e.Duration || '-')}</span>
           <span class="th-status badge badge-${e.Status === 'Success' ? 'active' : 'error'}">${syncEsc(e.Status)}</span>
-          <i data-lucide="chevron-down" class="th-chevron"></i>
-        </div>
-        <div class="th-output">
-          <div class="th-output-label">${syncEsc(i18n.t('sync.historyDetail'))}</div>
-          <pre class="th-output-text">${syncEsc(e.Message || '')}${e.RetentionDeleted ? `\n${i18n.t('sync.retentionDeleted', { n: e.RetentionDeleted })}` : ''}</pre>
+          <i data-lucide="chevron-right" class="th-chevron"></i>
         </div>
       </div>`).join('')
-      : `<div style="text-align:center;padding:24px;color:var(--text3)"><p>${syncEsc(i18n.t('sync.noHistory'))}</p></div>`;
+      : `<div class="modal-empty">${syncEsc(i18n.t('sync.noHistory'))}</div>`;
 
     showModal(`
       <h2><i data-lucide="history"></i> ${syncEsc(i18n.t('sync.historyTitle'))}</h2>
-      <div style="max-height:400px;overflow-y:auto">${rows}</div>
+      <div class="modal-summary">
+        <div class="modal-summary-item"><span class="modal-summary-label">${syncEsc(i18n.t('history.entries'))}</span><span class="modal-summary-value">${entries.length}</span></div>
+      </div>
+      <div class="modal-help"><i data-lucide="mouse-pointer-click"></i><span>${syncEsc(i18n.t('history.clickForDetail'))}</span></div>
+      <div class="task-history-list">${rows}</div>
       <div class="modal-actions"><button class="btn-ghost" onclick="hideModal()">${syncEsc(i18n.t('backup.close'))}</button></div>
     `, true);
+    const list = document.querySelector('.task-history-list');
+    if (list) list.onclick = (event) => {
+      const row = event.target.closest('[data-sync-history-index]');
+      if (row) showRunDetail(entries[Number(row.dataset.syncHistoryIndex)], 'sync');
+    };
     if (window.lucide) lucide.createIcons();
   }
 
@@ -225,12 +230,12 @@ class SyncPage {
     const isEdit = !!this.editingId;
     const steps = [i18n.t('sync.stepFolders'), i18n.t('sync.stepRetention'), i18n.t('sync.stepSchedule')];
     const stepTips = [i18n.t('sync.tipFolders'), i18n.t('sync.tipRetention'), i18n.t('sync.tipSchedule')];
-    const stepIcons = ['folder-sync', 'scissors', 'clock'];
 
     showModal(`
       <div class="wizard-layout">
         <div class="wizard-main">
           <h2><i data-lucide="${isEdit ? 'pencil' : 'folder-sync'}"></i> ${syncEsc(i18n.t(isEdit ? 'sync.editTitle' : 'sync.newTitle'))}</h2>
+          <div class="modal-help"><i data-lucide="info"></i><span>${syncEsc(stepTips[this.currentStep])}</span></div>
 
           <div class="wizard-tabs">
             ${steps.map((s, i) => `

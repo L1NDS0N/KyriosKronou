@@ -469,7 +469,7 @@ describe('Web interface: hosted by the service', () => {
   });
 
   it('the server pulls in nothing from electron, so the service can load it', () => {
-    for (const file of ['apiServer.js', 'webAuth.js', 'systemMetrics.js']) {
+    for (const file of ['apiServer.js', 'webAuth.js', 'webPermissions.js', 'backupArtifacts.js', 'systemMetrics.js']) {
       const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'main', file), 'utf8');
       expect(src, `${file} must not require electron`).to.not.match(/require\(['"]electron['"]\)/);
     }

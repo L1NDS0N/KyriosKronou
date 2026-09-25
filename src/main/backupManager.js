@@ -327,16 +327,26 @@ class BackupManager {
       TotalSize: totalSize,
       TotalSizeHuman: this.formatSize(totalSize),
       LogPath: logPath,
-      Results: results.map(r => ({
-        database: r.database,
-        success: r.success,
-        size: r.size || 0,
-        sizeHuman: r.sizeHuman || '0 B',
-        message: r.message || '',
-        stdout: r.stdout || '',
-        stderr: r.stderr || '',
-        uploads: r.uploads || []
-      }))
+      Results: results.map(r => {
+        // Where the artifact ended up, so the UI can offer "show in Explorer"
+        // without inventing a path. A remoteOnly result has no local file: the
+        // name is only what the engine would have used, and keeping it would
+        // point a reveal at a path that does not exist on this machine.
+        const local = !r.remoteOnly && r.filePath ? r.filePath : '';
+        return {
+          database: r.database,
+          success: r.success,
+          size: r.size || 0,
+          sizeHuman: r.sizeHuman || '0 B',
+          message: r.message || '',
+          stdout: r.stdout || '',
+          stderr: r.stderr || '',
+          uploads: r.uploads || [],
+          filePath: local,
+          fileName: local ? path.basename(local) : '',
+          remoteOnly: !!r.remoteOnly
+        };
+      })
     });
 
     this.logger.audit('BACKUP_EXECUTED', {

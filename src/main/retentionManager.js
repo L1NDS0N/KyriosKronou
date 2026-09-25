@@ -218,6 +218,7 @@ class RetentionManager {
         LastRun: null,
         LastStatus: null,
         LastResult: null,
+        History: [],
       };
       profiles.push(record);
       return { ...record };
@@ -244,6 +245,7 @@ class RetentionManager {
         LastRun: current.LastRun,
         LastStatus: current.LastStatus,
         LastResult: current.LastResult,
+        History: Array.isArray(current.History) ? current.History : [],
       };
       profiles[index] = record;
       return { ...record };
@@ -307,6 +309,17 @@ class RetentionManager {
       profile.LastRun = new Date().toISOString();
       profile.LastStatus = status;
       profile.LastResult = result;
+      const entry = Object.fromEntries(Object.entries({
+        Timestamp: profile.LastRun,
+        Status: status,
+        Deleted: result && result.deleted,
+        Freed: result && result.freed,
+        Planned: result && result.planned,
+        Failed: result && result.failed,
+        Error: result && result.error,
+        Folders: result && result.folders,
+      }).filter(([, value]) => value !== undefined));
+      profile.History = [entry, ...(Array.isArray(profile.History) ? profile.History : [])].slice(0, 100);
     });
   }
 

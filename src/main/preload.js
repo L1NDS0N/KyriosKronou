@@ -72,6 +72,10 @@ contextBridge.exposeInMainWorld('api', {
   downloadMysqldump: () => ipcRenderer.invoke('download-mysqldump'),
   setMysqldumpPath: (p) => ipcRenderer.invoke('set-mysqldump-path', p),
   getBackupHistory: (profileId) => ipcRenderer.invoke('get-backup-history', profileId),
+  // A file NAME, never a path: the main process rebuilds the path from the
+  // profile folder and refuses anything that lands outside it.
+  revealBackupArtifact: (profileId, name) => ipcRenderer.invoke('reveal-backup-artifact', profileId, name),
+  openBackupFolder: (profileId) => ipcRenderer.invoke('open-backup-folder', profileId),
 
   // Sync (folder synchronization + old-content retention)
   getSyncProfiles: () => ipcRenderer.invoke('get-sync-profiles'),
@@ -148,6 +152,7 @@ contextBridge.exposeInMainWorld('api', {
   setWebAccess: (data) => ipcRenderer.invoke('set-web-access', data),
   addWebUser: (login) => ipcRenderer.invoke('add-web-user', login),
   removeWebUser: (login) => ipcRenderer.invoke('remove-web-user', login),
+  setWebUserPermissions: (login, scopes) => ipcRenderer.invoke('set-web-user-permissions', login, scopes),
   getWebSessions: () => ipcRenderer.invoke('get-web-sessions'),
   onSchedulerOwnershipChanged: (cb) => ipcRenderer.on('scheduler-ownership-changed', (_e, data) => cb(data)),
 

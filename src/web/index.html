@@ -18,7 +18,11 @@
       <div class="brand-name">Κύριος Χρόνος</div>
     </div>
 
-    <div class="nav-item active" data-page="monitor">
+    <div class="nav-item active" data-page="dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+      Dashboard
+    </div>
+    <div class="nav-item" data-page="monitor">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
       Monitor
     </div>
@@ -29,6 +33,14 @@
     <div class="nav-item" data-page="backups">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>
       Backups
+    </div>
+    <div class="nav-item" data-page="sync">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h11l-3-3"/><path d="M20 17H9l3 3"/></svg>
+      Sincronismo
+    </div>
+    <div class="nav-item" data-page="retention">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 4v16"/><circle cx="6" cy="20" r="2"/><circle cx="6" cy="4" r="2"/><path d="M20 4L8.5 15.5"/><path d="M14 5l5 5"/><path d="M17 9l3-3"/></svg>
+      Retenção
     </div>
     <div class="nav-item" data-page="services">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>
@@ -41,6 +53,10 @@
     <div class="nav-item" data-page="history">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3v6h6"/><path d="M3.5 9a9 9 0 1 0 2.1-3.4L3 9"/><path d="M12 8v4l3 2"/></svg>
       Histórico
+    </div>
+    <div class="nav-item" data-page="calendar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 11h18"/></svg>
+      Calendário
     </div>
     <div class="nav-item" data-page="logs">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
@@ -63,8 +79,69 @@
   </aside>
 
   <main class="main">
+    <!-- ═══ DASHBOARD ═══ -->
+    <section class="page active" id="page-dashboard">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Dashboard</div>
+          <div class="page-sub" id="dash-sub">—</div>
+        </div>
+        <button class="btn-ghost" id="btn-reload-dashboard">Atualizar</button>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card stat-blue"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="stat-tasks">—</div><div class="stat-label">Tarefas ativas</div>
+          <div class="stat-sub" id="stat-tasks-sub">—</div></div></div>
+        <div class="stat-card stat-green"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="stat-backups">—</div><div class="stat-label">Perfis de backup</div>
+          <div class="stat-sub" id="stat-backups-sub">—</div></div></div>
+        <div class="stat-card stat-amber"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value stat-value-sm" id="stat-next">—</div><div class="stat-label">Próxima execução</div>
+          <div class="stat-sub" id="stat-next-sub">—</div></div></div>
+        <div class="stat-card stat-red"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="stat-failures">—</div><div class="stat-label">Falhas (24h)</div>
+          <div class="stat-sub" id="stat-failures-sub">—</div></div></div>
+      </div>
+
+      <div class="dash-grid">
+        <div class="glass-card">
+          <div class="glass-card-header"><h3>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            Agendador</h3>
+            <span class="badge badge-info" id="own-role">—</span></div>
+          <div class="glass-card-body">
+            <div class="own-line" id="own-detail">—</div>
+            <div class="own-line muted" id="own-source">—</div>
+            <div class="own-runs" id="own-runs"></div>
+          </div>
+        </div>
+
+        <div class="glass-card">
+          <div class="glass-card-header"><h3>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 19V5M4 19h16"/><path d="M8 15l4-5 3 3 4-6"/></svg>
+            Próximas execuções</h3>
+            <button class="btn-ghost btn-sm" id="btn-goto-calendar">Calendário</button></div>
+          <div class="glass-card-body" id="dash-upcoming"><div class="tbl-loading">carregando</div></div>
+        </div>
+      </div>
+
+      <div class="glass-card">
+        <div class="glass-card-header"><h3>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+          Atividade recente</h3>
+          <button class="btn-ghost btn-sm" id="btn-goto-history">Histórico</button></div>
+        <div class="glass-card-body">
+          <table class="tbl">
+            <thead><tr><th>Quando</th><th>O quê</th><th>Tipo</th><th>Status</th><th>Duração</th><th></th></tr></thead>
+            <tbody id="dash-activity"><tr><td colspan="6" class="tbl-loading">carregando</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <!-- ═══ MONITOR ═══ -->
-    <section class="page active" id="page-monitor">
+    <section class="page" id="page-monitor">
       <div class="page-head">
         <div>
           <div class="page-title">Monitor de recursos</div>
@@ -164,6 +241,72 @@
       </div>
     </section>
 
+    <!-- ═══ SINCRONISMO ═══ -->
+    <section class="page" id="page-sync">
+      <div class="page-head">
+        <div><div class="page-title">Sincronismo de pastas</div><div class="page-sub" id="sync-sub">—</div></div>
+        <div class="row-gap">
+          <button class="btn-primary" id="btn-new-sync">Novo perfil</button>
+          <button class="btn-ghost" id="btn-reload-sync">Atualizar</button>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card stat-blue"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="stat-sync-total">—</div><div class="stat-label">Perfis de sync</div>
+          <div class="stat-sub" id="stat-sync-total-sub">—</div></div></div>
+        <div class="stat-card stat-green"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="stat-sync-active">—</div><div class="stat-label">Ativos</div>
+          <div class="stat-sub" id="stat-sync-active-sub">—</div></div></div>
+        <div class="stat-card stat-amber"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="stat-sync-retention">—</div><div class="stat-label">Com retenção</div>
+          <div class="stat-sub" id="stat-sync-retention-sub">—</div></div></div>
+        <div class="stat-card stat-red"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="stat-sync-fail">—</div><div class="stat-label">Falha na última</div>
+          <div class="stat-sub" id="stat-sync-fail-sub">—</div></div></div>
+      </div>
+
+      <div class="glass-card">
+        <table class="tbl">
+          <thead><tr><th>Perfil</th><th>Origem → destino</th><th>Retenção</th><th>Agenda</th><th>Última execução</th><th></th></tr></thead>
+          <tbody id="sync-body"><tr><td colspan="6" class="tbl-loading">carregando</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ═══ RETENÇÃO ═══ -->
+    <section class="page" id="page-retention">
+      <div class="page-head">
+        <div><div class="page-title">Agendas de retenção</div><div class="page-sub" id="retention-sub">—</div></div>
+        <div class="row-gap">
+          <button class="btn-primary" id="btn-new-retention">Nova agenda</button>
+          <button class="btn-ghost" id="btn-reload-retention">Atualizar</button>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card stat-blue"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="stat-ret-total">—</div><div class="stat-label">Agendas</div>
+          <div class="stat-sub" id="stat-ret-total-sub">—</div></div></div>
+        <div class="stat-card stat-green"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="stat-ret-active">—</div><div class="stat-label">Ativas</div>
+          <div class="stat-sub" id="stat-ret-active-sub">—</div></div></div>
+        <div class="stat-card stat-amber"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="stat-ret-age">—</div><div class="stat-label">Prontas para rodar</div>
+          <div class="stat-sub" id="stat-ret-age-sub">—</div></div></div>
+        <div class="stat-card stat-red"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="stat-ret-fail">—</div><div class="stat-label">Falha na última</div>
+          <div class="stat-sub" id="stat-ret-fail-sub">—</div></div></div>
+      </div>
+
+      <div class="glass-card">
+        <table class="tbl">
+          <thead><tr><th>Agenda</th><th>Pasta</th><th>Política</th><th>Cron</th><th>Última execução</th><th></th></tr></thead>
+          <tbody id="retention-body"><tr><td colspan="6" class="tbl-loading">carregando</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- ═══ SERVIÇOS ═══ -->
     <section class="page" id="page-services">
       <div class="page-head">
@@ -203,22 +346,67 @@
     <!-- ═══ HISTÓRICO ═══ -->
     <section class="page" id="page-history">
       <div class="page-head">
-        <div><div class="page-title">Histórico de execuções</div><div class="page-sub">Tarefas executadas recentemente</div></div>
-        <button class="btn-ghost" id="btn-reload-history">Atualizar</button>
+        <div><div class="page-title">Histórico de execuções</div><div class="page-sub" id="history-sub">—</div></div>
+        <div class="row-gap">
+          <div class="tabs" id="history-tabs" role="tablist">
+            <button class="tab active" type="button" data-hist="tasks" role="tab" aria-selected="true">Tarefas</button>
+            <button class="tab" type="button" data-hist="backups" role="tab" aria-selected="false">Backups</button>
+          </div>
+          <button class="btn-ghost" id="btn-reload-history">Atualizar</button>
+        </div>
       </div>
       <div class="glass-card">
         <table class="tbl">
-          <thead><tr><th>Quando</th><th>Tarefa</th><th>Status</th><th>Duração</th><th>Mensagem</th></tr></thead>
-          <tbody id="history-body"><tr><td colspan="5" class="tbl-loading">carregando</td></tr></tbody>
+          <thead><tr><th>Quando</th><th id="history-col-name">Tarefa</th><th>Status</th><th>Duração</th><th>Mensagem</th><th></th></tr></thead>
+          <tbody id="history-body"><tr><td colspan="6" class="tbl-loading">carregando</td></tr></tbody>
         </table>
       </div>
+    </section>
+
+    <!-- ═══ CALENDÁRIO ═══ -->
+    <section class="page" id="page-calendar">
+      <div class="page-head">
+        <div><div class="page-title">Calendário</div><div class="page-sub" id="calendar-sub">Tarefas, backups e serviços numa linha do tempo</div></div>
+        <div class="row-gap">
+          <button class="btn-ghost btn-sm" id="cal-prev" type="button" aria-label="Anterior">‹</button>
+          <button class="btn-ghost btn-sm" id="cal-today" type="button">Hoje</button>
+          <button class="btn-ghost btn-sm" id="cal-next" type="button" aria-label="Próximo">›</button>
+        </div>
+      </div>
+
+      <div class="cal-toolbar">
+        <div class="cal-period" id="cal-period">—</div>
+        <div class="cal-views" role="tablist" aria-label="Visões do calendário">
+          <button class="cal-view-btn active" type="button" role="tab" data-view="month" aria-selected="true">Mês</button>
+          <button class="cal-view-btn" type="button" role="tab" data-view="week" aria-selected="false">Semana</button>
+          <button class="cal-view-btn" type="button" role="tab" data-view="agenda" aria-selected="false">Agenda</button>
+        </div>
+      </div>
+
+      <div class="cal-totals" id="cal-totals"></div>
+      <div class="cal-legend">
+        <span><i class="cal-dot k-task"></i>Tarefa</span>
+        <span><i class="cal-dot k-backup"></i>Backup</span>
+        <span><i class="cal-dot k-service"></i>Serviço</span>
+      </div>
+      <div class="glass-card"><div class="cal-body" id="cal-body"><div class="tbl-loading">carregando</div></div></div>
     </section>
 
     <!-- ═══ LOGS ═══ -->
     <section class="page" id="page-logs">
       <div class="page-head">
-        <div><div class="page-title">Logs</div><div class="page-sub">Inclui o que o serviço executou em segundo plano</div></div>
-        <button class="btn-ghost" id="btn-reload-logs">Atualizar</button>
+        <div><div class="page-title">Logs</div><div class="page-sub" id="logs-sub">Inclui o que o serviço executou em segundo plano</div></div>
+        <div class="row-gap">
+          <div class="tabs" id="logs-tabs" role="tablist"></div>
+          <select class="input input-sm" id="logs-level" aria-label="Nível do log">
+            <option value="">Todos os níveis</option>
+            <option value="ERROR">ERROR</option>
+            <option value="WARN">WARN</option>
+            <option value="INFO">INFO</option>
+            <option value="AUDIT">AUDIT</option>
+          </select>
+          <button class="btn-ghost" id="btn-reload-logs">Atualizar</button>
+        </div>
       </div>
       <div class="glass-card" id="logs-card"><div class="tbl-loading">carregando</div></div>
     </section>

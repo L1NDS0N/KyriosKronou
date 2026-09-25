@@ -9,6 +9,8 @@ class BackupPage {
     this.draft = {};
     this.saving = false;
     this.engines = [];
+    // profileId + file name for the artifact buttons of the open history modal.
+    this._artifacts = [];
   }
 
   async load() {
@@ -142,7 +144,7 @@ class BackupPage {
       return;
     }
     showToast(i18n.t('profile.cloned', { name: copy.Name }), 'success');
-    await this.loadProfiles();
+    await this.load();
     // Open the copy straight away - duplicating is almost always a prelude to editing.
     this.editProfile(created.Id);
   }
@@ -193,16 +195,17 @@ class BackupPage {
   _renderWizard() {
     const isEdit = !!this.editingId;
     const steps = [i18n.t('wizard.stepConnection'), i18n.t('wizard.stepDatabases'), i18n.t('wizard.stepDestination'), i18n.t('wizard.stepUpload'), i18n.t('wizard.stepSchedule')];
-    const stepIcons = ['database', 'list', 'hard-drive', 'upload', 'clock'];
 
+    const helpKey = ['wizard.helpConnection', 'wizard.helpDatabases', 'wizard.helpDestination', 'wizard.helpUpload', 'wizard.helpSchedule'][this.currentStep];
     showModal(`
       <div class="wizard-layout">
         <div class="wizard-main">
           <h2><i data-lucide="${isEdit ? 'pencil' : 'plus-circle'}"></i> ${esc(i18n.t(isEdit ? 'wizard.editTitle' : 'wizard.newTitle'))}</h2>
+          <div class="modal-help"><i data-lucide="info"></i><span>${esc(i18n.t(helpKey))}</span></div>
 
           <div class="wizard-tabs">
             ${steps.map((s, i) => `
-              <div class="wizard-tab ${i === this.currentStep ? 'active' : ''} ${i < this.currentStep ? 'completed' : ''}" onclick="backupPage.goStep(${i})">
+              <div class="wizard-tab ${i === this.currentStep ? 'active' : ''} ${i < this.currentStep ? 'completed' : ''}" data-tip="${esc(s)}" onclick="backupPage.goStep(${i})">
                 <div class="wizard-tab-num">${i < this.currentStep ? '<i data-lucide=\"check\" style=\"width:12px;height:12px\"></i>' : (i + 1)}</div>
                 <span class="wizard-tab-label">${s}</span>
               </div>
@@ -883,11 +886,14 @@ class BackupPage {
       return (bytes / 1073741824).toFixed(1) + ' GB';
     };
 
+    // Reset before the rows are built: every artifact button indexes into this.
+    this._artifacts = [];
+
     const rows = history.map((h, i) => {
       const ts = h.Timestamp ? new Date(h.Timestamp).toLocaleString() : '?';
       const dbs = (h.Databases || []).join(', ') || 'all';
       return `
-        <div class="bh-entry" onclick="this.classList.toggle('expanded')">
+        <div class="bh-entry row-clickable" data-backup-history-index="${i}">
           <div class="bh-row">
             <span class="bh-num">${history.length - i}</span>
             ${statusIcon(h.Status)}
@@ -905,6 +911,7 @@ class BackupPage {
                 <strong>${esc(r.database)}</strong>
                 <span style="color:var(--text3)">${r.sizeHuman || '0 B'}</span>
                 ${r.uploads && r.uploads.length > 0 ? r.uploads.map(u => `<span class="badge badge-${u.success ? 'active' : 'disabled'}" style="font-size:9px">${u.type.toUpperCase()} ${u.success ? 'ok' : 'fail'}</span>`).join(' ') : ''}
+                ${this._artifactButtonHtml(profileId, r)}
                 ${r.message ? `<div class="bh-error">${esc(r.message)}</div>` : ''}
               </div>
             `).join('')}
@@ -913,17 +920,80 @@ class BackupPage {
     }).join('');
 
     showModal(`
-      <h2><i data-lucide="history"></i> ${esc(profile.Name)} &mdash; History</h2>
-      <p style="font-size:12px;color:var(--text3);margin-bottom:12px">Cron: ${esc(profile.CronExpression)} &middot; ${history.length} execution(s)</p>
+      <h2><i data-lucide="history"></i> ${esc(profile.Name)} &mdash; ${esc(i18n.t('history.title'))}</h2>
+      <div class="modal-summary">
+        <div class="modal-summary-item"><span class="modal-summary-label">${esc(i18n.t('history.colCron'))}</span><span class="modal-summary-value">${esc(profile.CronExpression)}</span></div>
+        <div class="modal-summary-item"><span class="modal-summary-label">${esc(i18n.t('history.entries'))}</span><span class="modal-summary-value">${history.length}</span></div>
+      </div>
+      <div class="modal-help"><i data-lucide="mouse-pointer-click"></i><span>${esc(i18n.t('history.clickForDetail'))}</span></div>
       <div class="bh-list">
-        ${history.length === 0 ? '<p style="text-align:center;color:var(--text3);padding:24px">No execution history yet.</p>' : rows}
+        ${history.length === 0 ? `<div class="modal-empty">${esc(i18n.t('history.noHistory'))}</div>` : rows}
       </div>
       <div class="modal-actions">
-        <button class="btn-outline" onclick="backupPage.exportHistoryCsv('${profileId}')"><i data-lucide="download"></i> Export CSV</button>
-        <button class="btn-ghost" onclick="hideModal()">Close</button>
+        <button class="btn-outline" onclick="backupPage.exportHistoryCsv('${esc(profileId)}')"><i data-lucide="download"></i> ${esc(i18n.t('history.exportCsv'))}</button>
+        <button class="btn-ghost" onclick="hideModal()">${esc(i18n.t('backup.close'))}</button>
       </div>
-    `);
+    `, true);
+    const list = document.querySelector('.bh-list');
+    if (list) list.onclick = (event) => {
+      if (event.target.closest('[data-backup-artifact]')) return;
+      const row = event.target.closest('[data-backup-history-index]');
+      if (row) showRunDetail(history[Number(row.dataset.backupHistoryIndex)], 'backup');
+    };
     lucide.createIcons();
+  }
+
+  // ─── Local Backup Artifact ───
+  // One action per history result. What crosses to the main process is the
+  // profile id and a file NAME; the path never leaves the main process, which
+  // rebuilds it from the profile folder and refuses anything outside it.
+  //
+  // The button carries an index into this._artifacts rather than the name in an
+  // attribute: a file name with a quote or an angle bracket would otherwise
+  // break out of the markup, and an inline handler string would break on the
+  // first apostrophe.
+  _artifactButtonHtml(profileId, result) {
+    if (!result || !result.success) return '';
+    // Nothing to reveal when the file is not here: SQL Server wrote it on the
+    // database host, or the history predates these fields. The folder is still
+    // worth opening.
+    const name = result.remoteOnly ? '' : String(result.fileName || '').trim();
+    const index = this._artifacts.push({ profileId, name }) - 1;
+    const label = name ? 'artifact.reveal' : 'artifact.openFolder';
+    return `<button class="btn-secondary-sm" style="margin-left:auto"
+      data-backup-artifact="${index}"
+      onclick="event.stopPropagation(); backupPage.artifactAction(this)"
+      title="${esc(i18n.t(label))}"><i data-lucide="${name ? 'folder' : 'folder-open'}"></i> ${esc(i18n.t(label))}</button>`;
+  }
+
+  async artifactAction(button) {
+    const target = this._artifacts[Number(button.dataset.backupArtifact)] || {};
+    if (!target.name) return this.openBackupFolder(target.profileId);
+
+    const result = await window.api.revealBackupArtifact(target.profileId, target.name);
+    if (result && result.ok) {
+      showToast(i18n.t('artifact.revealed'), 'success');
+      return true;
+    }
+    // A file that is gone - KeepLocal off, retention, a folder moved - would
+    // leave a dead button, so the reveal degrades into the folder instead.
+    const reason = (result && result.reason) || 'artifact.notFound';
+    if (!await this.openBackupFolder(target.profileId, true)) {
+      showToast(i18n.t(reason), 'error');
+      return false;
+    }
+    showToast(i18n.t('artifact.folderFallback', { reason: i18n.t(reason) }), 'info');
+    return true;
+  }
+
+  async openBackupFolder(profileId, quiet) {
+    const result = await window.api.openBackupFolder(profileId);
+    if (result && result.ok) {
+      if (!quiet) showToast(i18n.t('artifact.folderOpened'), 'success');
+      return true;
+    }
+    showToast(i18n.t((result && result.reason) || 'artifact.folderNotFound'), 'error');
+    return false;
   }
 
   async exportHistoryCsv(profileId) {

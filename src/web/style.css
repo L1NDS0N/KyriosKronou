@@ -392,9 +392,210 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .drop-title { font-size: 13px; color: var(--text2); }
 .drop-sub { font-size: 11px; font-family: var(--mono); }
 
+/* ═══ DASHBOARD ═══ */
+/* Os dois cartões de cima dividem a linha: quem abre o painel quer o dono do
+   agendador e o que vem a seguir, lado a lado, antes de qualquer tabela. */
+.dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 14px; }
+.dash-grid .glass-card { margin-bottom: 16px; }
+.stat-value-sm { font-size: 16px; }
+
+.own-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--text2); line-height: 1.6; }
+.own-line.muted, .own-source { font-size: 11px; color: var(--text3); }
+.own-source { margin-top: 6px; line-height: 1.5; }
+.own-runs { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+
+.upcoming-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 0;
+  border-bottom: 1px solid rgba(180,180,200,.03); font-size: 12.5px; color: var(--text2);
+  cursor: pointer; transition: var(--transition);
+}
+.upcoming-row:last-child { border-bottom: none; }
+.upcoming-row:hover { background: rgba(180,180,200,.02); }
+.upcoming-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A linha que a origem apontou pisca, para não se perder numa tabela grande. */
+.row-flash { animation: rowFlash 2.4s ease-out; }
+@keyframes rowFlash {
+  0%, 60% { background: var(--primary-dim); }
+  100% { background: transparent; }
+}
+
+/* ═══ ABAS ═══ */
+/* Mesma família de botão do resto do painel, só com o estado ativo marcado -
+   não é um segundo sistema visual. */
+.tabs { display: inline-flex; gap: 4px; padding: 3px; border-radius: 10px; background: var(--glass); border: 1px solid var(--glass-border); }
+.tab {
+  display: inline-flex; align-items: center; min-height: 28px; padding: 0 12px;
+  border: 1px solid transparent; border-radius: var(--radius-xs); background: none;
+  color: var(--text3); font-family: var(--font); font-size: 11.5px; font-weight: 600;
+  cursor: pointer; transition: var(--transition); white-space: nowrap;
+}
+.tab:hover { color: var(--text2); background: var(--glass2); }
+.tab.active { background: var(--glass2); color: var(--text); border-color: var(--glass-border2); }
+.tab:focus-visible { outline: none; border-color: var(--primary-light); box-shadow: 0 0 0 3px var(--primary-dim); }
+.input.input-sm { width: auto; min-height: 28px; padding: 0 10px; font-size: 11.5px; }
+
+.detail-grid { margin-bottom: 14px; }
+.detail-row { display: flex; align-items: baseline; gap: 12px; padding: 6px 0; border-bottom: 1px solid rgba(180,180,200,.03); }
+.detail-row:last-child { border-bottom: none; }
+.detail-row span { width: 140px; flex-shrink: 0; font-size: 11px; letter-spacing: .05em; color: var(--text3); }
+.detail-row b { font-size: 12.5px; font-weight: 600; color: var(--text2); word-break: break-word; }
+.detail-row b.mono { font-family: var(--mono); font-size: 11.5px; font-weight: 400; }
+
+/* ═══ CALENDÁRIO ═══ */
+.cal-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.cal-period { font-size: 13px; font-weight: 600; color: var(--text2); text-transform: capitalize; }
+.cal-views { display: inline-flex; gap: 4px; padding: 3px; border-radius: 10px; background: var(--glass); border: 1px solid var(--glass-border); }
+.cal-view-btn {
+  min-height: 28px; padding: 0 13px; border: 1px solid transparent; border-radius: var(--radius-xs);
+  background: none; color: var(--text3); font-family: var(--font); font-size: 11.5px; font-weight: 600;
+  cursor: pointer; transition: var(--transition);
+}
+.cal-view-btn:hover { color: var(--text2); background: var(--glass2); }
+.cal-view-btn.active { background: var(--glass2); color: var(--text); border-color: var(--glass-border2); }
+.cal-view-btn:focus-visible { outline: none; border-color: var(--primary-light); box-shadow: 0 0 0 3px var(--primary-dim); }
+
+.cal-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.cal-metric { padding: 10px 14px; border-radius: var(--radius-sm); background: var(--glass); border: 1px solid var(--glass-border); }
+.cal-metric span { display: flex; flex-direction: column; font-size: 10px; letter-spacing: .09em; text-transform: uppercase; color: var(--text3); }
+.cal-metric strong { font-size: 19px; font-weight: 700; color: var(--text); }
+.cal-metric.ok strong { color: var(--green); }
+.cal-metric.bad strong { color: var(--red); }
+
+.cal-legend { display: flex; gap: 14px; margin-bottom: 10px; font-size: 10.5px; color: var(--text3); }
+.cal-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.cal-dot { width: 7px; height: 7px; border-radius: 2px; background: var(--primary); display: inline-block; flex-shrink: 0; }
+.cal-dot.k-task, .cal-chip.k-task { background: var(--primary-dim); color: var(--primary-light); }
+.cal-dot.k-task { background: var(--primary); }
+.cal-dot.k-backup { background: var(--green); }
+.cal-dot.k-service { background: var(--amber); }
+.cal-dot.s-success { background: var(--green); }
+.cal-dot.s-failed { background: var(--red); }
+.cal-dot.s-scheduled { background: var(--primary); }
+
+/* Mês */
+.cal-grid { display: flex; flex-direction: column; min-height: 420px; }
+.cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); border-bottom: 1px solid var(--glass-border); }
+.cal-weekdays > div { padding: 9px 10px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: var(--text3); }
+.cal-days { display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: minmax(74px, auto); flex: 1; }
+.cal-day { padding: 6px 7px; border-right: 1px solid rgba(180,180,200,.04); border-bottom: 1px solid rgba(180,180,200,.04); min-width: 0; }
+.cal-day.outside { opacity: .38; }
+.cal-day.today .cal-day-num { color: var(--text); background: var(--primary-dim); }
+.cal-day-num { display: inline-flex; align-items: center; justify-content: center; width: 21px; height: 21px; border-radius: 50%; font-size: 11px; color: var(--text3); font-family: var(--mono); }
+.cal-day-items { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
+.cal-chip {
+  display: flex; align-items: center; gap: 5px; padding: 2px 6px; border-radius: 6px;
+  background: var(--glass2); border: 1px solid var(--glass-border); cursor: pointer;
+  font-size: 10.5px; color: var(--text2); min-width: 0; transition: var(--transition);
+}
+.cal-chip:hover { border-color: var(--glass-border2); background: var(--glass3); }
+.cal-chip-time { font-family: var(--mono); font-size: 9.5px; color: var(--text3); flex-shrink: 0; }
+.cal-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-chip.k-backup { border-left: 2px solid var(--green); }
+.cal-chip.k-service { border-left: 2px solid var(--amber); }
+.cal-chip.k-task { border-left: 2px solid var(--primary); }
+.cal-chip.s-success { color: var(--green); }
+.cal-chip.s-failed { color: var(--red); }
+.cal-more { font-size: 10px; color: var(--text3); cursor: pointer; padding-left: 6px; }
+.cal-more:hover { color: var(--text2); }
+
+/* Semana */
+.cal-week { overflow-x: auto; }
+.cal-week-head, .cal-week-row { display: grid; grid-template-columns: 54px repeat(7, minmax(120px, 1fr)); min-width: 780px; }
+.cal-week-head { border-bottom: 1px solid var(--glass-border); }
+.cal-week-day { padding: 9px 10px; text-align: center; font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: .7px; }
+.cal-week-day strong { display: block; font-size: 14px; color: var(--text2); font-family: var(--mono); text-transform: none; letter-spacing: 0; margin-top: 3px; }
+.cal-week-day.today strong { color: var(--text); background: var(--primary-dim); border-radius: 8px; }
+.cal-week-row { border-bottom: 1px solid rgba(180,180,200,.04); }
+.cal-week-hour { padding: 6px 10px; font-family: var(--mono); font-size: 10.5px; color: var(--text3); }
+.cal-week-cell { padding: 4px 5px; border-left: 1px solid rgba(180,180,200,.04); display: flex; flex-direction: column; gap: 3px; }
+
+/* Agenda */
+.cal-agenda { display: flex; flex-direction: column; }
+.cal-agenda-day { display: flex; gap: 14px; padding: 12px 4px; border-bottom: 1px solid rgba(180,180,200,.04); }
+.cal-agenda-day:last-child { border-bottom: none; }
+.cal-agenda-date { width: 62px; flex-shrink: 0; text-align: center; }
+.cal-agenda-date strong { display: block; font-size: 17px; font-weight: 700; color: var(--text); font-family: var(--mono); }
+.cal-agenda-date span { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: .6px; }
+.cal-agenda-items { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.cal-agenda-item { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: var(--radius-xs); background: var(--glass); border: 1px solid var(--glass-border); cursor: pointer; font-size: 12px; color: var(--text2); transition: var(--transition); }
+.cal-agenda-item:hover { background: var(--glass2); border-color: var(--glass-border2); }
+.cal-agenda-time { font-size: 11px; color: var(--text3); flex-shrink: 0; }
+.cal-agenda-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-agenda-kind { font-size: 10px; text-transform: uppercase; letter-spacing: .7px; color: var(--text3); }
+
+/* ─── Editor em passos (sincronismo e retenção) ───
+   O modal é o mesmo do resto do painel; o que muda aqui é o trilho de passos,
+   a dica do passo e os blocos de resultado de análise, previsão e simulação. */
+.check-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 9px; font-size: 12.5px; color: var(--text2); }
+.check-row input[type="checkbox"] { margin-top: 2px; flex-shrink: 0; accent-color: var(--primary); }
+.check-hint { display: block; font-size: 11px; color: var(--text3); margin-top: 2px; line-height: 1.5; }
+.input-num { width: 84px; display: inline-block; min-height: 26px; padding: 2px 7px; font-size: 11.5px; margin: 0 2px; }
+
+/* A dica fica num "?" e não num title solto no label: title some assim que o
+   mouse sai, e these two telas explicam regra que a pessoa não vai deduzir. */
+.dica {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border-radius: 50%; cursor: help;
+  font-style: normal; font-size: 9px; font-weight: 700; line-height: 1;
+  color: var(--text3); background: var(--glass2); border: 1px solid var(--glass-border);
+}
+.dica:hover { color: var(--text); border-color: var(--glass-border2); }
+
+.wiz-steps { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.wiz-step {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 11px;
+  border: 1px solid var(--glass-border); border-radius: var(--radius-xs);
+  background: var(--glass); color: var(--text3); font-size: 11.5px; cursor: pointer;
+  transition: var(--transition);
+}
+.wiz-step:hover { color: var(--text2); background: var(--glass2); }
+.wiz-step.active { background: var(--glass2); color: var(--text); border-color: var(--glass-border2); font-weight: 600; }
+.wiz-step.done { color: var(--green); border-color: rgba(106,138,110,.18); }
+.wiz-step:focus-visible { outline: none; border-color: var(--primary-light); box-shadow: 0 0 0 3px var(--primary-dim); }
+.wiz-tip { margin: 0 0 12px; font-size: 11.5px; line-height: 1.6; color: var(--text3); }
+.wiz-tip-warn { color: var(--amber); }
+.wiz-body > .field:last-child { margin-bottom: 0; }
+.wiz-actions-inline { margin: 4px 0 12px; }
+.wiz-status { font-size: 11.5px; color: var(--text3); }
+.wiz-status .ok { color: var(--green); }
+.wiz-status .bad { color: var(--red); }
+.wiz-summary { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--glass-border); }
+.wiz-summary .detail-row b { word-break: break-all; }
+
+.wiz-result:not(:empty) { margin-top: 12px; }
+.wiz-box { padding: 12px 14px; border-radius: var(--radius-sm); background: var(--glass); border: 1px solid var(--glass-border); }
+.wiz-numbers { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.wiz-numbers > div { display: flex; flex-direction: column; gap: 2px; }
+.wiz-numbers b { font-size: 15px; font-weight: 700; color: var(--text); font-family: var(--mono); }
+.wiz-numbers span { font-size: 10px; letter-spacing: .07em; text-transform: uppercase; color: var(--text3); }
+.wiz-lista { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.wiz-item { display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: var(--radius-xs); background: rgba(0,0,0,.14); }
+.wiz-item-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.wiz-item-main b { font-size: 11px; font-weight: 500; color: var(--text2); word-break: break-all; }
+.wiz-item-main span { font-size: 10.5px; color: var(--text3); }
+.wiz-details { margin-top: 6px; }
+.wiz-details summary { font-size: 11.5px; color: var(--text3); cursor: pointer; padding: 4px 0; }
+.wiz-details summary:hover { color: var(--text2); }
+
+.wiz-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: -6px 0 13px; }
+.chip {
+  padding: 3px 9px; border-radius: 999px; cursor: pointer;
+  background: var(--glass); border: 1px solid var(--glass-border);
+  font-size: 10.5px; color: var(--text3); transition: var(--transition);
+}
+.chip:hover { color: var(--text2); background: var(--glass2); border-color: var(--glass-border2); }
+
 @media (max-width: 760px) {
   .footbar { flex-direction: column; height: auto; gap: 4px; padding: 6px 12px; }
   .main { padding-bottom: 86px; }
   .foot-metrics { gap: 12px; }
   .field-row { grid-template-columns: 1fr; }
+  /* No celular o mês perde as etiquetas e vira lista: sete colunas de 40px não
+     dizem o que é o quê. */
+  .cal-weekdays { display: none; }
+  .cal-days { grid-template-columns: 1fr; grid-auto-rows: auto; }
+  .cal-day { border-right: none; }
+  .cal-agenda-day { flex-direction: column; gap: 8px; }
+  .cal-agenda-date { width: auto; display: flex; align-items: baseline; gap: 8px; text-align: left; }
 }

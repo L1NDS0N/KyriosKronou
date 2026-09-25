@@ -1,61 +1,127 @@
-// quickCreate.js - Smart textarea for batch task creation with syntax validation
+// quickCreate.js - Smart textarea for batch task creation
 // Parses text like: cron | name | script | [args] | [description]
+//
+// The cron is validated by the main process through window.api: the parser is a
+// main-only module and instantiating it here was what silently broke the
+// preview (and the Create button) with a ReferenceError.
 
-function parseQuickLines(text, cronParser) {
-  const lines = text.split('\n').filter(l => l.trim());
+function qcText(value) {
+  if (typeof escHtml === 'function') return escHtml(value);
+  const d = document.createElement('div');
+  d.textContent = value == null ? '' : String(value);
+  return d.innerHTML;
+}
+
+function qcT(key, params) {
+  if (typeof i18n !== 'undefined' && i18n.t) return i18n.t(key, params);
+  return key;
+}
+
+/** A bridge call that must never take the preview down with it. */
+async function qcAsk(fn, fallback) {
+  try { return await fn(); } catch (e) { return fallback; }
+}
+
+// Checking clashes walks a week of fire times per schedule, so only the first
+// lines of a long paste are checked; the rest still show their own description.
+const QUICK_CONFLICT_LIMIT = 8;
+
+async function parseQuickLines(text, api) {
+  const bridge = api || (typeof window !== 'undefined' ? window.api : null);
+  const lines = String(text || '').split('\n').filter(l => l.trim());
   const results = [];
 
   for (const line of lines) {
     const parts = line.split('|').map(p => p.trim());
     if (parts.length < 3) {
-      results.push({ raw: line, valid: false, error: 'Need at least: cron | name | script', lineNum: results.length + 1 });
+      results.push({
+        raw: line, valid: false, lineNum: results.length + 1,
+        error: qcT('quick.error.minFields'),
+      });
       continue;
     }
 
     let [cron, name, script, args, desc] = parts;
-
     // Auto-correct common cron mistakes
     cron = autoCorrectCron(cron);
 
-    const cronValid = cronParser.validate(cron);
-    const scriptValid = validateScriptPath(script);
-    const valid = cronValid && scriptValid.valid;
-
-    let error = null;
-    if (!cronValid) error = `Invalid cron: ${cron}`;
-    else if (!scriptValid.valid) error = scriptValid.error;
-
+    const scriptCheck = validateScriptPath(script);
     results.push({
       raw: line,
-      valid,
       cron,
-      name: name || 'Unnamed Task',
+      name: name || qcT('quick.unnamed'),
       script: script || '',
       args: args || '',
       description: desc || '',
-      error,
+      scriptError: scriptCheck.valid ? null : scriptCheck.error,
+      cronOk: false,
+      valid: false,
+      error: null,
       lineNum: results.length + 1,
-      scriptExt: scriptValid.ext,
-      cronFields: parseCronFields(cron)
+      scriptExt: scriptCheck.ext,
+      cronFields: parseCronFields(cron),
+      conflicts: [],
+      suggestion: null,
     });
   }
+
+  // Cron validity decides what can be created, so the whole batch waits for it.
+  await Promise.all(results.map(async (r) => {
+    if (!r.cron) return;
+    r.cronOk = bridge && bridge.validateCron
+      ? await qcAsk(() => bridge.validateCron(r.cron), false)
+      : false;
+    r.valid = r.cronOk && !r.scriptError;
+    r.error = !r.cronOk
+      ? qcT('quick.error.cronInvalid', { cron: r.cron })
+      : r.scriptError;
+  }));
+
+  // Predictability before the click: what it runs, when it runs next, and what
+  // already fires at the same time.
+  let checked = 0;
+  await Promise.all(results.map(async (r) => {
+    if (!r.valid) return;
+    r.descriptionText = bridge && bridge.getCronDescription
+      ? await qcAsk(() => bridge.getCronDescription(r.cron), '')
+      : '';
+    r.nextRun = bridge && bridge.getNextRun
+      ? await qcAsk(() => bridge.getNextRun(r.cron), null)
+      : null;
+    if (!bridge || !bridge.checkScheduleConflicts || checked >= QUICK_CONFLICT_LIMIT) return;
+    checked++;
+    const clash = await qcAsk(() => bridge.checkScheduleConflicts(r.cron), null);
+    if (!clash || !clash.success) return;
+    r.conflicts = clash.conflicts || [];
+    r.suggestion = clash.suggestion || null;
+  }));
+
+  // Two identical crons in the same paste are invisible to the conflict check,
+  // which only knows what is already saved.
+  const seen = new Set();
+  for (const r of results) {
+    if (!r.valid) continue;
+    if (seen.has(r.cron)) r.duplicate = true;
+    seen.add(r.cron);
+  }
+
   return results;
 }
 
 function validateScriptPath(script) {
-  if (!script) return { valid: false, error: 'No script path', ext: '' };
+  if (!script) return { valid: false, error: qcT('quick.error.noScript'), ext: '' };
   const trimmed = script.trim();
   const ext = getExt(trimmed);
 
   // Check valid extensions
   const validExts = ['.ps1', '.bat', '.cmd', '.exe', '.py', '.js', '.sh'];
   if (ext && !validExts.includes(ext.toLowerCase())) {
-    return { valid: false, error: `Unknown extension: ${ext}`, ext };
+    return { valid: false, error: qcT('quick.error.unknownExt', { ext }), ext };
   }
 
   // Check for common path issues
   if (trimmed.includes('  ')) {
-    return { valid: false, error: 'Double spaces in path', ext };
+    return { valid: false, error: qcT('quick.error.doubleSpaces'), ext };
   }
 
   return { valid: true, ext };
@@ -71,16 +137,17 @@ function getExt(path) {
 function parseCronFields(cron) {
   if (!cron) return [];
   const parts = cron.split(/\s+/);
-  const labels = ['minute', 'hour', 'day', 'month', 'weekday'];
+  const labels = qcT('quick.cronLabels').split(',');
   return parts.map((p, i) => {
+    const label = labels[i] || '';
     let color = 'var(--green)';
     let desc = '';
-    if (p === '*') desc = `every ${labels[i]}`;
-    else if (p.includes('/')) desc = `every ${p.split('/')[1]} ${labels[i]}(s)`;
-    else if (p.includes('-')) desc = `${labels[i]} ${p}`;
-    else if (/^\d+$/.test(p)) desc = `${labels[i]} ${p}`;
-    else { color = 'var(--red)'; desc = 'invalid'; }
-    return { value: p, color, desc, label: labels[i] };
+    if (p === '*') desc = qcT('quick.cron.every', { field: label });
+    else if (p.includes('/')) desc = qcT('quick.cron.everyN', { n: p.split('/')[1], field: label });
+    else if (p.includes('-')) desc = qcT('quick.cron.range', { field: label });
+    else if (/^\d+$/.test(p)) desc = qcT('quick.cron.at', { field: label, p });
+    else color = 'var(--red)';
+    return { value: p, color, desc, label };
   });
 }
 
@@ -127,13 +194,34 @@ function autoCorrectCron(expr) {
   return fields.slice(0, 5).join(' ');
 }
 
+function quickMetaLine(r) {
+  const bits = [];
+  if (r.descriptionText) bits.push(qcText(r.descriptionText));
+  if (r.nextRun) bits.push(qcT('quick.nextRunAt', { when: formatQuickTime(r.nextRun) }));
+
+  const flags = [];
+  if (r.duplicate) flags.push(qcT('quick.duplicateCron'));
+  if (r.conflicts && r.conflicts.length) {
+    const who = r.conflicts.slice(0, 2).map(c => qcText(c.name)).join(', ');
+    const rest = r.conflicts.length > 2 ? ` +${r.conflicts.length - 2}` : '';
+    flags.push(qcT('quick.conflictsWith', { who: who + rest }));
+  }
+  return bits.concat(flags).join(' · ');
+}
+
+function formatQuickTime(value) {
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return String(value);
+  return d.toLocaleString(undefined, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
 function renderQuickPreview(results) {
   const container = document.getElementById('quick-preview');
   const status = document.getElementById('quick-status');
   const syntaxBar = document.getElementById('quick-syntax-bar');
   if (!container || !status) return;
 
-  if (results.length === 0) {
+  if (!results || results.length === 0) {
     container.innerHTML = '';
     container.classList.remove('has-items');
     status.innerHTML = '';
@@ -143,21 +231,26 @@ function renderQuickPreview(results) {
 
   container.classList.add('has-items');
   const validCount = results.filter(r => r.valid).length;
-  const invalidCount = results.filter(r => !r.valid).length;
+  const invalidCount = results.length - validCount;
 
   container.innerHTML = results.map(r => {
-    const extBadge = r.scriptExt ? `<span class="qpi-ext">${r.scriptExt}</span>` : '';
+    const extBadge = r.scriptExt ? `<span class="qpi-ext">${qcText(r.scriptExt)}</span>` : '';
+    const meta = r.valid ? quickMetaLine(r) : '';
     return `
     <div class="quick-preview-item ${r.valid ? 'valid' : 'invalid'}">
-      <span class="qpi-linenum">${r.lineNum}</span>
-      <span class="qpi-cron">${escHtml(r.cron || '???')}</span>
-      <span class="qpi-name">${escHtml(r.name || 'Unnamed')}</span>
-      <span class="qpi-script">${escHtml(r.script || 'no script')} ${extBadge}</span>
-      <span class="qpi-status">${r.valid ? '&#10003;' : r.error}</span>
+      <div class="qpi-main">
+        <span class="qpi-linenum">${r.lineNum}</span>
+        <span class="qpi-cron">${qcText(r.cron || '???')}</span>
+        <span class="qpi-name">${qcText(r.name)}</span>
+        <span class="qpi-script">${qcText(r.script || qcT('quick.noScript'))} ${extBadge}</span>
+        <span class="qpi-status">${r.valid ? '&#10003;' : qcText(r.error || '')}</span>
+      </div>
+      ${meta ? `<div class="qpi-meta">${meta}</div>` : ''}
     </div>`;
   }).join('');
 
-  status.innerHTML = `<span class="valid-count">${validCount} valid</span>${invalidCount > 0 ? ` · <span class="invalid-count">${invalidCount} invalid</span>` : ''}`;
+  status.innerHTML = `<span class="valid-count">${qcT('quick.validCount', { n: validCount })}</span>`
+    + (invalidCount > 0 ? ` · <span class="invalid-count">${qcT('quick.invalidCount', { n: invalidCount })}</span>` : '');
 
   // Render syntax bar for the last/active line
   if (syntaxBar) {
@@ -166,7 +259,7 @@ function renderQuickPreview(results) {
     if (validResults.length > 0) {
       const last = validResults[validResults.length - 1];
       syntaxBar.innerHTML = last.cronFields.map(f =>
-        `<span class="sb-field" style="color:${f.color}"><span class="sb-val">${escHtml(f.value)}</span><span class="sb-label">${f.label}</span></span>`
+        `<span class="sb-field" style="color:${f.color}" data-tip="${qcText(f.desc)}"><span class="sb-val">${qcText(f.value)}</span><span class="sb-label">${qcText(f.label)}</span></span>`
       ).join('<span class="sb-sep">|</span>');
     } else {
       syntaxBar.innerHTML = '';

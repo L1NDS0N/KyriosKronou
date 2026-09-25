@@ -423,14 +423,14 @@ select.form-input { appearance: none; background-image: url("data:image/svg+xml,
 #modal-content {
   background: rgba(10,10,18,.9);
   border: 1px solid var(--glass-border2);
-  border-radius: 16px; width: min(520px, calc(100vw - 48px)); max-height: 80vh; overflow-y: auto;
+  border-radius: 16px; width: min(calc(100vw - 48px), max(640px, 64vw)); max-height: 80vh; overflow-y: auto;
   padding: 32px;
   backdrop-filter: blur(40px);
   box-shadow: 0 24px 60px rgba(0,0,0,.5), inset 0 1px 0 rgba(200,200,212,.05);
   animation: modalIn .25s cubic-bezier(.4,0,.2,1);
   transition: width .3s cubic-bezier(.4,0,.2,1);
 }
-#modal-content.wizard-wide { width: min(780px, calc(100vw - 48px)); }
+#modal-content.wizard-wide { width: min(calc(100vw - 48px), max(900px, 72vw)); }
 @keyframes modalIn { from { opacity: 0; transform: translateY(12px) scale(.97); } to { opacity: 1; transform: none; } }
 #modal-content::before {
   content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
@@ -634,8 +634,9 @@ kbd {
 .log-level.audit { color: var(--amber); background: var(--amber-dim); }
 .log-action { font-weight: 600; color: var(--text); font-size: 11px; font-family: var(--mono); }
 .log-message { color: var(--text2); word-break: break-word; line-height: 1.5; }
-.log-meta { font-size: 11px; color: var(--text3); font-family: var(--mono); margin-top: 4px; max-height: 60px; overflow: hidden; transition: max-height .2s; cursor: pointer; }
-.log-meta:hover { max-height: 300px; color: var(--text2); }
+/* A preview, not an expander: the full entry opens in a modal, so hovering
+   must not stretch the row and break the table around it. */
+.log-meta { font-size: 11px; color: var(--text3); font-family: var(--mono); margin-top: 4px; max-height: 60px; overflow: hidden; }
 .log-target { font-weight: 600; color: var(--primary-light); font-size: 11px; }
 
 /* ═══ SCRIPT EDITOR ═══ */
@@ -656,11 +657,11 @@ kbd {
 .script-editor-status { display: flex; gap: 16px; padding: 7px 2px 0; font-size: 10px; color: var(--text3); }
 .secondary-modal-overlay { position: fixed; inset: 0; z-index: 150; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(4,5,10,.72); backdrop-filter: blur(8px); }
 .secondary-modal-overlay.hidden { display: none; }
-.secondary-modal { width: min(760px, calc(100vw - 48px)); max-height: 90vh; overflow-y: auto; border: 1px solid var(--glass-border2); border-radius: 12px; background: #17171f; box-shadow: 0 24px 80px rgba(0,0,0,.6); }
+.secondary-modal { width: min(calc(100vw - 48px), max(720px, 64vw)); max-height: 90vh; overflow-y: auto; border: 1px solid var(--glass-border2); border-radius: 12px; background: #17171f; box-shadow: 0 24px 80px rgba(0,0,0,.6); }
 .secondary-modal-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px 12px; border-bottom: 1px solid var(--border); }
 .secondary-modal-header h2 { margin: 0; display: flex; align-items: center; gap: 8px; }
 .secondary-modal-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px 18px; border-top: 1px solid var(--border); }
-.rich-text-modal { width: min(680px, calc(100vw - 48px)); }
+.rich-text-modal { width: min(calc(100vw - 48px), max(680px, 64vw)); }
 .rich-text-toolbar { display: flex; gap: 4px; padding: 10px 20px; border-bottom: 1px solid var(--border); }
 .rich-text-toolbar button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 30px; border: 1px solid var(--border); border-radius: 6px; background: var(--glass2); color: var(--text2); cursor: pointer; }
 .rich-text-toolbar button:hover { background: var(--glass3); color: var(--text); }
@@ -856,6 +857,18 @@ kbd {
  .ret-preview-sidebar { position: static; max-height: none; }
 }
 .wizard-content { min-height: 280px; }
+.modal-steps { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; margin: 0 0 18px; }
+.modal-step { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--text3); font-size: 11px; }
+.modal-step::before { counter-increment: modal-step; content: counter(modal-step); display: grid; place-items: center; width: 22px; height: 22px; flex: 0 0 22px; border-radius: 50%; background: var(--glass2); font-weight: 600; }
+.modal-steps { counter-reset: modal-step; }
+.modal-step.active { border-color: var(--primary); color: var(--text); background: var(--primary-dim); }
+.modal-step.done { color: var(--green); border-color: rgba(80,200,120,.3); }
+.modal-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 10px; margin-bottom: 16px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--glass); }
+.modal-summary-item { min-width: 0; }
+.modal-summary-label { display: block; color: var(--text3); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; }
+.modal-summary-value { display: block; margin-top: 3px; color: var(--text2); font-size: 12px; overflow-wrap: anywhere; }
+.modal-help { display: flex; gap: 8px; margin: 0 0 14px; padding: 10px 12px; border-left: 3px solid var(--primary); border-radius: 0 8px 8px 0; background: var(--primary-dim); color: var(--text2); font-size: 11px; }
+.modal-help svg { width: 14px; height: 14px; flex: 0 0 auto; margin-top: 1px; }
 .wizard-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
 /* Save must remain reachable while a long retention analysis is scrolled. */
 .sync-wizard-nav {
@@ -898,7 +911,26 @@ kbd {
 .th-expanded .th-output { display: block; }
 .th-output-label { font-size: 10px; text-transform: uppercase; color: var(--text3); letter-spacing: .5px; margin-bottom: 4px; }
 .th-output-text { font-size: 11px; font-family: var(--font-mono); color: var(--text2); background: rgba(0,0,0,.3); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin: 0; }
-.task-history-list { display: flex; flex-direction: column; gap: 0; }
+.web-perm-toolbar { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.web-perm-toolbar .form-input { width: min(280px, 100%); }
+.web-perm-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 10px; }
+.web-perm-screen { padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--glass); }
+.web-perm-screen-name { margin-bottom: 7px; color: var(--text2); font-size: 11px; font-weight: 600; }
+.web-perm-screen .check-row { margin-bottom: 4px; font-size: 11px; }
+.task-history-list { display: block; }
+.task-history-list .th-entry { flex: 0 0 auto; }
+/* A history row is a button: without the reset it carries the UA button chrome
+   and the list stops looking like a list. */
+button.th-entry { display: block; width: 100%; padding: 0; text-align: left; background: none; color: inherit; font: inherit; }
+button.th-entry:focus-visible { outline: 1px solid var(--primary); outline-offset: 1px; }
+
+/* ═══ MODAL EXTRAS ═══ */
+.modal-title-sub { font-size: 12px; font-weight: 400; color: var(--text3); }
+.modal-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 28px 12px; color: var(--text3); }
+.modal-empty svg { width: 30px; height: 30px; opacity: .3; }
+.modal-foot-note { margin-right: auto; align-self: center; font-size: 11px; color: var(--text3); }
+.run-detail-output { display: flex; flex-direction: column; gap: 10px; }
+.run-detail-output .th-output-text { max-height: min(46vh, 380px); }
 
 /* ═══ GITHUB PROFILE ═══ */
 .gh-profile { display: flex; flex-direction: column; gap: 20px; }
@@ -1004,6 +1036,15 @@ kbd {
 }
 .quick-preview-item.valid { border-left: 2px solid var(--green); }
 .quick-preview-item.invalid { border-left: 2px solid var(--red); }
+/* Two lines per entry: what it is, and what it will do - the second one is
+   what makes the schedule predictable before anything is saved. */
+.quick-preview-item { flex-direction: column; align-items: stretch; gap: 3px; }
+.quick-preview-item .qpi-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.quick-preview-item .qpi-meta {
+  font-size: 10.5px; color: var(--text3); padding-left: 22px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.quick-preview-item.invalid .qpi-meta { color: var(--red); }
 .quick-preview-item .qpi-cron { font-family: var(--mono); color: var(--primary-light); min-width: 110px; font-weight: 600; }
 .quick-preview-item .qpi-name { color: var(--text); font-weight: 600; flex: 1; }
 .quick-preview-item .qpi-script { color: var(--text3); font-family: var(--mono); font-size: 11px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1974,7 +2015,10 @@ input[type="file"]::file-selector-button:hover { background: var(--glass3); colo
 }
 .log-actor { font-size: 12px; color: var(--text2); }
 .log-ip { font-size: 10.5px; color: var(--text3); font-family: var(--mono); }
-.log-meta.expanded { max-height: 400px; overflow: auto; color: var(--text2); }
+/* Whole row is the hit target: the cell no longer has to grow to be readable. */
+.logs-table tbody tr.row-clickable { cursor: pointer; }
+.logs-table tbody tr.row-clickable:focus-visible { outline: 1px solid var(--primary); outline-offset: -1px; }
+.row-clickable:hover td { background: rgba(200,200,212,.03); }
 
 /* ═══════════════════════════════════════════════════════════
    Sync (folder synchronization + retention)
