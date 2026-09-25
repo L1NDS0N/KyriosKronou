@@ -33,9 +33,26 @@ app.whenReady().then(async () => {
         runRetentionProfile: async id => { window.__profileRuns.push(id); return { success: true }; },
       };
 
+      retentionPage.render();
+      const defaultPolicy = JSON.parse(JSON.stringify(retentionPage._getCfg()));
+      const defaultControls = {
+        count: document.getElementById('ret-default-count').checked,
+        countValue: document.getElementById('ret-default-count-n').value,
+        monthly: document.getElementById('ret-default-monthly').checked,
+        months: document.getElementById('ret-default-months').value,
+        advancedAge: !!document.getElementById('ret-adv-age')
+      };
+      const folderInput = document.getElementById('ret-folder');
+      folderInput.focus();
+      folderInput.value = 'D:/Typed';
+      folderInput.dispatchEvent(new Event('input', { bubbles: true }));
+      const folderInputPreserved = document.getElementById('ret-folder') === folderInput && folderInput.value === 'D:/Typed';
+      const folderFocusPreserved = document.activeElement === folderInput;
+
       retentionPage.folder = 'D:/Backups';
       await retentionPage.analyze();
       clearTimeout(retentionPage.previewTimer);
+      const analyzedPolicy = JSON.parse(JSON.stringify(retentionPage._getCfg()));
       const initialDisabled = document.getElementById('ret-apply-btn').disabled;
       const sidebarVisible = !!document.getElementById('ret-preview-card');
       const previewButtonCount = document.querySelectorAll('[onclick*="runPreview"]').length;
@@ -73,8 +90,24 @@ app.whenReady().then(async () => {
       await retentionPage.load();
       const profileRows = document.querySelectorAll('[data-retention-profile]').length;
       await retentionPage.runScheduleProfile('scheduled-1');
-      return { initialDisabled, failedDisabled, blocked, successEnabled, changedDisabled, applyCalls, appliedPolicy, sidebarVisible, previewButtonCount, modalCalls: window.__modalCalls, folderAccordions, previewViewButtons, treeFolders, treeFiles, treePattern, treePatternText, treeModeActive, defaultFormats, customFormats, allFormats, profileRows, profileRuns: window.__profileRuns, pageErrors: [] };
+      return { initialDisabled, failedDisabled, blocked, successEnabled, changedDisabled, applyCalls, appliedPolicy, sidebarVisible, previewButtonCount, modalCalls: window.__modalCalls, folderInputPreserved, folderFocusPreserved, defaultPolicy, analyzedPolicy, defaultControls, folderAccordions, previewViewButtons, treeFolders, treeFiles, treePattern, treePatternText, treeModeActive, defaultFormats, customFormats, allFormats, profileRows, profileRuns: window.__profileRuns, pageErrors: [] };
     })()`);
+    const measureLayout = async (width) => {
+      win.setSize(width, 900);
+      await new Promise(resolve => setTimeout(resolve, 80));
+      return win.webContents.executeJavaScript(`(() => {
+        const layout = document.querySelector('.retention-layout');
+        const sidebar = document.getElementById('ret-preview-card');
+        return {
+          viewport: window.innerWidth,
+          layout: Math.round(layout.getBoundingClientRect().width),
+          sidebar: Math.round(sidebar.getBoundingClientRect().width),
+          columns: getComputedStyle(layout).gridTemplateColumns.split(' ').length,
+          maxWidth: getComputedStyle(sidebar).maxWidth
+        };
+      })()`);
+    };
+    result.responsive = { narrow: await measureLayout(1000), wide: await measureLayout(1700) };
     process.stdout.write(`RETENTION_UI_RESULT=${JSON.stringify(result)}\n`);
     app.exit(0);
   } catch (error) {

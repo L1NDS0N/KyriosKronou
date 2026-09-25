@@ -55,7 +55,7 @@ class RetentionPage {
 
             <label class="form-label">${retEsc(i18n.t('retention.folderLabel'))}</label>
             <div class="input-row">
-              <input type="text" class="form-input" id="ret-folder" data-path-input data-path-kind="directory" value="${retEsc(this.folder)}" placeholder="D:\\Backups" oninput="retentionPage.folder=this.value; retentionPage._resetResults()">
+              <input type="text" class="form-input" id="ret-folder" data-path-input data-path-kind="directory" value="${retEsc(this.folder)}" placeholder="D:\\Backups" oninput="retentionPage._onFolderInput(this)">
               <button class="btn-outline btn-sm" onclick="retentionPage._browse()" title="${retEsc(i18n.t('taskModal.browse'))}"><i data-lucide="folder-open"></i></button>
               <button class="btn-glow btn-sm" onclick="retentionPage.analyze()" id="ret-analyze-btn"><i data-lucide="search"></i> ${retEsc(i18n.t('retention.analyzeBtn'))}</button>
             </div>
@@ -85,7 +85,7 @@ class RetentionPage {
             <div class="glass-card-header"><h3><i data-lucide="eye"></i> ${retEsc(i18n.t('retention.previewTitle'))}</h3></div>
             ${this._renderPreviewViewToggle()}
           </div>
-          ${this._renderLastRun()}
+          <div id="ret-last-run">${this._renderLastRun()}</div>
           <div class="ret-preview-content">${this._renderPreviewState()}</div>
           <button class="btn-danger" onclick="retentionPage.applyNow()" id="ret-apply-btn" ${this.preview && this.preview.ok ? '' : 'disabled'}><i data-lucide="trash-2"></i> ${retEsc(i18n.t('retention.applyBtn'))}</button>
         </aside>
@@ -103,14 +103,35 @@ class RetentionPage {
     if (window.lucide) lucide.createIcons();
   }
 
-  _resetResults() {
+  _onFolderInput(input) {
+    this.folder = input.value;
+    this._resetResults(false);
+  }
+
+  _resetResults(render = true) {
     clearTimeout(this.previewTimer);
     this.previewRequest++;
     this.analysis = null;
     this.preview = null;
     this.previewKey = null;
     this.lastRun = null;
-    this.render();
+    if (render) {
+      this.render();
+      return;
+    }
+    const analysis = document.getElementById('ret-analysis');
+    if (analysis) analysis.innerHTML = '';
+    const policy = document.getElementById('ret-policy-card');
+    if (policy) policy.style.display = 'none';
+    const lastRun = document.getElementById('ret-last-run');
+    if (lastRun) lastRun.innerHTML = this._renderLastRun();
+    const content = document.querySelector('.ret-preview-content');
+    if (content) content.innerHTML = this._renderPreviewState();
+    const button = document.getElementById('ret-apply-btn');
+    if (button) button.disabled = true;
+    const head = document.querySelector('.ret-preview-head');
+    if (head) head.innerHTML = `<div class="glass-card-header"><h3><i data-lucide="eye"></i> ${retEsc(i18n.t('retention.previewTitle'))}</h3></div>${this._renderPreviewViewToggle()}`;
+    if (window.lucide) lucide.createIcons();
   }
 
   async _browse() {
@@ -151,10 +172,6 @@ class RetentionPage {
     }
     this.busy = false;
     if (btn) btn.disabled = false;
-    // Default mode auto-suggests; advanced waits for explicit input.
-    if (this.analysis && this.analysis.ok && !this.advanced && this.analysis.suggested) {
-      this._applySuggestion(this.analysis.suggested, true);
-    }
     this.render();
     this._schedulePreview();
   }
@@ -200,7 +217,8 @@ class RetentionPage {
         </label>
       </div>
       ${this._renderFormatRules()}
-      ${adv ? this._renderAdvancedRules() : this._renderDefaultRules()}
+      ${this._renderDefaultRules()}
+      ${adv ? this._renderAdvancedRules() : ''}
     `;
   }
 
@@ -248,14 +266,14 @@ class RetentionPage {
   }
 
   _renderDefaultRules() {
+    const c = this._getCfg();
     return `
       <div class="ret-default">
         <div class="form-hint" style="margin-bottom:8px">${retEsc(i18n.t('retention.defaultHint'))}</div>
-        <div class="ret-default-row">
-          <span>${retEsc(i18n.t('retention.keepLabel'))}</span>
-          <input type="number" class="form-input" id="ret-days" value="${this._getCfg().KeepDays}" min="1" max="3650" style="width:90px" onchange="retentionPage._setDays(this.value)">
-          <span>${retEsc(i18n.t('sync.days'))}</span>
-        </div>
+        <label class="check-row"><input type="checkbox" id="ret-default-count" ${c.ByCount ? 'checked' : ''} onchange="retentionPage._syncAdvanced()">
+          <span>${retEsc(i18n.t('retention.keepRecent'))} <input type="number" class="form-input" id="ret-default-count-n" value="${c.KeepCount}" min="1" max="10000" style="width:80px;display:inline-block;padding:2px 6px" onchange="retentionPage._syncAdvanced()"> ${retEsc(i18n.t('retention.filesCount'))}</span></label>
+        <label class="check-row"><input type="checkbox" id="ret-default-monthly" ${c.ByMonthly ? 'checked' : ''} onchange="retentionPage._syncAdvanced()">
+          <span>${retEsc(i18n.t('retention.byMonthly'))} <input type="number" class="form-input" id="ret-default-months" value="${c.MonthlyKeepMonths}" min="1" max="240" style="width:80px;display:inline-block;padding:2px 6px" onchange="retentionPage._syncAdvanced()"> ${retEsc(i18n.t('retention.months'))}</span></label>
         <div class="form-hint" style="margin-top:8px">${retEsc(i18n.t('retention.defaultSafety'))}</div>
       </div>`;
   }
@@ -266,15 +284,10 @@ class RetentionPage {
       <div class="ret-advanced">
         <label class="check-row"><input type="checkbox" id="ret-adv-age" ${c.ByAge ? 'checked' : ''} onchange="retentionPage._syncAdvanced()">
           <span>${retEsc(i18n.t('sync.retByAge'))} <input type="number" class="form-input" id="ret-adv-days" value="${c.KeepDays}" min="1" max="3650" style="width:80px;display:inline-block;padding:2px 6px" onchange="retentionPage._syncAdvanced()"> ${retEsc(i18n.t('sync.days'))}</span></label>
-        <label class="check-row"><input type="checkbox" id="ret-adv-count" ${c.ByCount ? 'checked' : ''} onchange="retentionPage._syncAdvanced()">
-          <span>${retEsc(i18n.t('sync.retByCount'))} <input type="number" class="form-input" id="ret-adv-count-n" value="${c.KeepCount}" min="1" max="10000" style="width:80px;display:inline-block;padding:2px 6px" onchange="retentionPage._syncAdvanced()"> ${retEsc(i18n.t('sync.snapshots'))}</span></label>
         <label class="check-row"><input type="checkbox" id="ret-adv-weekly" ${c.ByWeekly ? 'checked' : ''} onchange="retentionPage._syncAdvanced()">
           <span>${retEsc(i18n.t('retention.byWeekly'))} <input type="number" class="form-input" id="ret-adv-weeks" value="${c.WeeklyKeepWeeks}" min="1" max="520" style="width:80px;display:inline-block;padding:2px 6px" onchange="retentionPage._syncAdvanced()"> ${retEsc(i18n.t('retention.weeks'))}</span></label>
         <label class="check-row"><input type="checkbox" id="ret-adv-biweekly" ${c.ByBiweekly ? 'checked' : ''} onchange="retentionPage._syncAdvanced()">
           <span>${retEsc(i18n.t('retention.byBiweekly'))} <input type="number" class="form-input" id="ret-adv-fortnights" value="${c.BiweeklyKeepPeriods}" min="1" max="480" style="width:80px;display:inline-block;padding:2px 6px" onchange="retentionPage._syncAdvanced()"> ${retEsc(i18n.t('retention.fortnights'))}</span></label>
-        <label class="check-row"><input type="checkbox" id="ret-adv-monthly" ${c.ByMonthly ? 'checked' : ''} onchange="retentionPage._syncAdvanced()">
-          <span>${retEsc(i18n.t('retention.byMonthly'))} <input type="number" class="form-input" id="ret-adv-months" value="${c.MonthlyKeepMonths}" min="1" max="240" style="width:80px;display:inline-block;padding:2px 6px" onchange="retentionPage._syncAdvanced()"> ${retEsc(i18n.t('retention.months'))}</span></label>
-        <div class="form-hint" style="margin:2px 0 8px 26px">${retEsc(i18n.t('retention.periodicHint'))}</div>
         <label class="check-row"><input type="checkbox" id="ret-adv-size" ${c.BySize ? 'checked' : ''} onchange="retentionPage._syncAdvanced()">
           <span>${retEsc(i18n.t('sync.retBySize'))} <input type="number" class="form-input" id="ret-adv-gb" value="${c.FreeGb || 10}" min="1" max="100000" style="width:80px;display:inline-block;padding:2px 6px" onchange="retentionPage._syncAdvanced()"> GB</span></label>
         <div style="margin-top:10px">
@@ -287,7 +300,7 @@ class RetentionPage {
 
   _getCfg() {
     if (!this.cfg) {
-      this.cfg = { Enabled: true, FileExtensions: ['.7z', '.zip'], ByAge: true, KeepDays: 90, ByCount: false, KeepCount: 10, BySize: false, FreeGb: 0, ByWeekly: false, WeeklyKeepWeeks: 8, ByBiweekly: false, BiweeklyKeepPeriods: 12, ByMonthly: false, MonthlyKeepMonths: 12, MinKeep: 5 };
+      this.cfg = { Enabled: true, FileExtensions: ['.7z', '.zip'], ByAge: false, KeepDays: 90, ByCount: true, KeepCount: 30, BySize: false, FreeGb: 0, ByWeekly: false, WeeklyKeepWeeks: 8, ByBiweekly: false, BiweeklyKeepPeriods: 12, ByMonthly: true, MonthlyKeepMonths: 12, MinKeep: 5 };
     }
     // The date source toggle is part of the policy: preview and apply must
     // date snapshots exactly as the analysis did.
@@ -305,22 +318,24 @@ class RetentionPage {
   }
 
   _syncAdvanced(invalidate = true) {
-    // The default/minimal mode has no advanced controls in the DOM.
-    if (!document.getElementById('ret-adv-age')) return;
     const c = this._getCfg();
-    c.ByAge = document.getElementById('ret-adv-age').checked;
-    c.KeepDays = parseInt(document.getElementById('ret-adv-days').value, 10) || 30;
-    c.ByCount = document.getElementById('ret-adv-count').checked;
-    c.KeepCount = parseInt(document.getElementById('ret-adv-count-n').value, 10) || 10;
-    c.ByWeekly = document.getElementById('ret-adv-weekly').checked;
-    c.WeeklyKeepWeeks = parseInt(document.getElementById('ret-adv-weeks').value, 10) || 8;
-    c.ByBiweekly = document.getElementById('ret-adv-biweekly').checked;
-    c.BiweeklyKeepPeriods = parseInt(document.getElementById('ret-adv-fortnights').value, 10) || 12;
-    c.ByMonthly = document.getElementById('ret-adv-monthly').checked;
-    c.MonthlyKeepMonths = parseInt(document.getElementById('ret-adv-months').value, 10) || 12;
-    c.BySize = document.getElementById('ret-adv-size').checked;
-    c.FreeGb = parseFloat(document.getElementById('ret-adv-gb').value) || 0;
-    c.MinKeep = parseInt(document.getElementById('ret-adv-minkeep').value, 10) || 0;
+    const read = (id, apply) => {
+      const element = document.getElementById(id);
+      if (element) apply(element);
+    };
+    read('ret-default-count', el => { c.ByCount = el.checked; });
+    read('ret-default-count-n', el => { c.KeepCount = parseInt(el.value, 10) || 30; });
+    read('ret-default-monthly', el => { c.ByMonthly = el.checked; });
+    read('ret-default-months', el => { c.MonthlyKeepMonths = parseInt(el.value, 10) || 12; });
+    read('ret-adv-age', el => { c.ByAge = el.checked; });
+    read('ret-adv-days', el => { c.KeepDays = parseInt(el.value, 10) || 90; });
+    read('ret-adv-weekly', el => { c.ByWeekly = el.checked; });
+    read('ret-adv-weeks', el => { c.WeeklyKeepWeeks = parseInt(el.value, 10) || 8; });
+    read('ret-adv-biweekly', el => { c.ByBiweekly = el.checked; });
+    read('ret-adv-fortnights', el => { c.BiweeklyKeepPeriods = parseInt(el.value, 10) || 12; });
+    read('ret-adv-size', el => { c.BySize = el.checked; });
+    read('ret-adv-gb', el => { c.FreeGb = parseFloat(el.value) || 0; });
+    read('ret-adv-minkeep', el => { c.MinKeep = parseInt(el.value, 10) || 0; });
     if (invalidate) this._invalidatePreview();
   }
 

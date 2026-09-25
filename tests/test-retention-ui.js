@@ -49,6 +49,32 @@ describe('Retention UI in the real Electron renderer', () => {
     expect(result.modalCalls).to.equal(0);
   });
 
+  it('stretches the retention layout and sidebar with the window', () => {
+    expect(result.responsive.narrow.columns).to.equal(2);
+    expect(result.responsive.wide.columns).to.equal(2);
+    expect(result.responsive.wide.sidebar).to.be.greaterThan(result.responsive.narrow.sidebar + 150);
+    expect(result.responsive.wide.layout).to.be.greaterThan(result.responsive.narrow.layout + 400);
+    expect(result.responsive.wide.maxWidth).to.equal('none');
+  });
+
+  it('defaults to 30 recent files plus monthly retention', () => {
+    expect(result.defaultPolicy.ByCount).to.equal(true);
+    expect(result.defaultPolicy.KeepCount).to.equal(30);
+    expect(result.defaultPolicy.ByMonthly).to.equal(true);
+    expect(result.defaultPolicy.MonthlyKeepMonths).to.equal(12);
+    expect(result.defaultPolicy.ByAge).to.equal(false);
+    expect(result.defaultPolicy.ByWeekly).to.equal(false);
+    expect(result.defaultPolicy.ByBiweekly).to.equal(false);
+    expect(result.defaultPolicy.BySize).to.equal(false);
+    expect(result.analyzedPolicy).to.deep.equal(result.defaultPolicy);
+    expect(result.defaultControls).to.deep.equal({ count: true, countValue: '30', monthly: true, months: '12', advancedAge: false });
+  });
+
+  it('keeps the folder input and its focus while typing', () => {
+    expect(result.folderInputPreserved).to.equal(true);
+    expect(result.folderFocusPreserved).to.equal(true);
+  });
+
   it('keeps Apply disabled without a successful preview', () => {
     expect(result.initialDisabled).to.equal(true);
     expect(result.failedDisabled).to.equal(true);

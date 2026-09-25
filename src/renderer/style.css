@@ -738,10 +738,10 @@ kbd {
 .sim-note { font-size: 10.5px; color: var(--text3); padding: 6px 12px 8px; border-top: 1px solid var(--border); font-style: italic; }
 
 /* Standalone Retention screen */
-.ret-card { margin-bottom: 14px; max-width: 860px; padding: 18px 20px; }
- .retention-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 14px; max-width: 1280px; align-items: start; }
+ .ret-card { margin-bottom: 14px; max-width: none; padding: 18px 20px; }
+ .retention-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 38%); gap: 14px; width: 100%; align-items: start; }
  .retention-config .ret-card { max-width: none; }
- .ret-preview-sidebar { position: sticky; top: 14px; max-width: none; max-height: calc(100vh - 32px); overflow-y: auto; }
+ .ret-preview-sidebar { position: sticky; top: 14px; width: 100%; max-width: none; max-height: calc(100vh - 104px); overflow-y: auto; }
  .ret-preview-sidebar > .btn-danger { width: 100%; margin-top: 14px; }
  .ret-preview-content { min-height: 80px; }
  .ret-preview-content .ret-list-scroll { max-height: 46vh; }
@@ -783,7 +783,7 @@ kbd {
  .ret-tree-file-details { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 5px 0 0 19px; color: var(--text3); font-size: 9.5px; }
  .ret-tree-file-details span { display: flex; align-items: center; gap: 4px; }
  .ret-tree-file-details svg { width: 10px; height: 10px; }
- .ret-schedules-card { max-width: 1280px; }
+ .ret-schedules-card { max-width: none; }
  .ret-schedules-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
  .ret-profile-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 0; border-top: 1px solid var(--border); }
  .ret-profile-row.disabled { opacity: .6; }
