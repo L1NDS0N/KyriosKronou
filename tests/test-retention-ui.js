@@ -50,11 +50,18 @@ describe('Retention UI in the real Electron renderer', () => {
   });
 
   it('stretches the retention layout and sidebar with the window', () => {
-    expect(result.responsive.narrow.columns).to.equal(2);
+    expect(result.responsive.narrow.columns).to.equal(1);
     expect(result.responsive.wide.columns).to.equal(2);
-    expect(result.responsive.wide.sidebar).to.be.greaterThan(result.responsive.narrow.sidebar + 150);
+    expect(result.responsive.wide.sidebar).to.be.within(400, 800);
     expect(result.responsive.wide.layout).to.be.greaterThan(result.responsive.narrow.layout + 400);
     expect(result.responsive.wide.maxWidth).to.equal('none');
+  });
+
+  it('standardizes primary, small and destructive button sizes', () => {
+    expect(result.responsive.wide.primaryButton).to.equal(34);
+    expect(result.responsive.wide.smallButton).to.equal(28);
+    expect(result.responsive.wide.dangerButton).to.equal(28);
+    expect(result.responsive.wide.disabledOpacity).to.equal('0.4');
   });
 
   it('defaults to 30 recent files plus monthly retention', () => {

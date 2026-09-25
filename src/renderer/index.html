@@ -35,9 +35,9 @@
       </div>
     </div>
     <div id="titlebar-buttons">
-      <button class="tb-btn" id="btn-minimize"><i data-lucide="minus" class="tb-icon"></i></button>
-      <button class="tb-btn" id="btn-maximize"><i data-lucide="square" class="tb-icon"></i></button>
-      <button class="tb-btn tb-close" id="btn-close"><i data-lucide="x" class="tb-icon"></i></button>
+      <button type="button" class="tb-btn" id="btn-minimize"><i data-lucide="minus" class="tb-icon"></i></button>
+      <button type="button" class="tb-btn" id="btn-maximize"><i data-lucide="square" class="tb-icon"></i></button>
+      <button type="button" class="tb-btn tb-close" id="btn-close"><i data-lucide="x" class="tb-icon"></i></button>
     </div>
   </div>
 
@@ -165,7 +165,7 @@
             <div class="glass-card-header">
               <h3><i data-lucide="activity"></i> <span data-i18n="dash.recentActivity">Atividade recente</span></h3>
             </div>
-            <div class="table-wrap">
+            <div class="table-wrap table-scroll" data-min="560">
               <table class="data-table" id="recent-table">
                 <thead><tr><th>Quando</th><th>O quê</th><th>Status</th><th>Duração</th></tr></thead>
                 <tbody id="recent-body"></tbody>
@@ -177,7 +177,7 @@
 
         <!-- ═══ TASKS ═══ -->
         <section id="page-tasks" class="page">
-          <div class="page-toolbar">
+          <div class="page-toolbar toolbar-wrap">
             <div class="toolbar-left">
               <button class="btn-glow" id="btn-new-task"><i data-lucide="plus"></i><span data-i18n="tasks.newTask">New Task</span></button>
               <button class="btn-ghost" id="btn-import"><i data-lucide="upload"></i><span data-i18n="tasks.import">Import</span></button>
@@ -228,7 +228,7 @@
             </div>
             <button class="btn-outline btn-sm" id="btn-kyrion-svc-toggle" style="font-size:11px"></button>
           </div>
-          <div class="page-toolbar">
+          <div class="page-toolbar toolbar-wrap">
             <div class="toolbar-left">
               <span class="toolbar-info"><i data-lucide="server"></i> Serviços do Windows</span>
               <span class="badge badge-info svc-refreshing" id="services-refreshing" style="display:none">atualizando…</span>
@@ -244,7 +244,7 @@
             </div>
           </div>
           <div class="glass-card">
-            <div class="table-wrap">
+            <div class="table-wrap table-scroll" data-min="560">
               <table class="data-table" id="services-table">
                 <thead><tr><th>Service Name</th><th>Status</th><th>Application</th><th>Startup</th><th>Actions</th></tr></thead>
                 <tbody id="services-body"></tbody>
@@ -256,7 +256,7 @@
 
         <!-- ═══ HISTORY ═══ -->
         <section id="page-history" class="page">
-          <div class="page-toolbar">
+          <div class="page-toolbar toolbar-wrap">
             <div class="toolbar-left">
               <div class="segmented">
                 <button class="seg-btn active" data-filter="all" data-i18n="history.all">All</button>
@@ -270,7 +270,7 @@
             </div>
           </div>
           <div class="glass-card">
-            <div class="table-wrap">
+            <div class="table-wrap table-scroll" data-min="560">
               <table class="data-table" id="history-table">
                 <thead><tr><th>Timestamp</th><th>Task</th><th>Cron</th><th>Status</th><th>Duration</th></tr></thead>
                 <tbody id="history-body"></tbody>
@@ -282,7 +282,7 @@
 
         <!-- ═══ BACKUPS ═══ -->
         <section id="page-backup" class="page">
-          <div class="page-toolbar">
+          <div class="page-toolbar toolbar-wrap">
             <div class="toolbar-left"><span class="toolbar-info"><i data-lucide="hard-drive-download"></i> MySQL Backup Profiles</span></div>
             <div class="toolbar-right">
               <button class="btn-outline" id="btn-refresh-backups" title="Refresh"><i data-lucide="refresh-cw"></i></button>
@@ -300,7 +300,7 @@
 
         <!-- ═══ SYNC ═══ -->
         <section id="page-sync" class="page">
-          <div class="page-toolbar">
+          <div class="page-toolbar toolbar-wrap">
             <div class="toolbar-left"><span class="toolbar-info"><i data-lucide="folder-sync"></i> <span data-i18n="sync.title">Folder Sync Profiles</span></span></div>
             <div class="toolbar-right">
               <button class="btn-outline" id="btn-refresh-sync" title="Refresh"><i data-lucide="refresh-cw"></i></button>
@@ -317,7 +317,7 @@
 
         <!-- ═══ RETENTION (standalone cleanup) ═══ -->
         <section id="page-retention" class="page">
-          <div class="page-toolbar">
+          <div class="page-toolbar toolbar-wrap">
             <div class="toolbar-left"><span class="toolbar-info"><i data-lucide="scissors"></i> <span data-i18n="retention.title">Retention</span></span></div>
           </div>
           <div id="retention-content"></div>
@@ -330,7 +330,7 @@
               <div class="glass-card-header"><h3><i data-lucide="user-cog"></i> Configuration Profile</h3></div>
               <div class="settings-body">
                 <div class="form-group"><label class="form-label">Profile Name</label><input type="text" class="form-input" id="cfg-profile" value="default"></div>
-                <div class="form-group"><label class="form-label">NSSM Path</label><div class="input-with-btn"><input type="text" class="form-input" id="cfg-nssm" value="nssm"><button class="btn-outline btn-sm">Browse</button></div></div>
+                <div class="form-group"><label class="form-label">NSSM Path</label><input type="text" class="form-input" id="cfg-nssm" value="nssm"></div>
                 <div class="form-group">
                   <label class="form-label" data-i18n="settings.language">Language</label>
                   <select class="form-input" id="cfg-language">
@@ -452,7 +452,7 @@
                   <div class="toggle-desc" style="margin-bottom:10px">Nobody can sign in until a login is added here &mdash; including you. Removing a login ends its active sessions immediately.</div>
                   <div style="display:flex;gap:8px;margin-bottom:12px">
                     <input type="text" class="form-input" id="gh-user-input" placeholder="login do GitHub" style="flex:1" autocomplete="off">
-                    <button class="btn-primary" id="btn-add-gh-user">Add</button>
+                    <button type="button" class="btn-glow" id="btn-add-gh-user">Add</button>
                   </div>
                   <div id="gh-users-list"></div>
                 </div>
@@ -485,7 +485,7 @@
 
         <!-- ═══ LOGS ═══ -->
         <section id="page-logs" class="page">
-          <div class="page-toolbar">
+          <div class="page-toolbar toolbar-wrap">
             <div class="toolbar-left">
               <div class="logs-tabs">
                 <button class="logs-tab active" data-log-tab="errors"><i data-lucide="alert-circle"></i> Errors</button>
@@ -504,7 +504,7 @@
           <div id="logs-filters"></div>
 
           <div class="glass-card">
-            <div class="table-wrap">
+            <div class="table-wrap table-scroll" data-min="560">
               <!-- Sibling, not child: renderLogsTable replaces #logs-table-wrap
                    wholesale, which used to destroy this node and crash the next
                    render on a null reference. -->

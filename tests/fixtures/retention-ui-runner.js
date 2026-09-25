@@ -98,12 +98,21 @@ app.whenReady().then(async () => {
       return win.webContents.executeJavaScript(`(() => {
         const layout = document.querySelector('.retention-layout');
         const sidebar = document.getElementById('ret-preview-card');
+        const probe = document.createElement('button');
+        probe.className = 'btn-glow';
+        document.body.appendChild(probe);
+        const primaryHeight = Math.round(probe.getBoundingClientRect().height);
+        probe.remove();
         return {
           viewport: window.innerWidth,
           layout: Math.round(layout.getBoundingClientRect().width),
           sidebar: Math.round(sidebar.getBoundingClientRect().width),
           columns: getComputedStyle(layout).gridTemplateColumns.split(' ').length,
-          maxWidth: getComputedStyle(sidebar).maxWidth
+          maxWidth: getComputedStyle(sidebar).maxWidth,
+          primaryButton: primaryHeight,
+          smallButton: Math.round(document.querySelector('#ret-folder ~ button').getBoundingClientRect().height),
+          dangerButton: Math.round(document.getElementById('ret-apply-btn').getBoundingClientRect().height),
+          disabledOpacity: getComputedStyle(document.getElementById('ret-apply-btn')).opacity
         };
       })()`);
     };

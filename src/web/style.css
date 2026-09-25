@@ -136,37 +136,26 @@ a { color: inherit; text-decoration: none; }
 .badge-info { background: var(--glass2); color: var(--text2); border: 1px solid var(--border); }
 
 /* ═══ BUTTONS ═══ */
-.btn-primary {
-  display: inline-flex; align-items: center; gap: 7px; padding: 9px 18px;
-  border: 1px solid var(--glass-border2); border-radius: var(--radius-xs);
-  background: var(--glass2); color: var(--text); font-size: 12px; font-weight: 600;
-  font-family: var(--font); cursor: pointer; transition: var(--transition);
-}
-.btn-primary:hover { background: var(--glass3); border-color: rgba(180,180,200,.16); }
-.btn-ghost, .btn-outline {
-  display: inline-flex; align-items: center; gap: 7px; padding: 9px 18px;
+.btn-primary, .btn-ghost, .btn-outline, .btn-secondary-sm, .btn-danger {
+  --btn-h: 34px; --btn-px: 18px; --btn-gap: 7px; --btn-icon: 15px;
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--btn-gap);
+  min-height: var(--btn-h); padding: 0 var(--btn-px);
   border: 1px solid var(--glass-border); border-radius: var(--radius-xs);
-  background: var(--glass); backdrop-filter: blur(12px);
-  color: var(--text3); font-size: 12px; font-weight: 500;
-  font-family: var(--font); cursor: pointer; transition: var(--transition);
+  color: var(--text3); font-family: var(--font); font-size: 12px; font-weight: 500; line-height: 1;
+  cursor: pointer; transition: var(--transition); user-select: none; white-space: nowrap;
 }
-.btn-ghost:hover, .btn-outline:hover { background: var(--glass2); color: var(--text2); border-color: var(--glass-border2); }
-.btn-secondary-sm {
-  display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px;
-  border: 1px solid var(--glass-border); border-radius: var(--radius-xs);
-  background: var(--glass); color: var(--text3); font-size: 11px; font-weight: 500;
-  font-family: var(--font); cursor: pointer; transition: var(--transition);
-}
-.btn-secondary-sm:hover { background: var(--glass2); color: var(--text2); border-color: var(--glass-border2); }
-.btn-danger {
-  display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px;
-  border: 1px solid rgba(138,90,90,.12); border-radius: var(--radius-xs);
-  background: var(--red-dim); color: var(--red); font-size: 11px; font-weight: 600;
-  font-family: var(--font); cursor: pointer; transition: var(--transition);
-}
-.btn-danger:hover { background: rgba(138,90,90,.14); border-color: rgba(138,90,90,.2); }
-button svg { width: 13px; height: 13px; }
+.btn-primary { border-color: var(--glass-border2); background: var(--glass2); color: var(--text); font-weight: 600; }
+.btn-ghost, .btn-outline, .btn-secondary-sm { background: var(--glass); }
+.btn-secondary-sm, .btn-danger { --btn-h: 28px; --btn-px: 10px; --btn-gap: 4px; --btn-icon: 13px; font-size: 11px; }
+.btn-danger { background: var(--red-dim); color: var(--red); font-weight: 600; border-color: rgba(138,90,90,.12); }
+.btn-sm { --btn-h: 28px; --btn-px: 10px; --btn-gap: 4px; --btn-icon: 13px; font-size: 11px; }
+.btn-block { display: flex; width: 100%; }
+.btn-primary:hover:not(:disabled) { background: var(--glass3); border-color: rgba(180,180,200,.16); color: var(--text); }
+.btn-ghost:hover:not(:disabled), .btn-outline:hover:not(:disabled), .btn-secondary-sm:hover:not(:disabled) { background: var(--glass2); color: var(--text2); border-color: var(--glass-border2); }
+.btn-danger:hover:not(:disabled) { background: rgba(138,90,90,.14); border-color: rgba(138,90,90,.2); }
+button svg { width: var(--btn-icon, 13px); height: var(--btn-icon, 13px); flex: 0 0 auto; }
 button:disabled { opacity: .4; cursor: not-allowed; }
+.btn-primary:focus-visible, .btn-ghost:focus-visible, .btn-outline:focus-visible, .btn-secondary-sm:focus-visible, .btn-danger:focus-visible { outline: none; border-color: var(--primary-light); box-shadow: 0 0 0 3px var(--primary-dim); }
 
 /* ═══ TABLES ═══ */
 .tbl { width: 100%; border-collapse: collapse; font-size: 12px; }

@@ -316,15 +316,15 @@ class SyncPage {
         </select>
         <div class="input-row" style="margin-top:6px">
           <input type="text" class="form-input" id="sync-dest" value="${syncEsc(d.DestPath)}" placeholder="${d.Engine === 'local' ? 'D:\\Espelho\\Dados' : '/backups/dados'}" oninput="syncPage._setDestPath(this.value)">
-          ${d.Engine === 'local' ? `<button class="btn-outline btn-sm" onclick="syncPage.browse('sync-dest')"><i data-lucide="folder-open"></i></button>` : ''}
+          ${d.Engine === 'local' ? `<button class="btn-outline btn-sm" onclick="syncPage.browse('sync-dest')" title="${syncEsc(i18n.t('taskModal.browse'))}"><i data-lucide="folder-open"></i></button>` : ''}
         </div>
 
         ${d.Engine !== 'local' ? `
-        <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px;margin-top:10px">
+        <div class="connection-grid" style="margin-top:10px">
           <div><label class="form-label">${syncEsc(i18n.t('wizard.host'))}</label><input type="text" class="form-input" id="sync-host" value="${syncEsc(d.Host)}" oninput="syncPage.draft.Host=this.value"></div>
           <div><label class="form-label">${syncEsc(i18n.t('wizard.port'))}</label><input type="number" class="form-input" id="sync-port" value="${d.Port || ''}" oninput="syncPage.draft.Port=parseInt(this.value)||null"></div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+        <div class="responsive-grid" data-min="180" style="margin-top:8px">
           <div><label class="form-label">${syncEsc(i18n.t('wizard.user'))}</label><input type="text" class="form-input" id="sync-user" value="${syncEsc(d.User)}" oninput="syncPage.draft.User=this.value"></div>
           <div><label class="form-label">${syncEsc(i18n.t('wizard.password'))}</label><input type="password" class="form-input" id="sync-pass" value="${syncEsc(d.Password)}" oninput="syncPage.draft.Password=this.value"></div>
         </div>` : ''}
@@ -420,7 +420,7 @@ class SyncPage {
       <div class="form-hint" style="margin:0 0 8px">${syncEsc(i18n.t('retention.formatsHint'))}</div>
       <label class="check-row"><input type="checkbox" ${all ? 'checked' : ''} onchange="syncPage._setAllFormats(this.checked)"><span>${syncEsc(i18n.t('retention.formatsAll'))}</span></label>
       <div class="ret-format-choices">${choices.map(ext => `<label class="check-row"><input type="checkbox" ${!all && extensions.includes(ext) ? 'checked' : ''} onchange="syncPage._toggleFormat('${ext}', this.checked)"><span class="mono">${syncEsc(ext)}</span></label>`).join('')}</div>
-      <div class="input-row" style="margin-top:6px"><input type="text" class="form-input mono" id="sync-custom-format" placeholder="${syncEsc(i18n.t('retention.formatsCustom'))}" onkeydown="if(event.key==='Enter'){event.preventDefault();syncPage._addFormat()}"><button class="btn-outline btn-sm" onclick="syncPage._addFormat()"><i data-lucide="plus"></i></button></div>
+      <div class="input-row" style="margin-top:6px"><input type="text" class="form-input mono" id="sync-custom-format" placeholder="${syncEsc(i18n.t('retention.formatsCustom'))}" onkeydown="if(event.key==='Enter'){event.preventDefault();syncPage._addFormat()}"><button class="btn-outline btn-sm" onclick="syncPage._addFormat()" title="${syncEsc(i18n.t('retention.formatsCustom'))}"><i data-lucide="plus"></i></button></div>
     </div>`;
   }
 

@@ -233,7 +233,7 @@ class RetentionPage {
       <div class="form-hint" style="margin:0 0 8px">${retEsc(i18n.t('retention.formatsHint'))}</div>
       <label class="check-row"><input type="checkbox" ${all ? 'checked' : ''} onchange="retentionPage._setAllFormats(this.checked)"><span>${retEsc(i18n.t('retention.formatsAll'))}</span></label>
       <div class="ret-format-choices">${choices.map(ext => `<label class="check-row"><input type="checkbox" ${!all && extensions.includes(ext) ? 'checked' : ''} onchange="retentionPage._toggleFormat('${ext}', this.checked)"><span class="mono">${retEsc(ext)}</span></label>`).join('')}</div>
-      <div class="input-row" style="margin-top:6px"><input type="text" class="form-input mono" id="ret-custom-format" placeholder="${retEsc(i18n.t('retention.formatsCustom'))}" onkeydown="if(event.key==='Enter'){event.preventDefault();retentionPage._addFormat()}"><button class="btn-outline btn-sm" onclick="retentionPage._addFormat()"><i data-lucide="plus"></i></button></div>
+      <div class="input-row" style="margin-top:6px"><input type="text" class="form-input mono" id="ret-custom-format" placeholder="${retEsc(i18n.t('retention.formatsCustom'))}" onkeydown="if(event.key==='Enter'){event.preventDefault();retentionPage._addFormat()}"><button class="btn-outline btn-sm" onclick="retentionPage._addFormat()" title="${retEsc(i18n.t('retention.formatsCustom'))}"><i data-lucide="plus"></i></button></div>
     </div>`;
   }
 

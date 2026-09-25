@@ -313,11 +313,11 @@ class BackupPage {
         ` : ''}
 
         <label class="form-label" style="margin-top:12px">${esc(i18n.t('wizard.connection'))}</label>
-        <div style="display:grid;grid-template-columns:1fr 80px;gap:8px">
+        <div class="connection-grid">
           <div class="form-group"><label class="form-label">${esc(i18n.t('wizard.host'))}</label><input type="text" class="form-input" id="wiz-host" value="${esc(d.Host)}" oninput="backupPage.draft.Host=this.value; backupPage._updateFloatingSummary()"></div>
           <div class="form-group"><label class="form-label">${esc(i18n.t('wizard.port'))}</label><input type="number" class="form-input" id="wiz-port" value="${d.Port}" oninput="backupPage.draft.Port=parseInt(this.value)||3306; backupPage._updateFloatingSummary()"></div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div class="responsive-grid" data-min="180" style="margin-top:8px">
           <div class="form-group"><label class="form-label">${esc(i18n.t('wizard.user'))}</label><input type="text" class="form-input" id="wiz-user" value="${esc(d.User)}" oninput="backupPage.draft.User=this.value"></div>
           <div class="form-group"><label class="form-label">${esc(i18n.t('wizard.password'))}</label><input type="password" class="form-input" id="wiz-pass" value="${esc(d.Password)}" oninput="backupPage.draft.Password=this.value"></div>
         </div>
@@ -492,8 +492,8 @@ class BackupPage {
           <button class="btn-outline btn-sm" onclick="backupPage.testTarget(${i})" title="Test Connection"><i data-lucide="wifi"></i> Test</button>
           <button class="btn-danger btn-sm" onclick="this.closest('.bp-target-card').remove(); backupPage._syncTargets()" title="Remove"><i data-lucide="trash-2"></i></button>
         </div>
-        <div style="display:grid;grid-template-columns:1fr;gap:6px">
-          <div style="display:grid;grid-template-columns:2fr 1fr;gap:6px">
+        <div style="display:grid;gap:6px">
+          <div class="connection-grid">
             <div>
               <label class="form-label" style="margin-bottom:2px;font-size:10px">Host</label>
               <input type="text" class="form-input" id="wiz-t-host-${i}" value="${esc(t.host || t.url || '')}" placeholder="ftp.example.com" oninput="backupPage._syncTargets()">
@@ -503,7 +503,7 @@ class BackupPage {
               <input type="number" class="form-input" id="wiz-t-port-${i}" value="${port}" min="1" max="65535" oninput="backupPage._syncTargets()">
             </div>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <div class="responsive-grid" data-min="180" style="gap:6px">
             <div>
               <label class="form-label" style="margin-bottom:2px;font-size:10px">User ${isSmb ? '<span style="color:var(--text3)">(optional for local shares)</span>' : ''}</label>
               <input type="text" class="form-input" id="wiz-t-user-${i}" value="${esc(t.user || '')}" placeholder="${isSmb ? 'DOMAIN\\user or .\\user' : 'username'}" oninput="backupPage._syncTargets()">
