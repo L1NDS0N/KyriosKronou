@@ -7,6 +7,7 @@
 const { SyncthingInstaller } = require('./installer');
 const { SyncthingManager, normalizeFolder, normalizeDevice } = require('./manager');
 const { PostSyncBridge } = require('./postSync');
+const { SyncInstances, DEFAULT_ID } = require('./instances');
 const deviceAuth = require('./deviceAuth');
 
 const DEVICE_REGISTRY_KEY = 'SyncNetworkDevices';
@@ -27,13 +28,56 @@ class SyncNetwork {
     this.config = options.config || null;
     this.installer = options.installer || new SyncthingInstaller(options.logger);
     this.manager = options.manager || new SyncthingManager({ logger: options.logger, installer: this.installer });
+    this.instances = options.instances || new SyncInstances({ logger: options.logger, config: this.config, installer: this.installer });
     this.postSync = options.postSync || new PostSyncBridge({
       logger: options.logger, taskManager: options.taskManager, runRegistry: options.runRegistry,
     });
   }
 
+  // Cada instancia e uma "maquina" para efeitos de pareamento. A padrao e a que
+  // responde a rede; as demais sao a copia local para outro disco.
+  managerFor(instanceId) {
+    if (!instanceId || instanceId === DEFAULT_ID) return this.manager;
+    return this.instances.managerFor(instanceId) || this.manager;
+  }
+
+  listInstances() {
+    return this.instances.list().map((i) => Object.assign({}, i, {
+      deviceID: this.instances.deviceIdOf(i),
+      running: i.Id === DEFAULT_ID ? Boolean((this.statusCache || {}).running) : undefined,
+    }));
+  }
+
   // Chamado pelo dono do agendador a cada tique. Devolve as tarefas disparadas
   // para o chamador auditar; um erro aqui nunca deve derrubar o tique.
+  async createInstance(name) {
+    return this.instances.create(name);
+  }
+
+  async removeInstance(id) {
+    return this.instances.remove(id);
+  }
+
+  async startInstance(id) {
+    const manager = this.instances.managerFor(id);
+    if (!manager) return { success: false, reason: 'network.instanceNotFound' };
+    const result = await manager.daemon.start();
+    if (!result.ok) return Object.assign({ success: false }, result, { reason: reasonOf(result) });
+    manager.client = result.client;
+    return { success: true, alreadyRunning: Boolean(result.alreadyRunning), port: result.port };
+  }
+
+  async stopInstance(id) {
+    const manager = this.instances.managerFor(id);
+    if (!manager) return { success: false, reason: 'network.instanceNotFound' };
+    const ready = await manager.ready();
+    if (!ready.ok) return Object.assign({ success: false }, ready, { reason: reasonOf(ready) });
+    const result = await manager.daemon.stop(ready.client);
+    if (!result.ok) return Object.assign({ success: false }, result, { reason: reasonOf(result) });
+    manager.client = null;
+    return { success: true };
+  }
+
   async checkPostSync() {
     try {
       const ready = await this.manager.ready();

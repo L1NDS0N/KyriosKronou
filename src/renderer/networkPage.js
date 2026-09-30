@@ -69,6 +69,7 @@ class NetworkPage {
     this.overview = null;
     this.folders = [];
     this.devices = [];
+    this.instances = [];
     this.tab = 'dashboard';
     this.folderTab = 'general';
     this.draft = null;
@@ -88,6 +89,10 @@ class NetworkPage {
     try { this.status = await window.api.getSyncNetworkStatus(); } catch (e) { this.status = { installed: false, running: false }; }
     try { this.identity = await window.api.getSyncNetworkIdentity(); } catch (e) { this.identity = { loggedIn: false, user: null }; }
     await this.loadTasks();
+    try {
+      const result = await window.api.getSyncNetworkInstances();
+      this.instances = (result && result.instances) || [];
+    } catch (e) { this.instances = []; }
 
     if (this.status && this.status.running) {
       const [overview, folders, devices] = await Promise.all([
@@ -270,6 +275,8 @@ class NetworkPage {
 
     panel.innerHTML = `
       ${identityBlock}
+      <div class="net-help"><i data-lucide="hard-drive"></i><span>${escHtml(i18n.t('network.localCopyHelp'))}</span></div>
+      ${this.renderInstances()}
       <table class="net-table">
         <thead><tr>
           <th>${escHtml(i18n.t('network.colName'))}</th>
@@ -281,6 +288,63 @@ class NetworkPage {
         <tbody>${rows || `<tr><td colspan="5" class="net-empty">${escHtml(i18n.t('network.noDevices'))}</td></tr>`}</tbody>
       </table>`;
     if (window.lucide && lucide.createIcons) lucide.createIcons();
+  }
+
+  // Cada instancia extra e um destino local. A pasta compartilhada entre a
+  // instancia principal e ela passa pelo mesmo protocolo e pelo mesmo
+  // pareamento por GitHub das maquinas remotas.
+  renderInstances() {
+    const extra = this.instances.filter((i) => i.Id !== 'default');
+    const rows = extra.map((i) => `
+      <tr>
+        <td><strong>${escHtml(i.Name)}</strong></td>
+        <td><code>${escHtml(i.deviceID || i18n.t('network.instanceNoDevice'))}</code></td>
+        <td class="net-path">${escHtml(i.Home)}</td>
+        <td class="net-actions">
+          <button class="btn-outline" onclick="networkPage.startInstance('${escHandler(i.Id)}')"><i data-lucide="play"></i></button>
+          <button class="btn-outline" onclick="networkPage.stopInstance('${escHandler(i.Id)}')"><i data-lucide="square"></i></button>
+          <button class="btn-outline btn-danger" onclick="networkPage.removeInstance('${escHandler(i.Id)}')"><i data-lucide="trash-2"></i></button>
+        </td>
+      </tr>`).join('');
+
+    return `
+      <div class="net-toolbar">
+        <button class="btn-outline" onclick="networkPage.createInstance()"><i data-lucide="plus"></i><span>${escHtml(i18n.t('network.newInstance'))}</span></button>
+      </div>
+      ${extra.length ? `<table class="net-table">
+        <thead><tr>
+          <th>${escHtml(i18n.t('network.colName'))}</th>
+          <th>${escHtml(i18n.t('network.colDeviceId'))}</th>
+          <th>${escHtml(i18n.t('network.colPath'))}</th>
+          <th></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>` : ''}`;
+  }
+
+  async createInstance() {
+    const name = window.prompt(i18n.t('network.instancePrompt'));
+    if (!name) return;
+    const result = await window.api.createSyncNetworkInstance(name);
+    if (result && result.ok) showToast(i18n.t('network.instanceCreated'), 'success');
+    else showToast(i18n.t((result && result.error) || 'network.instanceFailed'), 'error');
+    await this.load();
+  }
+
+  async removeInstance(id) {
+    await window.api.removeSyncNetworkInstance(id);
+    showToast(i18n.t('network.instanceRemoved'), 'success');
+    await this.load();
+  }
+
+  async startInstance(id) {
+    const result = await window.api.startSyncNetworkInstance(id);
+    showToast(i18n.t(result && result.success ? 'network.instanceStarted' : 'network.instanceFailed'), result && result.success ? 'success' : 'error');
+  }
+
+  async stopInstance(id) {
+    const result = await window.api.stopSyncNetworkInstance(id);
+    showToast(i18n.t(result && result.success ? 'network.instanceStopped' : 'network.instanceFailed'), result && result.success ? 'success' : 'error');
   }
 
   async login() {

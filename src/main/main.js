@@ -960,7 +960,20 @@ function registerIPC() {
     return { ok: true };
   });
 
-  syncNetworkCall('get-sync-network-status', () => syncNetwork.status());  syncNetworkCall('install-syncthing', () => syncNetwork.install());
+  syncNetworkCall('get-sync-network-status', () => syncNetwork.status());
+  syncNetworkCall('get-sync-network-instances', async () => ({ ok: true, instances: syncNetwork.listInstances() }));
+  syncNetworkCall('create-sync-network-instance', async (name) => {
+    const result = await syncNetwork.createInstance(name);
+    if (result.ok) logger.log('INFO', `SYNC_INSTANCE_CREATED id=${result.instance.Id} device=${result.deviceID}`);
+    return result;
+  });
+  syncNetworkCall('remove-sync-network-instance', async (id) => {
+    const result = await syncNetwork.removeInstance(id);
+    if (result.ok) logger.log('INFO', `SYNC_INSTANCE_REMOVED id=${id}`);
+    return result;
+  });
+  syncNetworkCall('start-sync-network-instance', async (id) => syncNetwork.startInstance(id));
+  syncNetworkCall('stop-sync-network-instance', async (id) => syncNetwork.stopInstance(id));  syncNetworkCall('install-syncthing', () => syncNetwork.install());
   syncNetworkCall('start-syncthing', () => syncNetwork.start());
   syncNetworkCall('stop-syncthing', () => syncNetwork.stop());
   syncNetworkCall('get-sync-network-overview', () => syncNetwork.overview());

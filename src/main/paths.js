@@ -37,7 +37,16 @@ function ownerFile() { return path.join(configDir(), 'scheduler-owner.json'); }
 // Syncthing's own config/cert/index. Deliberately NOT %LOCALAPPDATA%\Syncthing:
 // the service runs as LocalSystem and would spin up a second, invisible instance
 // with a different device ID, so devices paired with the GUI would never see it.
-function syncthingHome() { return path.join(dataDir(), 'syncthing'); }
+function syncthingHome(instance) {
+  if (!instance) return path.join(dataDir(), 'syncthing');
+  // Uma segunda instancia precisa de um home próprio porque a chave do
+  // certificado - e portanto o device ID - vive dentro dele. Compartilhar o
+  // home daria às duas o mesmo ID, que é justamente o oposto de "outra
+  // maquina" para o pareamento.
+  const slug = String(instance).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!slug) return path.join(dataDir(), 'syncthing');
+  return path.join(dataDir(), `syncthing-${slug}`);
+}
 
 // Directories the GUI used before the %ProgramData% move, newest first.
 function legacyDirs() {

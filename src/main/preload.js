@@ -100,6 +100,11 @@ contextBridge.exposeInMainWorld('api', {
 
   // Rede de sincronismo (daemon Syncthing)
   getSyncNetworkStatus: () => ipcRenderer.invoke('get-sync-network-status'),
+  getSyncNetworkInstances: () => ipcRenderer.invoke('get-sync-network-instances'),
+  createSyncNetworkInstance: (name) => ipcRenderer.invoke('create-sync-network-instance', name),
+  removeSyncNetworkInstance: (id) => ipcRenderer.invoke('remove-sync-network-instance', id),
+  startSyncNetworkInstance: (id) => ipcRenderer.invoke('start-sync-network-instance', id),
+  stopSyncNetworkInstance: (id) => ipcRenderer.invoke('stop-sync-network-instance', id),
   installSyncthing: () => ipcRenderer.invoke('install-syncthing'),
   startSyncthing: () => ipcRenderer.invoke('start-syncthing'),
   stopSyncthing: () => ipcRenderer.invoke('stop-syncthing'),
