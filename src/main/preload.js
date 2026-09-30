@@ -97,6 +97,28 @@ contextBridge.exposeInMainWorld('api', {
   testSyncConnection: (engineId, cfg) => ipcRenderer.invoke('test-sync-connection', engineId, cfg),
   getBackupHistoryStats: (profileId) => ipcRenderer.invoke('get-backup-history-stats', profileId),
   deployBackupNssm: (profileId) => ipcRenderer.invoke('deploy-backup-nssm', profileId),
+
+  // Rede de sincronismo (daemon Syncthing)
+  getSyncNetworkStatus: () => ipcRenderer.invoke('get-sync-network-status'),
+  installSyncthing: () => ipcRenderer.invoke('install-syncthing'),
+  startSyncthing: () => ipcRenderer.invoke('start-syncthing'),
+  stopSyncthing: () => ipcRenderer.invoke('stop-syncthing'),
+  getSyncNetworkOverview: () => ipcRenderer.invoke('get-sync-network-overview'),
+  getSyncNetworkFolders: () => ipcRenderer.invoke('get-sync-network-folders'),
+  saveSyncNetworkFolder: (folder) => ipcRenderer.invoke('save-sync-network-folder', folder),
+  deleteSyncNetworkFolder: (id) => ipcRenderer.invoke('delete-sync-network-folder', id),
+  rescanSyncNetworkFolder: (id) => ipcRenderer.invoke('rescan-sync-network-folder', id),
+  getSyncNetworkIgnores: (id) => ipcRenderer.invoke('get-sync-network-ignores', id),
+  saveSyncNetworkIgnores: (id, lines) => ipcRenderer.invoke('save-sync-network-ignores', id, lines),
+  getSyncNetworkDevices: () => ipcRenderer.invoke('get-sync-network-devices'),
+  getSyncNetworkIdentity: () => ipcRenderer.invoke('get-sync-network-identity'),
+  startGithubDeviceFlow: () => ipcRenderer.invoke('start-github-device-flow'),
+  pollGithubDeviceFlow: (deviceCode) => ipcRenderer.invoke('poll-github-device-flow', deviceCode),
+  logoutGithubDeviceFlow: () => ipcRenderer.invoke('logout-github-device-flow'),
+  // O `actor` não vai no payload de propósito: a identidade é a que o main
+  // verificou contra a API do GitHub, nunca uma enviada pelo renderer.
+  authorizeSyncNetworkDevice: (payload) => ipcRenderer.invoke('authorize-sync-network-device', payload),
+  revokeSyncNetworkDevice: (deviceID) => ipcRenderer.invoke('revoke-sync-network-device', deviceID),
   undeployBackupNssm: (profileId) => ipcRenderer.invoke('undeploy-backup-nssm', profileId),
   getBackupNssmStatus: (profileId) => ipcRenderer.invoke('get-backup-nssm-status', profileId),
   deployTaskService: (task) => ipcRenderer.invoke('deploy-task-service', task),
