@@ -185,6 +185,7 @@ class SyncthingInstaller {
 }
 
 module.exports = SyncthingInstaller;
+module.exports.SyncthingInstaller = SyncthingInstaller;
 module.exports.parseVersion = parseVersion;
 module.exports.parseLatestVersion = parseLatestVersion;
 module.exports.candidatePaths = candidatePaths;

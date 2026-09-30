@@ -111,6 +111,7 @@ class SyncthingClient {
 }
 
 module.exports = SyncthingClient;
+module.exports.SyncthingClient = SyncthingClient;
 module.exports.SyncthingApiError = SyncthingApiError;
 module.exports.DEFAULT_PORT = DEFAULT_PORT;
 module.exports.DEFAULT_HOST = DEFAULT_HOST;
