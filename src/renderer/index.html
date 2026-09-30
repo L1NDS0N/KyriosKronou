@@ -336,9 +336,9 @@
           </div>
 
           <div class="net-tabs" role="tablist">
-            <button class="net-tab active" role="tab" data-net-tab="dashboard" aria-selected="true"><i data-lucide="gauge"></i><span data-i18n="network.tabDashboard">Dashboard</span></button>
-            <button class="net-tab" role="tab" data-net-tab="devices" aria-selected="false"><i data-lucide="monitor-smartphone"></i><span data-i18n="network.tabDevices">Devices</span></button>
-            <button class="net-tab" role="tab" data-net-tab="folders" aria-selected="false"><i data-lucide="folder-sync"></i><span data-i18n="network.tabFolders">Folders</span></button>
+            <button class="net-tab active" role="tab" data-net-tab="dashboard" aria-selected="true" onclick="networkPage.setTab('dashboard')"><i data-lucide="gauge"></i><span data-i18n="network.tabDashboard">Dashboard</span></button>
+            <button class="net-tab" role="tab" data-net-tab="devices" aria-selected="false" onclick="networkPage.setTab('devices')"><i data-lucide="monitor-smartphone"></i><span data-i18n="network.tabDevices">Devices</span></button>
+            <button class="net-tab" role="tab" data-net-tab="folders" aria-selected="false" onclick="networkPage.setTab('folders')"><i data-lucide="folder-sync"></i><span data-i18n="network.tabFolders">Folders</span></button>
           </div>
 
           <div id="network-setup" style="display:none"></div>

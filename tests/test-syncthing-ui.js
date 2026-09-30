@@ -46,8 +46,25 @@ describe('Rede de sincronismo: tela', () => {
   });
 });
 
-describe('Rede de sincronismo: main nao confia no renderer para identificar o ator', () => {
-  const mainSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'main', 'main.js'), 'utf8');
+describe('Rede de sincronismo: abas respondem antes da pagina ser aberta', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'index.html'), 'utf8');
+
+  // Reproduzido no app rodando: as abas ficavam mortas até a página Rede ser
+  // aberta uma vez, porque o handler era ligado em render(), que só roda
+  // depois do load. A ligação precisa ser declarativa no HTML.
+  it('declara o onclick de cada aba no HTML, não em render', () => {
+    for (const tab of ['dashboard', 'devices', 'folders']) {
+      expect(html, `aba ${tab}`).to.include(`onclick="networkPage.setTab('${tab}')"`);
+    }
+  });
+
+  it('nao depende de render para ligar as abas', () => {
+    const renderBlock = source.slice(source.indexOf('render() {'), source.indexOf('renderSetup()'));
+    expect(renderBlock).to.not.match(/\.onclick\s*=/);
+  });
+});
+
+describe('Rede de sincronismo: main nao confia no renderer para identificar o ator', () => {  const mainSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'main', 'main.js'), 'utf8');
 
   it('guarda o ator e recusa autorizar sem login', () => {
     expect(mainSource).to.include('let syncNetworkActor = null');
