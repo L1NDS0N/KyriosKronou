@@ -34,6 +34,11 @@ function logsDir() { return path.join(dataDir(), 'logs'); }
 // Heartbeat file naming the process that currently owns task execution.
 function ownerFile() { return path.join(configDir(), 'scheduler-owner.json'); }
 
+// Syncthing's own config/cert/index. Deliberately NOT %LOCALAPPDATA%\Syncthing:
+// the service runs as LocalSystem and would spin up a second, invisible instance
+// with a different device ID, so devices paired with the GUI would never see it.
+function syncthingHome() { return path.join(dataDir(), 'syncthing'); }
+
 // Directories the GUI used before the %ProgramData% move, newest first.
 function legacyDirs() {
   const roaming = roamingAppData();
@@ -104,6 +109,7 @@ module.exports = {
   configDir,
   logsDir,
   ownerFile,
+  syncthingHome,
   legacyDirs,
   ensureDirs,
   migrateLegacyData,
