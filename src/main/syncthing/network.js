@@ -71,6 +71,9 @@ class SyncNetwork {
   async start() {
     const result = await this.manager.daemon.start();
     if (!result.ok) return Object.assign({ success: false }, result, { reason: reasonOf(result) });
+    // Guardar o client é o que impede o próximo ready() de subir um segundo
+    // daemon: sem isto, overview() logo depois de start() abria outra instância.
+    this.manager.client = result.client;
     return { success: true, alreadyRunning: Boolean(result.alreadyRunning), port: result.port, version: result.version };
   }
 

@@ -22,11 +22,17 @@ const { SyncthingClient } = require('./client');
 const BASE_PORT = 8384;
 const MAX_PORT_ATTEMPTS = 12;
 
-// O Syncthing se autoupdate por conta própria quando pode. Num daemon
-// gerenciado isso troca o exe em uso sem ninguém pedir e sem chance de
-// rollback, então o upgrade fica desligado.
-const COMMON_V2 = ['--no-browser', '--no-console', '--no-restart', '--no-upgrade', '--no-default-folder'];
-const COMMON_V1 = ['-no-browser', '-no-console', '-no-restart', '-no-upgrade', '-no-default-folder'];
+// A CLI mudou entre v1 e v2. These flags were measured with --help on 2.1.5,
+// not taken from the docs: `generate` in v2 accepts no --no-default-folder and
+// no --no-upgrade, and --gui-address wants a full URL instead of host:port.
+// Getting any of this wrong makes the binary open a brand new profile instead
+// of ours, or refuse to start at all, so the version decides the arguments.
+//
+// --no-port-probing keeps Syncthing on the port we picked: it would otherwise
+// go looking for a free one and move out from under the client we already
+// built for it.
+const COMMON_V2 = ['--no-browser', '--no-console', '--no-restart', '--no-upgrade', '--no-port-probing'];
+const COMMON_V1 = ['-no-browser', '-no-console', '-no-restart', '-no-upgrade'];
 
 function readApiKey(home) {
   const xmlPath = path.join(home, 'config.xml');
@@ -66,14 +72,13 @@ class SyncthingDaemon {
   }
 
   serveArgs(major, port) {
-    const addr = `127.0.0.1:${port}`;
-    if (major >= 2) return ['serve', '--home', this.home, '--gui-address', addr, ...COMMON_V2];
-    return [`-home=${this.home}`, `-gui-address=${addr}`, ...COMMON_V1];
+    if (major >= 2) return ['serve', '--home', this.home, '--gui-address', `http://127.0.0.1:${port}`, ...COMMON_V2];
+    return [`-home=${this.home}`, `-gui-address=127.0.0.1:${port}`, ...COMMON_V1];
   }
 
   generateArgs(major) {
-    if (major >= 2) return ['generate', '--home', this.home, '--no-default-folder', '--no-upgrade'];
-    return [`-home=${this.home}`, ...COMMON_V1];
+    if (major >= 2) return ['generate', '--home', this.home, '--no-port-probing'];
+    return [`-home=${this.home}`];
   }
 
   async findFreePort() {
@@ -96,25 +101,29 @@ class SyncthingDaemon {
     return isGenerated(this.home);
   }
 
+  // A ordem importa: primeiro pergunta a cada porta se alguém já responde, e
+  // só depois procura porta livre. Procurar a livre primeiro pulava a porta do
+  // nosso próprio daemon - ela está ocupada justamente porque ele está de pé -
+  // e o resultado era um segundo Syncthing subindo na porta seguinte.
   async pickClient(executable) {
     const installed = await this.installer.checkInstalled();
     if (!installed.installed) return { ok: false, reason: 'not-installed' };
     const apiKey = readApiKey(this.home);
     if (!apiKey) return { ok: false, reason: 'not-generated', executable: installed.path, version: installed.version };
 
-    for (let i = 0; i < MAX_PORT_ATTEMPTS; i++) {
-      const port = BASE_PORT + i;
-      if (!(await portFree(port))) continue;
+    const base = { executable: installed.path, version: installed.version };
+    const ports = Array.from({ length: MAX_PORT_ATTEMPTS }, (unused, i) => BASE_PORT + i);
+
+    for (const port of ports) {
       const client = new SyncthingClient({ port, apiKey });
       try {
-        const status = await client.systemStatus();
-        return { ok: true, client, port, status, executable: installed.path, version: installed.version };
-      } catch (e) {
-        // Porta livre mas sem daemon atrás: é o caso normal antes do primeiro start.
-        return { ok: true, client, port, executable: installed.path, version: installed.version };
-      }
+        return { ok: true, client, port, running: true, status: await client.systemStatus(), ...base };
+      } catch (e) { /* nada escutando nesta porta */ }
     }
-    return { ok: false, reason: 'no-port', executable: installed.path, version: installed.version };
+    for (const port of ports) {
+      if (await portFree(port)) return { ok: true, client: new SyncthingClient({ port, apiKey }), port, running: false, ...base };
+    }
+    return { ok: false, reason: 'no-port', ...base };
   }
 
   async start() {
@@ -126,12 +135,8 @@ class SyncthingDaemon {
 
     const picked = await this.pickClient();
     if (!picked.ok) return picked;
-
-    try {
-      const status = await picked.client.systemStatus();
-      return { ok: true, alreadyRunning: true, client: picked.client, port: picked.port, status };
-    } catch (e) {
-      // Cai para o start real: ainda não estava rodando.
+    if (picked.running) {
+      return { ok: true, alreadyRunning: true, client: picked.client, port: picked.port, executable: picked.executable, version: picked.version, status: picked.status };
     }
 
     const installed = await this.installer.checkInstalled();
@@ -146,7 +151,21 @@ class SyncthingDaemon {
     this.log('INFO', `Syncthing iniciado: ${installed.path} (v${installed.version.text}) porta ${port}`);
 
     const status = await this.waitForApi(picked.client, 30000);
+    if (status.ok) await this.dropDefaultFolder(picked.client);
     return { ok: status.ok, client: picked.client, port, executable: installed.path, version: installed.version, status: status.status };
+  }
+
+  // A v2 não tem mais --no-default-folder, e a flag só valeria na primeira
+  // inicialização mesmo. Apagar pela REST API funciona em toda versão e não
+  // depende de o binário aceitar uma flag.
+  async dropDefaultFolder(client) {
+    try {
+      const folders = await client.folders();
+      const extra = (folders || []).filter((f) => f.id === 'default');
+      for (const folder of extra) await client.deleteFolder(folder.id);
+    } catch (e) {
+      this.log('WARN', `Nao foi possivel remover a pasta default: ${e.message}`);
+    }
   }
 
   async waitForApi(client, timeoutMs) {
@@ -182,11 +201,7 @@ class SyncthingDaemon {
   async status() {
     const picked = await this.pickClient();
     if (!picked.ok) return picked;
-    try {
-      return { ok: true, running: true, client: picked.client, port: picked.port, status: await picked.client.systemStatus() };
-    } catch (e) {
-      return { ok: true, running: false, client: picked.client, port: picked.port };
-    }
+    return { ok: true, running: picked.running, client: picked.client, port: picked.port, status: picked.status };
   }
 }
 

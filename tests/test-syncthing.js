@@ -1,4 +1,4 @@
-// tests/test-syncthing.js
+﻿// tests/test-syncthing.js
 //
 // The Kyrios sync network drives an external Syncthing daemon. Three things
 // here are load-bearing and easy to regress silently:
@@ -120,9 +120,29 @@ describe('Syncthing: argumentos de CLI por versao', () => {
     expect(args.some((a) => a.startsWith('-home='))).to.equal(false);
   });
 
+  it('gives the v2 gui-address as a URL, which is what it takes', () => {
+    // Medido no --help da 2.1.5: v2 exige URL, v1 exige host:port.
+    expect(daemon.serveArgs(2, 8384)).to.include('http://127.0.0.1:8384');
+    expect(daemon.serveArgs(1, 8384)).to.include('-gui-address=127.0.0.1:8384');
+  });
+
   it('never lets Syncthing upgrade its own binary behind our back', () => {
     expect(daemon.serveArgs(1, 8384)).to.include('-no-upgrade');
     expect(daemon.serveArgs(2, 8384)).to.include('--no-upgrade');
+  });
+
+  it('passes only flags the measured binary actually accepts', () => {
+    // A 2.1.5 rejeita --no-default-folder e --no-upgrade no subcomando
+    // generate; mandÃ¡-los derrubava a geraÃ§Ã£o do profile inteiro.
+    expect(daemon.generateArgs(2)).to.deep.equal(['generate', '--home', 'C:\\data\\syncthing', '--no-port-probing']);
+    for (const arg of [...daemon.serveArgs(2, 8384), ...daemon.generateArgs(2)]) {
+      expect(arg, arg).to.not.include('--no-default-folder');
+    }
+  });
+
+  it('pins the daemon to the port we picked', () => {
+    expect(daemon.serveArgs(2, 8384)).to.include('--no-port-probing');
+    expect(daemon.serveArgs(1, 8384)).to.include('-gui-address=127.0.0.1:8384');
   });
 
   it('generates the profile in the same home it later serves from', () => {
@@ -190,47 +210,113 @@ describe('Syncthing: leitura de dispositivos', () => {
 });
 
 describe('Syncthing: dashboard de metricas', () => {
-  const client = {
-    systemStatus: async () => ({ myID: 'LOCAL-ID', startTime: Date.now() - 5000 }),
-    statsConnection: async () => ({
-      total: {
-        inRate: 1, outRate: 2, inBytesTotal: 1024, outBytesTotal: 2048,
-        inListenAddrsOk: 3, inListenAddrsCount: 3, connections: 2,
+  // Formas medidas no Syncthing 2.1.5, nÃ£o copiadas da documentaÃ§Ã£o: o
+  // snapshot deixou de trazer inRate/outRate, o startTime virou string ISO, e
+  // tanto escutadores quanto descoberta passaram a ser mapas por serviÃ§o.
+  const client = (overrides = {}) => Object.assign({
+    systemStatus: async () => ({
+      myID: 'LOCAL-ID',
+      uptime: 3600,
+      connectionServiceStatus: {
+        'tcp://0.0.0.0:22000': { error: null },
+        'quic://0.0.0.0:22000': { error: null },
+        'relay://pool': { error: 'timeout' },
+      },
+      discoveryEnabled: true,
+      discoveryMethods: 3,
+      discoveryStatus: {
+        'IPv4 local': { error: null },
+        'IPv6 local': { error: null },
+        'global@v6': { error: 'no such host' },
       },
     }),
+    get: async (route) => (route === '/rest/system/version'
+      ? { version: 'v2.1.5', os: 'windows', arch: 'amd64', longVersion: 'syncthing v2.1.5' }
+      : { connections: {}, total: { inBytesTotal: 1000, outBytesTotal: 2000 } }),
     statsFolder: async () => ({ docs: { files: 100, dirs: 10, bytes: 500 }, fotos: { files: 33, dirs: 4, bytes: 100 } }),
-    statsDevice: async () => ({ 'REMOTE-1': { deviceID: 'REMOTE-1', deviceName: 'Servidor', connected: true, lastSeen: '2026-01-01T00:00:00Z' } }),
-    get: async () => ({ version: 'v2.1.4', os: 'windows', arch: 'amd64', longVersion: 'syncthing v2.1.4' }),
-    discovery: async () => ({ global: { enabled: true, ok: true, devices: ['a', 'b', 'c', 'd'] } }),
-  };
+    statsDevice: async () => ({
+      'AAAAAAA-BBBBBBB-CCCCCCC-DDDDDDD-EEEEEEE-FFFFFFF-GGGGGGG-HHHHHHH': { lastSeen: '2026-01-01T00:00:00Z' },
+    }),
+    discovery: async () => ({}),
+  }, overrides);
 
   it('summarises the dashboard rows', async () => {
-    const view = await manager.overview(client);
+    const view = await manager.overview(client());
     expect(view.deviceID).to.equal('LOCAL-ID');
     expect(view.running).to.equal(true);
-    expect(view.receive).to.deep.equal({ rate: 1, bytes: 1024 });
-    expect(view.send).to.deep.equal({ rate: 2, bytes: 2048 });
+    expect(view.receive.bytes).to.equal(1000);
+    expect(view.send.bytes).to.equal(2000);
     expect(view.localState).to.deep.equal({ files: 133, directories: 14, bytes: 600 });
-    expect(view.listeners).to.deep.equal({ ok: 3, total: 3 });
-    expect(view.discovery.devices).to.equal(4);
-    expect(view.uptimeMs).to.be.above(0);
+    expect(view.uptimeMs).to.equal(3600000);
+  });
+
+  it('counts listeners and discovery methods the way the panel does', async () => {
+    const view = await manager.overview(client());
+    expect(view.listeners).to.deep.equal({ ok: 2, total: 3 });
+    expect(view.discovery).to.include({ available: true, ok: 2, total: 3, enabled: true });
+    expect(view.discovery.errors).to.deep.equal(['global@v6']);
+  });
+
+  it('derives the transfer rate from two samples instead of a field that no longer exists', async () => {
+    const tracker = new manager.RateTracker();
+    let bytes = 1000;
+    const counting = client({
+      get: async (route) => (route === '/rest/system/version' ? null : { connections: {}, total: { inBytesTotal: bytes, outBytesTotal: 0 } }),
+    });
+
+    const first = await manager.overview(counting, { tracker });
+    expect(first.receive.rate).to.equal(0);
+
+    bytes = 3000;
+    const second = await manager.overview(counting, { tracker });
+    expect(second.receive.bytes).to.equal(3000);
+    expect(second.receive.rate).to.be.at.least(0);
+  });
+
+  it('refuses to invent a rate before there is a window to measure', () => {
+    const instant = new manager.RateTracker();
+    instant.sample({ inBytesTotal: 0 }, 1000);
+    const tooSoon = instant.sample({ inBytesTotal: 1000 }, 1000.2);
+    expect(tooSoon.sampled).to.equal(false);
+    expect(tooSoon.inRate).to.equal(0);
+  });
+
+  it('computes a real rate when a window actually elapsed', () => {
+    const tracker = new manager.RateTracker();
+    tracker.sample({ inBytesTotal: 0, outBytesTotal: 0 }, 1000);
+    const later = tracker.sample({ inBytesTotal: 2000, outBytesTotal: 1000 }, 3000);
+    expect(later.sampled).to.equal(true);
+    expect(later.inRate).to.equal(1000);
+    expect(later.outRate).to.equal(500);
+  });
+
+  it('computes uptime from an ISO startTime when uptime is absent', () => {
+    const ms = manager.uptimeMs({ startTime: '2026-01-01T00:00:00Z' }, Date.parse('2026-01-02T00:00:00Z'));
+    expect(ms).to.equal(86400000);
+  });
+
+  it('never reports a negative rate when the daemon restarts and the counter drops', () => {
+    const tracker = new manager.RateTracker();
+    tracker.sample({ inBytesTotal: 5000 }, 1000);
+    const restarted = tracker.sample({ inBytesTotal: 0 }, 3000);
+    expect(restarted.inRate).to.equal(0);
+  });
+
+  it('ignores a stats entry with no device ID', async () => {
+    const view = await manager.overview(client({
+      statsDevice: async () => ({ '': { lastSeen: '1969-12-31T21:00:00-03:00' } }),
+    }));
+    expect(view.devices).to.have.length(0);
   });
 
   it('still renders when some stats endpoints are unavailable', async () => {
-    const flaky = Object.assign({}, client, {
+    const view = await manager.overview(client({
       statsFolder: async () => { throw new Error('offline'); },
-      discovery: async () => { throw new Error('offline'); },
-    });
-    const view = await manager.overview(flaky);
+      systemStatus: async () => { throw new Error('offline'); },
+    }));
     expect(view.localState).to.deep.equal({ files: 0, directories: 0, bytes: 0 });
+    expect(view.running).to.equal(false);
     expect(view.discovery.available).to.equal(false);
-    expect(view.discovery.devices).to.equal(0);
-  });
-
-  it('reports the device list with its connection state', async () => {
-    const view = await manager.overview(client);
-    expect(view.devices).to.have.length(1);
-    expect(view.devices[0].name).to.equal('Servidor');
-    expect(view.devices[0].connected).to.equal(true);
+    expect(view.uptimeMs).to.equal(0);
   });
 });

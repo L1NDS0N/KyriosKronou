@@ -193,9 +193,7 @@ class NetworkPage {
     }
 
     const v = this.overview;
-    const discovery = v.discovery && v.discovery.available
-      ? `${v.discovery.devices}`
-      : '—';
+    const discovery = v.discovery.available ? `${v.discovery.ok}/${v.discovery.total}` : '—';
 
     panel.innerHTML = `
       <div class="net-metrics">
