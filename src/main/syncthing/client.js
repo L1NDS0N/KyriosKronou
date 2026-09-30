@@ -105,6 +105,11 @@ class SyncthingClient {
   dbStatus(folder) {
     return this.get(`/rest/db/status${folder ? `?folder=${encodeURIComponent(folder)}` : ''}`);
   }
+  // /rest/db/status devolve 404 na v2; acompletion é o que responde agora e é
+  // o que diz se a pasta terminou de sincronizar.
+  dbCompletion(folder) {
+    return this.get(`/rest/db/completion?folder=${encodeURIComponent(folder)}`);
+  }
   rescanFolder(folder) {
     return this.post(`/rest/db/scan?folder=${encodeURIComponent(folder)}`);
   }

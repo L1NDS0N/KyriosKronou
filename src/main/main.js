@@ -298,7 +298,7 @@ function initComponents() {
   backupManager = new BackupManager(config, logger, runs);
   syncManager = new SyncManager(config, logger, runs);
   retentionManager = new RetentionManager({ syncManager, cronParser, logger });
-  syncNetwork = new SyncNetwork({ logger, config });
+  syncNetwork = new SyncNetwork({ logger, config, taskManager, runRegistry: runs });
   // Mesma implementação de device flow do painel web, sem sessão nem cookie: o
   // desktop só precisa da identidade verificada para autorizar dispositivos.
   desktopWebAuth = new WebAuth(config, logger);

@@ -6,6 +6,7 @@
 
 const { SyncthingInstaller } = require('./installer');
 const { SyncthingManager, normalizeFolder, normalizeDevice } = require('./manager');
+const { PostSyncBridge } = require('./postSync');
 const deviceAuth = require('./deviceAuth');
 
 const DEVICE_REGISTRY_KEY = 'SyncNetworkDevices';
@@ -26,7 +27,26 @@ class SyncNetwork {
     this.config = options.config || null;
     this.installer = options.installer || new SyncthingInstaller(options.logger);
     this.manager = options.manager || new SyncthingManager({ logger: options.logger, installer: this.installer });
+    this.postSync = options.postSync || new PostSyncBridge({
+      logger: options.logger, taskManager: options.taskManager, runRegistry: options.runRegistry,
+    });
   }
+
+  // Chamado pelo dono do agendador a cada tique. Devolve as tarefas disparadas
+  // para o chamador auditar; um erro aqui nunca deve derrubar o tique.
+  async checkPostSync() {
+    try {
+      const ready = await this.manager.ready();
+      if (!ready.ok) return { ok: false, reason: reasonOf(ready) };
+      const folders = await ready.client.folders();
+      return { ok: true, fired: await this.postSync.check(ready.client, folders || []) };
+    } catch (err) {
+      this.log('WARN', `PostSync: varredura falhou: ${err.message}`);
+      return { ok: false, reason: err.message };
+    }
+  }
+
+  log(level, message) { if (this.logger) this.logger.log(level, message); }
 
   deviceRegistry() {
     if (!this.config) return [];

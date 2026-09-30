@@ -24,6 +24,7 @@ const CronParser = require('./cronParser');
 const TaskManager = require('./taskManager');
 const BackupManager = require('./backupManager');
 const SyncManager = require('./sync/syncManager');
+const SyncNetwork = require('./syncthing/network');
 const RetentionManager = require('./retentionManager');
 const ServiceManager = require('./serviceManager');
 const WrapperGenerator = require('./wrapperGenerator');
@@ -49,6 +50,10 @@ function bootstrap() {
   const wrapperGenerator = new WrapperGenerator(config, logger);
   const syncManager = new SyncManager(config, logger, null);
   const retentionManager = new RetentionManager({ syncManager, cronParser, logger });
+  // O serviço tambem conduz a rede de sincronismo: e ele quem fica ligado
+  // quando ninguem esta logado, e sem isto as tarefas pos-sincronismo
+  // simplesmente nunca disparariam no servidor.
+  const syncNetwork = new SyncNetwork({ logger, config, taskManager, runRegistry: runs });
 
   logger.log('INFO', '=== Κύριος Χρόνος service scheduler starting ===');
   logger.log('INFO', `PID ${process.pid} | node ${process.version} | data ${paths.dataDir()}`);
@@ -60,7 +65,7 @@ function bootstrap() {
   try { fs.writeFileSync(pidFile, String(process.pid), 'utf8'); } catch (e) {}
 
   const scheduler = new SchedulerCore(
-    { taskManager, backupManager, syncManager, retentionManager, cronParser, logger },
+    { taskManager, backupManager, syncManager, retentionManager, cronParser, syncNetwork, logger },
     ROLE_SERVICE
   ).start();
 
@@ -117,7 +122,7 @@ function bootstrap() {
   logger.log('INFO', 'Scheduler loop running (15s interval)');
   logger.flush();
 
-  return { scheduler, logger, taskManager, backupManager, syncManager, retentionManager, config, apiServer };
+  return { scheduler, logger, taskManager, backupManager, syncManager, retentionManager, syncNetwork, config, apiServer };
 }
 
 // Only bootstrap when executed directly, so tests can require this file.

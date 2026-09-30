@@ -73,12 +73,21 @@ class NetworkPage {
     this.folderTab = 'general';
     this.draft = null;
     this.ignores = [];
+    this.tasks = [];
     this.busy = null;
+  }
+
+  // As tarefas pós-sincronismo são tarefas já registradas no Agendador. O
+  // sincronismo não cria nem edita tarefas: ele só referencia uma pelo id.
+  async loadTasks() {
+    try { this.tasks = (await window.api.getTasks()) || []; }
+    catch (e) { this.tasks = []; }
   }
 
   async load() {
     try { this.status = await window.api.getSyncNetworkStatus(); } catch (e) { this.status = { installed: false, running: false }; }
     try { this.identity = await window.api.getSyncNetworkIdentity(); } catch (e) { this.identity = { loggedIn: false, user: null }; }
+    await this.loadTasks();
 
     if (this.status && this.status.running) {
       const [overview, folders, devices] = await Promise.all([
@@ -379,7 +388,7 @@ class NetworkPage {
 
   createFolder() {
     this.draft = {
-      id: netFolderId(), label: '', path: '', type: 'sendreceive',
+      id: netFolderId(), label: '', path: '', type: 'sendreceive', PostSyncTaskId: '',
       devices: [], ignorePerms: false, syncOwnership: false, syncXattrs: false,
       rescanIntervalS: 3600, fsWatcherEnabled: true, fsWatcherDelayS: 10,
       versioning: { type: 'off', params: {} },
@@ -446,6 +455,11 @@ class NetworkPage {
           <label class="net-field"><span>${escHtml(i18n.t('network.folderType'))}</span>
             <select onchange="networkPage.setType(this.value)">
               ${FOLDER_TYPES.map((t) => `<option value="${t.value}" ${d.type === t.value ? 'selected' : ''}>${escHtml(i18n.t(t.labelKey))}</option>`).join('')}
+            </select></label>
+          <label class="net-field"><span>${escHtml(i18n.t('network.postSyncTask'))}</span>
+            <select onchange="networkPage.setPostSyncTask(this.value)">
+              <option value="">${escHtml(i18n.t('network.postSyncNone'))}</option>
+              ${this.tasks.map((t) => `<option value="${escAttr(t.Id)}" ${d.PostSyncTaskId === t.Id ? 'selected' : ''}>${escHtml(t.Name)}${t.Enabled === false ? ` (${escHtml(i18n.t('network.taskDisabled'))})` : ''}</option>`).join('')}
             </select></label>
         </div>
         <div class="modal-summary">
@@ -519,6 +533,7 @@ class NetworkPage {
   }
 
   setType(value) { this.draft.type = value; this.renderFolderModal(); }
+  setPostSyncTask(value) { this.draft.PostSyncTaskId = value || ''; }
   setFlag(key, value) { this.draft[key] = value; }
   setNumber(key, value) { this.draft[key] = Number(value) || 0; }
   setVersioningType(value) { this.draft.versioning = { type: value, params: {} }; this.renderFolderModal(); }
