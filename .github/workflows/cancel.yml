@@ -1,0 +1,41 @@
+name: Cancel run
+
+# Manual dispatcher to abort a stuck or superseded run from the Actions tab,
+# without pushing an empty commit and without waiting for a new push to trip
+# the concurrency group.
+#
+# Kept in its own workflow on purpose: if this lived in the CI file, the cancel
+# job would sit in the same concurrency group as the run it is cancelling, so
+# starting it would make it cancel itself.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'ID of the run to cancel (the number shown in the run list)'
+        required: true
+        type: string
+      reason:
+        description: 'Why (recorded in the Actions log)'
+        required: false
+        default: 'Cancelled manually'
+        type: string
+
+permissions:
+  actions: write
+
+jobs:
+  cancel:
+    name: Cancel run ${{ inputs.run_id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Cancel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          echo "Cancelling run $RUN_ID: $REASON"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/cancel"
+          echo "::notice::Run $RUN_ID cancelled. Toolchain caches keyed on package-lock.json are kept."

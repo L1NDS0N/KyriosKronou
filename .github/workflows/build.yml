@@ -1,64 +1,120 @@
-name: Build Kyrion Kronou
+name: CI
 
+# Continuous integration: prove the tree builds on every push, publish nothing.
+# Release artifacts and the GitHub Release belong to release.yml alone - two
+# workflows uploading the same tag is how you end up with a draft release cut
+# from a stale build.
 on:
   push:
     branches: [ master ]
+  pull_request:
+    branches: [ master ]
   workflow_dispatch:
+    inputs:
+      run_tests:
+        description: 'Run the test suite before building'
+        required: false
+        default: true
+        type: boolean
+      force:
+        description: 'Run even if a run for this branch is already in flight'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  # A forced manual run gets its own group so it neither is cancelled nor
+  # cancels anything - to abort the run occupying the group, use cancel.yml.
+  group: ci-${{ github.ref }}-${{ inputs.force && github.run_id || '' }}
+  # A new push makes the in-flight run obsolete; finishing it would only burn
+  # runner minutes on a commit nobody will look at. Cancelling a run does not
+  # touch the toolchain cache: that is saved at job end, not on the run.
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  # electron-builder downloads Electron, the winCodeSign helpers and the NSIS
+  # binaries into these. Left at the default they land in LOCALAPPDATA, which is
+  # fine locally but is what makes every CI run re-download ~400 MB.
+  ELECTRON_CACHE: ${{ github.workspace }}\.cache\electron
+  ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\.cache\electron-builder
 
 jobs:
-  build:
+  test:
+    name: Tests
+    # Manual run may skip the suite to get artifacts fast; automated runs never do.
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_tests }}
     runs-on: windows-latest
-
+    timeout-minutes: 20
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: CronMasterJS/package-lock.json
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
 
       - name: Install dependencies
-        working-directory: CronMasterJS
         run: npm ci
 
+      # `npm test` must fail the job. The old `|| true` turned every red suite
+      # into a green check and shipped broken installers.
       - name: Run tests
-        working-directory: CronMasterJS
-        run: npm test || true
+        run: npm test
 
-      - name: Build portable app
-        working-directory: CronMasterJS
-        run: npx electron-packager . KyrionKronou --platform=win32 --arch=x64 --out=build --overwrite --asar --icon build-resources/icon.ico
+  package:
+    name: Build artifacts
+    runs-on: windows-latest
+    timeout-minutes: 30
+    needs: test
+    # Artifacts are only worth the runner minutes on master and on manual runs;
+    # a PR gets the test signal, not a 200 MB upload. `skipped` is the manual
+    # run with run_tests=false - the build still has to happen.
+    if: ${{ !cancelled() && (needs.test.result == 'success' || needs.test.result == 'skipped') && github.event_name != 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Build NSIS installer
-        working-directory: CronMasterJS
-        run: npx electron-builder --win nsis --config.win.icon=build-resources/icon.ico
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # Keyed by the lockfile: a dependency bump is the only thing that
+      # invalidates it, and restore-keys keep the previous cache as a warm base.
+      - name: Cache Electron and NSIS toolchains
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/electron
+            .cache/electron-builder
+          key: electron-win-x64-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            electron-win-x64-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install NSIS
+        run: choco install nsis --no-progress -y
+
+      # Tests already ran in the `test` job; running them again here would
+      # double the slowest part of the pipeline for no extra signal.
+      - name: Build portable app and installer
+        run: .\Build-Installer.ps1 -SkipTests
 
       - name: Upload portable app
         uses: actions/upload-artifact@v4
         with:
-          name: KyrionKronou-Portable
-          path: CronMasterJS/build/KyrionKronou-win32-x64/
+          name: kyrios-chronos-portable
+          path: build/KyriosChronos-win32-x64/
           retention-days: 30
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: KyrionKronou-Installer
-          path: CronMasterJS/dist/*.exe
+          name: kyrios-chronos-installer
+          path: dist/*.exe
           retention-days: 30
-
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            CronMasterJS/dist/*.exe
-          draft: true
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

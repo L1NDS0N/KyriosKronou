@@ -12,6 +12,17 @@ describe('Release workflow', () => {
   const installer = read('installer/KyriosChronos-Installer.nsi');
   const build = read('Build-Installer.ps1');
 
+  // The regression that broke CI: every path still pointed at the old
+  // CronMasterJS/ layout, so setup-node aborted the job on an unresolved
+  // cache-dependency-path before a single line of the project was built.
+  it('builds from the repository root, not the removed CronMasterJS folder', () => {
+    for (const file of ['.github/workflows/build.yml', '.github/workflows/release.yml']) {
+      const source = read(file);
+      expect(source, file).to.not.include('CronMasterJS');
+    }
+    expect(workflow).to.include('run: npm ci');
+  });
+
   it('builds on Windows from tags and manual publications', () => {
     expect(workflow).to.include("tags:\n      - 'v*.*.*'");
     expect(workflow).to.include('workflow_dispatch:');
@@ -58,6 +69,40 @@ describe('Release workflow', () => {
     expect(installer).to.include('${SETUP_EXE}');
     expect(installer).to.not.include('OutFile "..\\dist\\KyriosChronos-Setup-1.0.0.exe"');
     expect(build).to.include('"/DAPP_VERSION=$version"');
+  });
+
+  it('caches the Electron/NSIS toolchain and drops the cancelled-run race', () => {
+    for (const file of ['.github/workflows/build.yml', '.github/workflows/release.yml']) {
+      const source = read(file);
+      expect(source, file).to.include('actions/cache@v4');
+      expect(source, file).to.include('ELECTRON_CACHE:');
+      expect(source, file).to.include('ELECTRON_BUILDER_CACHE:');
+      expect(source, file).to.include("hashFiles('package-lock.json')");
+    }
+    const ci = read('.github/workflows/build.yml');
+    expect(ci).to.include('cancel-in-progress: true');
+    // A failed suite must fail the job: a `|| true` on the npm test step is how
+    // a red build ships green. Checked per line so a comment can name it.
+    const runLines = ci.split('\n').filter(line => /^\s*(run|shell):/.test(line) && line.includes('npm test'));
+    expect(runLines).to.have.lengthOf(1);
+    expect(runLines[0]).to.equal('        run: npm test');
+  });
+
+  it('does not run the suite twice on the same pipeline', () => {
+    const ci = read('.github/workflows/build.yml');
+    expect(ci).to.include('.\\Build-Installer.ps1 -SkipTests');
+    expect(build).to.include('[switch]$SkipTests');
+  });
+
+  it('exposes a manual dispatcher to cancel a run in flight', () => {
+    const cancel = read('.github/workflows/cancel.yml');
+    expect(cancel).to.include('workflow_dispatch:');
+    expect(cancel).to.include('run_id:');
+    expect(cancel).to.include('actions/runs/${RUN_ID}/cancel');
+    // Own workflow, own concurrency: sharing a group with the run being
+    // cancelled would make the dispatcher cancel itself.
+    expect(cancel).to.not.include('concurrency:');
+    expect(cancel).to.include('actions: write');
   });
 
   it('generates a categorized changelog from the real git history', () => {

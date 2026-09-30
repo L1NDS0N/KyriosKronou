@@ -11,11 +11,16 @@
 #   .\Build-Installer.ps1 -Portable    # Build portable .exe only
 #   .\Build-Installer.ps1 -Installer   # Build NSIS installer only
 #   .\Build-Installer.ps1 -Package     # Build portable via electron-packager
+#   .\Build-Installer.ps1 -SkipTests   # Build without re-running npm test
 
 param(
     [switch]$Portable,
     [switch]$Installer,
-    [switch]$Package
+    [switch]$Package,
+    # CI runs the suite in its own step so the failure is visible in the log and
+    # not swallowed inside the build. Re-running it here would double the slowest
+    # part of the pipeline for no extra signal.
+    [switch]$SkipTests
 )
 
 $ErrorActionPreference = 'Stop'
@@ -60,19 +65,24 @@ try {
     }
 
     # Run tests first
-    Write-Host "  Running tests..." -ForegroundColor Yellow
-    # stderr from a native command must not abort the build; $LASTEXITCODE is
-    # the authoritative pass/fail signal.
-    $ErrorActionPreference = 'Continue'
-    npm test
-    $testExit = $LASTEXITCODE
-    $ErrorActionPreference = 'Stop'
-    if ($testExit -ne 0) {
-        Write-Host "  [ERROR] Tests failed! Fix errors before building." -ForegroundColor Red
-        exit 1
+    if ($SkipTests) {
+        Write-Host "  Skipping tests (-SkipTests)." -ForegroundColor DarkGray
+        Write-Host ""
+    } else {
+        Write-Host "  Running tests..." -ForegroundColor Yellow
+        # stderr from a native command must not abort the build; $LASTEXITCODE is
+        # the authoritative pass/fail signal.
+        $ErrorActionPreference = 'Continue'
+        npm test
+        $testExit = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+        if ($testExit -ne 0) {
+            Write-Host "  [ERROR] Tests failed! Fix errors before building." -ForegroundColor Red
+            exit 1
+        }
+        Write-Host "  All tests passed!" -ForegroundColor Green
+        Write-Host ""
     }
-    Write-Host "  All tests passed!" -ForegroundColor Green
-    Write-Host ""
 
     # Generate icon assets from logo.png
     if (Test-Path "logo.png") {

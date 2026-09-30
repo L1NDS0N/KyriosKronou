@@ -39,13 +39,29 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     env:
-      NODE_VERSION: '16.20.2'
+      NODE_VERSION: '20'
+      # electron-builder downloads Electron, the winCodeSign helpers and the NSIS
+      # binaries into these; without a stable path the release run re-downloads
+      # ~400 MB that the previous run already cached.
+      ELECTRON_CACHE: ${{ github.workspace }}\.cache\electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\.cache\electron-builder
     steps:
       - name: Checkout source and tags
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           fetch-tags: true
+
+      # Keyed by the lockfile so only a dependency bump invalidates it.
+      - name: Cache Electron and NSIS toolchains
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/electron
+            .cache/electron-builder
+          key: electron-win-x64-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            electron-win-x64-
 
       - name: Resolve version and publication tag
         id: version
