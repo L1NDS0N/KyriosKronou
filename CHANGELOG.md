@@ -2,6 +2,14 @@
 
 All notable changes to Kyrios Chronos.
 
+## 1.0.3 - 2026-10-01
+
+### Fixed
+
+- fix(release): the published release was going out without an update manifest (`b9355ed`) — l1nds0n
+
+**Changes since v1.0.2**
+
 ## 1.0.2 - 2026-10-01
 
 ### Fixed
