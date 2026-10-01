@@ -8,6 +8,7 @@ const { SyncthingInstaller } = require('./installer');
 const { SyncthingManager, normalizeFolder, normalizeDevice } = require('./manager');
 const { PostSyncBridge } = require('./postSync');
 const { SyncInstances, DEFAULT_ID } = require('./instances');
+const { FolderCompressor } = require('./folderCompressor');
 const deviceAuth = require('./deviceAuth');
 
 const DEVICE_REGISTRY_KEY = 'SyncNetworkDevices';
@@ -29,8 +30,14 @@ class SyncNetwork {
     this.installer = options.installer || new SyncthingInstaller(options.logger);
     this.manager = options.manager || new SyncthingManager({ logger: options.logger, installer: this.installer });
     this.instances = options.instances || new SyncInstances({ logger: options.logger, config: this.config, installer: this.installer });
+    this.compressor = options.compressor || new FolderCompressor({ logger: options.logger, config: this.config });
     this.postSync = options.postSync || new PostSyncBridge({
-      logger: options.logger, taskManager: options.taskManager, runRegistry: options.runRegistry,
+      logger: options.logger,
+      taskManager: options.taskManager,
+      runRegistry: options.runRegistry,
+      compressor: this.compressor,
+      onPreFire: options.onPreFire,
+      onFire: options.onFire,
     });
   }
 
@@ -88,6 +95,30 @@ class SyncNetwork {
       this.log('WARN', `PostSync: varredura falhou: ${err.message}`);
       return { ok: false, reason: err.message };
     }
+  }
+
+  // A compressão roda depois que a pasta terminou de sincronizar, e nunca no
+  // meio de uma transferência: comprimir um arquivo pela metade produziria um
+  // container truncado com nome de completo.
+  async compressFolder(id, policy) {
+    const ready = await this.manager.ready();
+    if (!ready.ok) return { ok: false, reason: reasonOf(ready) };
+    let folder = null;
+    try { folder = await ready.client.folder(id); }
+    catch (e) { return { ok: false, reason: 'network.folderNotFound' }; }
+
+    const result = await this.compressor.compressFolder(folder.path, Object.assign({ mode: 'none' }, policy));
+    if (!result.ok) this.log('WARN', `SYNC_COMPRESSION_FAILED folder=${id} reason=${result.reason} ${result.detail || ''}`);
+    return result;
+  }
+
+  async restoreFolder(id, policy) {
+    const ready = await this.manager.ready();
+    if (!ready.ok) return { ok: false, reason: reasonOf(ready) };
+    let folder = null;
+    try { folder = await ready.client.folder(id); }
+    catch (e) { return { ok: false, reason: 'network.folderNotFound' }; }
+    return this.compressor.restoreArchive(policy, folder.path);
   }
 
   log(level, message) { if (this.logger) this.logger.log(level, message); }

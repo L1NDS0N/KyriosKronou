@@ -12,6 +12,7 @@ const FOLDER_TABS = [
   { id: 'advanced', labelKey: 'network.folderTabAdvanced' },
   { id: 'versioning', labelKey: 'network.folderTabVersioning' },
   { id: 'ignores', labelKey: 'network.folderTabIgnores' },
+  { id: 'compression', labelKey: 'network.compression' },
 ];
 
 const FOLDER_TYPES = [
@@ -452,7 +453,8 @@ class NetworkPage {
 
   createFolder() {
     this.draft = {
-      id: netFolderId(), label: '', path: '', type: 'sendreceive', PostSyncTaskId: '',
+      id: netFolderId(), label: '', path: '', type: 'sendreceive',
+      PreSyncTaskId: '', PostSyncTaskId: '', PreSyncBlocks: false,
       devices: [], ignorePerms: false, syncOwnership: false, syncXattrs: false,
       rescanIntervalS: 3600, fsWatcherEnabled: true, fsWatcherDelayS: 10,
       versioning: { type: 'off', params: {} },
@@ -520,6 +522,13 @@ class NetworkPage {
             <select onchange="networkPage.setType(this.value)">
               ${FOLDER_TYPES.map((t) => `<option value="${t.value}" ${d.type === t.value ? 'selected' : ''}>${escHtml(i18n.t(t.labelKey))}</option>`).join('')}
             </select></label>
+          <label class="net-field"><span>${escHtml(i18n.t('network.preSyncTask'))}</span>
+            <select onchange="networkPage.setPreSyncTask(this.value)">
+              <option value="">${escHtml(i18n.t('network.postSyncNone'))}</option>
+              ${this.tasks.map((t) => `<option value="${escAttr(t.Id)}" ${d.PreSyncTaskId === t.Id ? 'selected' : ''}>${escHtml(t.Name)}${t.Enabled === false ? ` (${escHtml(i18n.t('network.taskDisabled'))})` : ''}</option>`).join('')}
+            </select></label>
+          ${d.PreSyncTaskId ? `<label class="net-check"><input type="checkbox" ${d.PreSyncBlocks ? 'checked' : ''} onchange="networkPage.setFlag('PreSyncBlocks', this.checked)">
+            <span>${escHtml(i18n.t('network.preSyncBlocks'))}</span></label>` : ''}
           <label class="net-field"><span>${escHtml(i18n.t('network.postSyncTask'))}</span>
             <select onchange="networkPage.setPostSyncTask(this.value)">
               <option value="">${escHtml(i18n.t('network.postSyncNone'))}</option>
@@ -570,6 +579,40 @@ class NetworkPage {
         <div class="modal-actions"><button class="btn-glow" onclick="networkPage.renderFolderModal()">${escHtml(i18n.t('common.ok'))}</button></div>`;
     }
 
+    if (this.folderTab === 'compression') {
+      const comp = this.draft.Compression || { mode: 'none', level: 5, extensions: [], excludes: [], minSizeBytes: 0 };
+      return `${tabButtons}
+        <div class="net-help net-help-warn"><i data-lucide="shield-alert"></i><span>${escHtml(i18n.t('network.compressWarning'))}</span></div>
+        <div class="net-form">
+          <label class="net-field"><span>${escHtml(i18n.t('network.compressionMode'))}</span>
+            <select onchange="networkPage.setCompression('mode', this.value)">
+              <option value="none" ${comp.mode === 'none' ? 'selected' : ''}>${escHtml(i18n.t('network.compressionOff'))}</option>
+              <option value="perFile" ${comp.mode === 'perFile' ? 'selected' : ''}>${escHtml(i18n.t('network.compressionPerFile'))}</option>
+              <option value="archive" ${comp.mode === 'archive' ? 'selected' : ''}>${escHtml(i18n.t('network.compressionArchive'))}</option>
+            </select></label>
+          ${comp.mode !== 'none' ? `
+          <label class="net-field"><span>${escHtml(i18n.t('network.compressionLevel'))}</span>
+            <input type="number" min="1" max="9" value="${escAttr(String(comp.level || 5))}" onchange="networkPage.setCompression('level', this.value)"></label>
+          <label class="net-field"><span>${escHtml(i18n.t('network.compressionMinSize'))}</span>
+            <input type="number" min="0" value="${escAttr(String(Math.round((comp.minSizeBytes || 0) / 1024)))}" onchange="networkPage.setCompression('minSizeKb', this.value)"></label>
+          <label class="net-field"><span>${escHtml(i18n.t('network.compressionExtensions'))}</span>
+            <textarea rows="3" onchange="networkPage.setCompressionList('extensions', this.value)">${escHtml((comp.extensions || []).join('\n'))}</textarea></label>
+          <label class="net-field"><span>${escHtml(i18n.t('network.compressionExcludes'))}</span>
+            <textarea rows="3" onchange="networkPage.setCompressionList('excludes', this.value)">${escHtml((comp.excludes || []).join('\n'))}</textarea></label>
+          ${comp.mode === 'archive' ? `
+          <label class="net-field"><span>${escHtml(i18n.t('network.compressionArchivePath'))}</span>
+            <input value="${escAttr(comp.archivePath || '')}" onchange="networkPage.setCompression('archivePath', this.value)"
+              placeholder="C:\\compactado\\${escHtml(this.draft.id || 'pasta')}.7z"></label>
+          <div class="net-help"><i data-lucide="info"></i><span>${escHtml(i18n.t('network.archiveOutsideHint'))}</span></div>` : ''}
+          ` : ''}
+        </div>
+        <div class="modal-actions">
+          ${comp.mode !== 'none' && this.draft.id ? `<button class="btn-outline" ${this.busy ? 'disabled' : ''} onclick="networkPage.compressNow()"><i data-lucide="package"></i><span>${escHtml(i18n.t('network.compressNow'))}</span></button>` : ''}
+          ${comp.mode === 'archive' && comp.archivePath ? `<button class="btn-outline" ${this.busy ? 'disabled' : ''} onclick="networkPage.restoreNow()"><i data-lucide="undo-2"></i><span>${escHtml(i18n.t('network.restoreFolder'))}</span></button>` : ''}
+          <button class="btn-glow" onclick="networkPage.renderFolderModal()">${escHtml(i18n.t('common.ok'))}</button>
+        </div>`;
+    }
+
     return `${tabButtons}
       <div class="net-form">
         <label class="net-field"><span>${escHtml(i18n.t('network.ignorePatterns'))}</span>
@@ -598,23 +641,71 @@ class NetworkPage {
 
   setType(value) { this.draft.type = value; this.renderFolderModal(); }
   setPostSyncTask(value) { this.draft.PostSyncTaskId = value || ''; }
+  setPreSyncTask(value) { this.draft.PreSyncTaskId = value || ''; this.draft.PreSyncBlocks = this.draft.PreSyncBlocks === true; this.renderFolderModal(); }
   setFlag(key, value) { this.draft[key] = value; }
   setNumber(key, value) { this.draft[key] = Number(value) || 0; }
   setVersioningType(value) { this.draft.versioning = { type: value, params: {} }; this.renderFolderModal(); }
   setVersioningParam(key, value) { this.draft.versioning.params[key] = Number(value) || 0; }
+  setCompression(key, value) {
+    if (!this.draft.Compression) this.draft.Compression = { mode: 'none', level: 5, extensions: [], excludes: [], minSizeBytes: 0 };
+    if (key === 'minSizeKb') this.draft.Compression.minSizeBytes = Math.max(0, Math.round(Number(value) || 0) * 1024);
+    else if (key === 'level') this.draft.Compression.level = Math.min(9, Math.max(1, Number(value) || 5));
+    else this.draft.Compression[key] = value;
+    this.renderFolderModal();
+  }
+
+  setCompressionList(key, value) {
+    if (!this.draft.Compression) this.draft.Compression = { mode: 'none', level: 5, extensions: [], excludes: [], minSizeBytes: 0 };
+    this.draft.Compression[key] = String(value).split('\n').map((l) => l.trim()).filter(Boolean);
+  }
+
+  async compressNow() {
+    if (!this.draft.Compression || this.draft.Compression.mode === 'none') return;
+    this.busy = 'compress';
+    this.renderFolderModal();
+    // Grava antes de comprimir: a pasta precisa existir no Syncthing para o
+    // caminho ser conhecido, e o Compression precisa estar persistido para o
+    // ciclo automático usar a mesma política.
+    await this.saveFolder({ quiet: true });
+    const result = await window.api.compressSyncNetworkFolder(this.draft.id, this.draft.Compression);
+    this.busy = null;
+    if (result && result.ok) {
+      showToast(i18n.t('network.compressionDone').replace('{n}', String(result.added || 0)).replace('{r}', String(result.removed || 0)), 'success');
+    } else {
+      showToast(i18n.t('network.compressionFailed'), 'error');
+    }
+    this.renderFolderModal();
+  }
+
+  async restoreNow() {
+    if (!this.draft.Compression) return;
+    this.busy = 'restore';
+    this.renderFolderModal();
+    const result = await window.api.restoreSyncNetworkFolder(this.draft.id, this.draft.Compression);
+    this.busy = null;
+    showToast(i18n.t(result && result.ok ? 'network.restoreDone' : 'network.compressionFailed'), result && result.ok ? 'success' : 'error');
+    this.renderFolderModal();
+  }
+
   setIgnores(value) { this.ignores = String(value).split('\n').map((l) => l.trim()).filter(Boolean); }
 
-  async saveFolder() {
+  async saveFolder(options = {}) {
+    // O Compression viaja no objeto da pasta, que é um bloco livre do Syncthing:
+    // um campo a mais no JSON da config não atrapalha o daemon, e reaproveita
+    // a mesma gravação em vez de criar um canal paralelo.
     const result = await window.api.saveSyncNetworkFolder(this.draft);
     if (!result || !result.ok) {
       const reason = (result && result.error) || 'network.saveFailed';
       showToast(i18n.t(reason), 'error');
-      return;
+      return false;
     }
     await window.api.saveSyncNetworkIgnores(this.draft.id, this.ignores);
-    this.closeModal();
-    showToast(i18n.t('network.folderSaved'), 'success');
+    if (!options.quiet) {
+      this.closeModal();
+      showToast(i18n.t('network.folderSaved'), 'success');
+    }
     await this.load();
+    return true;
   }
 
   async deleteFolder(id) {

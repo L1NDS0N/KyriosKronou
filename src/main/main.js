@@ -982,6 +982,18 @@ function registerIPC() {
   syncNetworkCall('get-sync-network-ignores', (id) => syncNetwork.ignores(id));
   syncNetworkCall('save-sync-network-ignores', (id, lines) => syncNetwork.saveIgnores(id, lines));
   syncNetworkCall('rescan-sync-network-folder', (id) => syncNetwork.rescanFolder(id));
+  // Compactar é irreversible no disco: o original sai depois que o container é
+  // conferido, e não há como desfazer sem o restore. Fica com auditoria.
+  syncNetworkCall('compress-sync-network-folder', async (id, policy) => {
+    const result = await syncNetwork.compressFolder(id, policy);
+    if (result.ok) logger.log('INFO', `SYNC_COMPRESSED folder=${id} mode=${result.mode || 'none'} added=${result.added || 0} removed=${result.removed || 0}`);
+    return result;
+  });
+  syncNetworkCall('restore-sync-network-folder', async (id, policy) => {
+    const result = await syncNetwork.restoreFolder(id, policy);
+    if (result.ok) logger.log('INFO', `SYNC_COMPRESSION_RESTORED folder=${id} files=${result.restored}`);
+    return result;
+  });
   syncNetworkCall('save-sync-network-folder', async (folder) => {
     const result = await syncNetwork.saveFolder(folder);
     if (result.ok) logger.log('INFO', `SYNC_FOLDER_SAVED folder=${result.folder.id} type=${result.folder.type} devices=${(result.folder.devices || []).length}`);

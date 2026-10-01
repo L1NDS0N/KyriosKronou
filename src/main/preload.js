@@ -113,6 +113,8 @@ contextBridge.exposeInMainWorld('api', {
   saveSyncNetworkFolder: (folder) => ipcRenderer.invoke('save-sync-network-folder', folder),
   deleteSyncNetworkFolder: (id) => ipcRenderer.invoke('delete-sync-network-folder', id),
   rescanSyncNetworkFolder: (id) => ipcRenderer.invoke('rescan-sync-network-folder', id),
+  compressSyncNetworkFolder: (id, policy) => ipcRenderer.invoke('compress-sync-network-folder', id, policy),
+  restoreSyncNetworkFolder: (id, policy) => ipcRenderer.invoke('restore-sync-network-folder', id, policy),
   getSyncNetworkIgnores: (id) => ipcRenderer.invoke('get-sync-network-ignores', id),
   saveSyncNetworkIgnores: (id, lines) => ipcRenderer.invoke('save-sync-network-ignores', id, lines),
   getSyncNetworkDevices: () => ipcRenderer.invoke('get-sync-network-devices'),
