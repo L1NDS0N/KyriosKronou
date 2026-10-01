@@ -246,18 +246,37 @@ class SmartCronInput {
     if (!value || value === '*') return true;
     if (value.includes('/')) {
       const [base, step] = value.split('/');
-      if (base !== '*' && (isNaN(parseInt(base)) || parseInt(base) < min || parseInt(base) > max)) return false;
-      return !isNaN(parseInt(step)) && parseInt(step) >= 1;
+      if (!this.isWholeNumber(step) || Number(step) < 1) return false;
+      if (base === '*') return true;
+      // A base volta pelo mesmo validador: assim "1-30/2" e "1,5,9/3" são
+      // julgados pelos Operados que já existem, em vez de uma comparação
+      // solta que aceitaria intervalo dentro de intervalo.
+      return this.validateField(base, min, max);
     }
     if (value.includes('-')) {
-      const [a, b] = value.split('-').map(Number);
-      return !isNaN(a) && !isNaN(b) && a >= min && b <= max && a <= b;
+      const [a, b] = value.split('-');
+      if (!this.isWholeNumber(a) || !this.isWholeNumber(b)) return false;
+      return Number(a) >= min && Number(b) <= max && Number(a) <= Number(b);
     }
     if (value.includes(',')) {
-      return value.split(',').every(v => this.validateField(v.trim(), min, max));
+      const parts = value.split(',');
+      // "1,,2" e ",5" não são cron: elemento vazio era aceito porque o
+      // topo do método trata campo não preenchido como "ainda digitando".
+      if (parts.some((p) => !p.trim())) return false;
+      return parts.every(v => this.validateField(v.trim(), min, max));
     }
-    const num = parseInt(value, 10);
-    return !isNaN(num) && num >= min && num <= max;
+    if (!this.isWholeNumber(value)) return false;
+    const num = Number(value);
+    return num >= min && num <= max;
+  }
+
+  // parseInt truncava: "1.5" virava 1 e passava na faixa, a tela aceitava
+  // "1.5" como minuto, salvava, e o parser do main recusava na hora de
+  // executar. Tarefa que parece agendada e nunca roda.
+  isWholeNumber(value) {
+    const s = String(value == null ? '' : value).trim();
+    if (!s) return false;
+    return /^[+-]?\d+$/.test(s);
   }
 
   updateDescription() {
@@ -289,28 +308,31 @@ class SmartCronInput {
 
   getDescription() {
     const parts = this.value.split(/\s+/);
+    if (parts.length !== 5) return '';
     const [min, hour, dom, month, dow] = parts;
 
-    if (min === '*' && hour === '*') return 'Runs every minute';
-    if (min.startsWith('*/')) return `Runs every ${min.replace('*/', '')} minutes`;
-    if (hour.startsWith('*/')) return `Runs every ${hour.replace('*/', '')} hours`;
+    if (min === '*' && hour === '*') return i18n.t('cron.everyMinute');
+    if (min.startsWith('*/')) return i18n.t('cron.everyNMinutes', { n: min.replace('*/', '') });
+    if (hour.startsWith('*/')) return i18n.t('cron.everyNHours', { n: hour.replace('*/', '') });
 
-    let desc = 'Runs at ';
-    desc += min === '*' ? 'minute 0' : `minute ${min}`;
-    desc += hour === '*' ? ' of every hour' : ` past hour ${hour.padStart(2, '0')}`;
+    // As chaves existiam nos dois dicionários desde o começo e não eram
+    // usadas: a descrição saía em inglês dentro de um app em português.
+    let desc = i18n.t('cron.runsAt');
+    desc += ` ${min === '*' ? 0 : min}`;
+    desc += hour === '*'
+      ? ` ${i18n.t('cron.daily').toLowerCase()}`
+      : `:${hour.padStart(2, '0')}`;
 
-    if (dom !== '*') desc += `, on day ${dom}`;
-    if (month !== '*') desc += ` of month ${month}`;
+    if (dom !== '*') desc += ` · ${i18n.t('cron.day')} ${dom}`;
+    if (month !== '*') desc += ` · ${i18n.t('cron.month')} ${month}`;
     if (dow !== '*') {
       const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
       if (dow.includes('-')) {
         const [s, e] = dow.split('-');
-        desc += `, ${dayNames[s]}-${dayNames[e]}`;
+        desc += ` · ${dayNames[s]}-${dayNames[e]}`;
       } else {
-        desc += `, ${dayNames[dow] || dow}`;
+        desc += ` · ${dayNames[dow] || dow}`;
       }
-    } else if (dom === '*') {
-      desc += ' daily';
     }
 
     return desc;
