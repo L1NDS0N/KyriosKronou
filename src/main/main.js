@@ -556,7 +556,6 @@ function registerIPC() {
   // ─── Wrapper + Deploy ───
   ipcMain.handle('generate-wrapper', (e, task) => wrapperGenerator.generateWrapper(task));
   ipcMain.handle('remove-wrapper', (e, taskId) => wrapperGenerator.removeWrapper(taskId));
-  ipcMain.handle('get-wrapper-path', (e, taskId) => wrapperGenerator.getWrapperPath(taskId));
   ipcMain.handle('list-wrappers', () => wrapperGenerator.listWrappers());
 
   // ─── Service Parameter Editing ───
