@@ -2235,7 +2235,10 @@ window.api.onTaskExecuted((result) => {
 const GH_USERNAME = 'l1nds0n';
 
 async function showGitHubProfile() {
-  showModal(`<div class="gh-loading" id="gh-loading"><i data-lucide="loader"></i><p>Loading profile...</p></div><div id="gh-content" style="display:none"></div>`);
+  showModal(`<div class="gh-shell">
+    <div class="gh-loading" id="gh-loading"><i data-lucide="loader"></i><p>Loading profile...</p></div>
+    <div id="gh-content" style="display:none"></div>
+  </div>`);
   try {
     const [userRes, reposRes] = await Promise.all([
       fetch(`https://api.github.com/users/${GH_USERNAME}`),
@@ -2247,9 +2250,12 @@ async function showGitHubProfile() {
     const loading = document.getElementById('gh-loading');
     const content = document.getElementById('gh-content');
 
-    const location = user.location ? `<span><i data-lucide="map-pin"></i>${user.location}</span>` : '';
-    const company = user.company ? `<span><i data-lucide="building-2"></i>${user.company}</span>` : '';
-    const blog = user.blog ? `<a href="${user.blog.startsWith('http') ? user.blog : 'https://' + user.blog}" target="_blank" style="color:var(--primary);text-decoration:none;"><i data-lucide="link"></i>${user.blog}</a>` : '';
+    // Tudo que vem da API do GitHub passa por escHtml/escAttr. Descrição de
+    // repositório e bio são texto livre de terceiros e iam direto para o
+    // innerHTML: um <img onerror=...> ali é execução de script dentro do app.
+    const location = user.location ? `<span><i data-lucide="map-pin"></i>${escHtml(user.location)}</span>` : '';
+    const company = user.company ? `<span><i data-lucide="building-2"></i>${escHtml(user.company)}</span>` : '';
+    const blog = user.blog ? `<a href="${escAttr(user.blog.startsWith('http') ? user.blog : 'https://' + user.blog)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);text-decoration:none;"><i data-lucide="link"></i>${escHtml(user.blog)}</a>` : '';
 
     let reposHtml = '';
     if (repos.length > 0) {
@@ -2258,14 +2264,14 @@ async function showGitHubProfile() {
           <h4><i data-lucide="folder-git-2"></i> Top Repositories</h4>
           <div class="gh-repo-list">
             ${repos.map(r => `
-              <a class="gh-repo" href="${r.html_url}" target="_blank">
+              <a class="gh-repo" href="${escAttr(r.html_url)}" target="_blank" rel="noopener noreferrer">
                 <div>
-                  <div class="gh-repo-name">${r.name}</div>
-                  ${r.description ? `<div class="gh-repo-desc">${r.description.substring(0, 80)}</div>` : ''}
+                  <div class="gh-repo-name">${escHtml(r.name)}</div>
+                  ${r.description ? `<div class="gh-repo-desc">${escHtml(r.description.substring(0, 80))}</div>` : ''}
                 </div>
                 <div style="text-align:right;flex-shrink:0;margin-left:12px;">
-                  ${r.language ? `<div class="gh-repo-lang">${r.language}</div>` : ''}
-                  <div style="font-size:11px;color:var(--text3);margin-top:4px;display:flex;align-items:center;gap:4px;justify-content:flex-end;"><i data-lucide="star" style="width:12px;height:12px;"></i>${r.stargazers_count}</div>
+                  ${r.language ? `<div class="gh-repo-lang">${escHtml(r.language)}</div>` : ''}
+                  <div style="font-size:11px;color:#7a7a8c;margin-top:4px;display:flex;align-items:center;gap:4px;justify-content:flex-end;"><i data-lucide="star" style="width:12px;height:12px;"></i>${Number(r.stargazers_count) || 0}</div>
                 </div>
               </a>
             `).join('')}
@@ -2276,11 +2282,11 @@ async function showGitHubProfile() {
     content.innerHTML = `
       <div class="gh-profile">
         <div class="gh-header">
-          <img class="gh-avatar" src="${user.avatar_url}" alt="${user.login}"/>
+          <img class="gh-avatar" src="${escAttr(user.avatar_url)}" alt="${escAttr(user.login)}"/>
           <div class="gh-info">
-            <h3>${user.name || user.login}</h3>
-            <div class="gh-login">@${user.login}</div>
-            ${user.bio ? `<div class="gh-bio">${user.bio}</div>` : ''}
+            <h3>${escHtml(user.name || user.login)}</h3>
+            <div class="gh-login">@${escHtml(user.login)}</div>
+            ${user.bio ? `<div class="gh-bio">${escHtml(user.bio)}</div>` : ''}
             <div class="gh-meta">
               ${location}
               ${company}
@@ -2290,15 +2296,15 @@ async function showGitHubProfile() {
           </div>
         </div>
         <div class="gh-actions">
-          <a class="gh-coffee-btn" href="https://www.buymeacoffee.com/lindsonfranca" target="_blank" rel="noopener">
+          <a class="gh-coffee-btn" href="https://www.buymeacoffee.com/lindsonfranca" target="_blank" rel="noopener noreferrer">
             <i data-lucide="coffee"></i> Buy me a coffee
           </a>
         </div>
         <div class="gh-stats">
-          <div class="gh-stat"><div class="gh-stat-value">${user.public_repos}</div><div class="gh-stat-label">Repos</div></div>
-          <div class="gh-stat"><div class="gh-stat-value">${user.followers}</div><div class="gh-stat-label">Followers</div></div>
-          <div class="gh-stat"><div class="gh-stat-value">${user.following}</div><div class="gh-stat-label">Following</div></div>
-          <div class="gh-stat"><div class="gh-stat-value">${user.public_gists}</div><div class="gh-stat-label">Gists</div></div>
+          <div class="gh-stat"><div class="gh-stat-value">${Number(user.public_repos) || 0}</div><div class="gh-stat-label">Repos</div></div>
+          <div class="gh-stat"><div class="gh-stat-value">${Number(user.followers) || 0}</div><div class="gh-stat-label">Followers</div></div>
+          <div class="gh-stat"><div class="gh-stat-value">${Number(user.following) || 0}</div><div class="gh-stat-label">Following</div></div>
+          <div class="gh-stat"><div class="gh-stat-value">${Number(user.public_gists) || 0}</div><div class="gh-stat-label">Gists</div></div>
         </div>
         ${reposHtml}
       </div>`;
