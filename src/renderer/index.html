@@ -60,6 +60,9 @@
         <button class="nav-btn" data-page="retention">
           <i data-lucide="scissors"></i><span data-i18n="nav.retention">Retention</span>
         </button>
+        <button class="nav-btn" data-page="network">
+          <i data-lucide="network"></i><span data-i18n="nav.network">Network</span>
+        </button>
         <button class="nav-btn" data-page="services">
           <i data-lucide="server"></i><span data-i18n="nav.services">Services</span>
         </button>
@@ -323,6 +326,30 @@
           <div id="retention-content"></div>
         </section>
 
+        <!-- ═══ NETWORK (Syncthing daemon) ═══ -->
+        <section id="page-network" class="page">
+          <div class="page-toolbar toolbar-wrap">
+            <div class="toolbar-left"><span class="toolbar-info"><i data-lucide="network"></i> <span data-i18n="network.title">Sync Network</span></span></div>
+            <div class="toolbar-right">
+              <button class="btn-outline" id="btn-refresh-network" title="Refresh"><i data-lucide="refresh-cw"></i></button>
+            </div>
+          </div>
+
+          <div class="net-tabs" role="tablist">
+            <button class="net-tab active" role="tab" data-net-tab="dashboard" aria-selected="true" onclick="networkPage.setTab('dashboard')"><i data-lucide="gauge"></i><span data-i18n="network.tabDashboard">Dashboard</span></button>
+            <button class="net-tab" role="tab" data-net-tab="devices" aria-selected="false" onclick="networkPage.setTab('devices')"><i data-lucide="monitor-smartphone"></i><span data-i18n="network.tabDevices">Devices</span></button>
+            <button class="net-tab" role="tab" data-net-tab="folders" aria-selected="false" onclick="networkPage.setTab('folders')"><i data-lucide="folder-sync"></i><span data-i18n="network.tabFolders">Folders</span></button>
+          </div>
+
+          <div id="network-setup" style="display:none"></div>
+
+          <div class="net-panel" id="net-panel-dashboard" role="tabpanel"></div>
+          <div class="net-panel" id="net-panel-devices" role="tabpanel" style="display:none"></div>
+          <div class="net-panel" id="net-panel-folders" role="tabpanel" style="display:none"></div>
+
+          <div id="network-folder-modal-overlay" class="secondary-modal-overlay hidden"></div>
+        </section>
+
         <!-- ═══ SETTINGS ═══ -->
         <section id="page-settings" class="page">
           <div class="settings-grid">
@@ -572,6 +599,7 @@
   <script src="backupPage.js"></script>
   <script src="syncPage.js"></script>
   <script src="retentionPage.js"></script>
+  <script src="networkPage.js"></script>
   <script src="app.js"></script>
   <script src="webPermissionsUi.js"></script>
 </body>

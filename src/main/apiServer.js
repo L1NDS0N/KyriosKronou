@@ -38,6 +38,7 @@ class ApiServer {
     // mesmo sem eles, e cada rota responde 503 em vez de derrubar o servidor.
     this.syncManager = opts.syncManager || null;
     this.retentionManager = opts.retentionManager || null;
+    this.syncNetwork = opts.syncNetwork || null;
 
     this.app = express();
     this.server = null;
@@ -224,6 +225,7 @@ class ApiServer {
     this._backupRoutes();
     this._syncRoutes();
     this._retentionRoutes();
+    this._networkRoutes();
     this._serviceRoutes();
     this._runRoutes();
     this._scriptRoutes();
@@ -732,10 +734,147 @@ class ApiServer {
   // corpo de um erro. E um corpo sem Password no PUT significa "não mexa na
   // senha", exatamente como no backup - o painel não a devolve, então "ausente"
   // não pode virar "apagada".
+  // Rede de sincronismo: mesmas telas do desktop, com os mesmos escopos. A
+  // autorização de dispositivo exige a conta GitHub da sessão - o id numérico
+  // sai de req.kyriosUser, que o webAuth validou contra a API do GitHub, e
+  // nunca do corpo da requisição. Sem sessão não há autorização possível.
+  _networkRoutes() {
+    const guard = (res) => {
+      if (!this.syncNetwork) { res.status(503).json({ error: 'Sync network unavailable' }); return false; }
+      return true;
+    };
+    const actorOf = (req) => {
+      const user = req.kyriosUser;
+      if (!user) return null;
+      return { githubId: user.id, githubLogin: String(user.login || '').toLowerCase(), githubName: user.name || '', isAdmin: false };
+    };
+    // `blocked` viaja junto porque "pasta nao salva" sem dizer qual dispositivo
+    // travou deixa o operador sem saber o que liberar.
+    const reason = (res, result) => res.status(400).json(Object.assign(
+      { success: false, error: (result && result.error) || (result && result.reason) || 'network.error' },
+      (result && result.blocked) ? { blocked: result.blocked } : {}
+    ));
+
+    this.app.get('/api/network/status', this._need('network:view'), (req, res) => {
+      if (!guard(res)) return;
+      this.syncNetwork.status().then((status) => res.json({ success: true, data: status }), (err) => res.status(500).json({ error: err.message }));
+    });
+
+    this.app.get('/api/network/overview', this._need('network:view'), (req, res) => {
+      if (!guard(res)) return;
+      this.syncNetwork.overview()
+        .then((view) => res.json({ success: Boolean(view.ok), data: view }))
+        .catch((err) => res.status(500).json({ error: err.message }));
+    });
+
+    this.app.get('/api/network/folders', this._need('network:view'), (req, res) => {
+      if (!guard(res)) return;
+      this.syncNetwork.folders()
+        .then((result) => res.json({ success: Boolean(result.ok), data: result.folders || [], reason: result.reason }))
+        .catch((err) => res.status(500).json({ error: err.message }));
+    });
+
+    this.app.put('/api/network/folders/:id', this._need('network:write'), (req, res) => {
+      if (!guard(res)) return;
+      this.syncNetwork.saveFolder(Object.assign({}, req.body, { id: req.params.id }))
+        .then((result) => {
+          if (!result.ok) { reason(res, result); return; }
+          this._audit(req, 'WEB_SYNC_FOLDER_SAVED', { targetId: req.params.id, type: result.folder.type });
+          res.json({ success: true, data: result.folder });
+        })
+        .catch((err) => res.status(500).json({ error: err.message }));
+    });
+
+    this.app.delete('/api/network/folders/:id', this._need('network:write'), (req, res) => {
+      if (!guard(res)) return;
+      this.syncNetwork.deleteFolder(req.params.id)
+        .then(() => { this._audit(req, 'WEB_SYNC_FOLDER_DELETED', { targetId: req.params.id }); res.json({ success: true }); })
+        .catch((err) => res.status(500).json({ error: err.message }));
+    });
+
+    this.app.get('/api/network/folders/:id/ignores', this._need('network:view'), (req, res) => {
+      if (!guard(res)) return;
+      this.syncNetwork.ignores(req.params.id)
+        .then((result) => res.json({ success: Boolean(result.ok), data: result.ignores || [] }))
+        .catch((err) => res.status(500).json({ error: err.message }));
+    });
+
+    this.app.put('/api/network/folders/:id/ignores', this._need('network:write'), (req, res) => {
+      if (!guard(res)) return;
+      this.syncNetwork.saveIgnores(req.params.id, (req.body && req.body.ignore) || [])
+        .then(() => { this._audit(req, 'WEB_SYNC_IGNORES_SAVED', { targetId: req.params.id }); res.json({ success: true }); })
+        .catch((err) => res.status(500).json({ error: err.message }));
+    });
+
+    this.app.get('/api/network/devices', this._need('network:view'), (req, res) => {
+      if (!guard(res)) return;
+      this.syncNetwork.devices()
+        .then((result) => res.json({ success: Boolean(result.ok), data: result.devices || [], reason: result.reason }))
+        .catch((err) => res.status(500).json({ error: err.message }));
+    });
+
+    this.app.post('/api/network/devices/:deviceId/authorize', this._need('network:write'), (req, res) => {
+      if (!guard(res)) return;
+      const actor = actorOf(req);
+      if (!actor) { res.status(401).json({ success: false, error: 'network.loginRequired' }); return; }
+      this.syncNetwork.authorizeDevice({ deviceID: req.params.deviceId, githubId: actor.githubId, githubLogin: actor.githubLogin }, actor)
+        .then((result) => {
+          if (!result.ok) { res.status(403).json({ success: false, error: result.reason }); return; }
+          this._audit(req, 'WEB_SYNC_DEVICE_AUTHORIZED', { targetId: req.params.deviceId, github: `${result.entry.githubLogin}#${result.entry.githubId}` });
+          res.json({ success: true, data: result.entry });
+        })
+        .catch((err) => res.status(500).json({ error: err.message }));
+    });
+
+    this.app.delete('/api/network/devices/:deviceId/authorize', this._need('network:write'), (req, res) => {
+      if (!guard(res)) return;
+      this.syncNetwork.revokeDevice(req.params.deviceId)
+        .then(() => { this._audit(req, 'WEB_SYNC_DEVICE_REVOKED', { targetId: req.params.deviceId }); res.json({ success: true }); })
+        .catch((err) => res.status(500).json({ error: err.message }));
+    });
+
+    this.app.get('/api/network/instances', this._need('network:view'), (req, res) => {
+      if (!guard(res)) return;
+      res.json({ success: true, data: this.syncNetwork.listInstances() });
+    });
+
+    this.app.post('/api/network/instances', this._need('network:write'), (req, res) => {
+      if (!guard(res)) return;
+      this.syncNetwork.createInstance(req.body && req.body.name)
+        .then((result) => {
+          if (!result.ok) { reason(res, result); return; }
+          this._audit(req, 'WEB_SYNC_INSTANCE_CREATED', { targetId: result.instance.Id });
+          res.status(201).json({ success: true, data: result.instance });
+        })
+        .catch((err) => res.status(500).json({ error: err.message }));
+    });
+
+    this.app.delete('/api/network/instances/:id', this._need('network:write'), (req, res) => {
+      if (!guard(res)) return;
+      this.syncNetwork.removeInstance(req.params.id)
+        .then((result) => {
+          if (!result.ok) { reason(res, result); return; }
+          this._audit(req, 'WEB_SYNC_INSTANCE_REMOVED', { targetId: req.params.id });
+          res.json({ success: true });
+        })
+        .catch((err) => res.status(500).json({ error: err.message }));
+    });
+
+    this.app.post('/api/network/daemon/:action', this._need('network:run'), (req, res) => {
+      if (!guard(res)) return;
+      const action = req.params.action;
+      if (!['start', 'stop', 'install'].includes(action)) { res.status(400).json({ error: 'network.unknownAction' }); return; }
+      const run = action === 'stop' ? this.syncNetwork.stop() : (action === 'install' ? this.syncNetwork.install() : this.syncNetwork.start());
+      run.then((result) => {
+        this._audit(req, `WEB_SYNC_DAEMON_${action.toUpperCase()}`, { success: Boolean(result.success) });
+        res.json(Object.assign({ success: Boolean(result.success) }, result));
+      }).catch((err) => res.status(500).json({ error: err.message }));
+    });
+  }
+
   _syncRoutes() {
     const guard = (res) => {
-      if (!this.syncManager) { res.status(503).json({ error: 'Sync manager unavailable' }); return false; }
-      return true;
+      if (!this.syncManager) { res.status(503).json({ error: 'Sync manager unavailable' }); return false; }      return true;
     };
     const semSenha = (profile) => Object.assign({}, profile, { Password: undefined });
     const pastaDe = (body) => (body && (body.dir || body.path || body.folder)) || '';

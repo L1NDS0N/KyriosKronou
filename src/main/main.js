@@ -14,10 +14,12 @@ const ApiServer = require('./apiServer');
 const BackupManager = require('./backupManager');
 const SyncManager = require('./sync/syncManager');
 const RetentionManager = require('./retentionManager');
+const SyncNetwork = require('./syncthing/network');
 const KyrionService = require('./kyrionService');
 const paths = require('./paths');
 const { SchedulerCore, ROLE_GUI, readOwner } = require('./schedulerCore');
 const WebPermissions = require('./webPermissions');
+const WebAuth = require('./webAuth');
 const RunRegistry = require('./runRegistry');
 
 // ─── Single instance ───
@@ -52,6 +54,9 @@ let webPermissions;
 let backupManager;
 let syncManager;
 let retentionManager;
+let syncNetwork;
+let syncNetworkActor = null;
+let desktopWebAuth = null;
 let isQuitting = false;
 
 // ─── Push Notifications ───
@@ -293,6 +298,10 @@ function initComponents() {
   backupManager = new BackupManager(config, logger, runs);
   syncManager = new SyncManager(config, logger, runs);
   retentionManager = new RetentionManager({ syncManager, cronParser, logger });
+  syncNetwork = new SyncNetwork({ logger, config, taskManager, runRegistry: runs });
+  // Mesma implementação de device flow do painel web, sem sessão nem cookie: o
+  // desktop só precisa da identidade verificada para autorizar dispositivos.
+  desktopWebAuth = new WebAuth(config, logger);
 
   if (migration.migrated) {
     logger.log('INFO', `Migrated ${migration.copied} file(s) from ${migration.sources.join(', ')} to ${paths.dataDir()}`);
@@ -315,7 +324,7 @@ function syncWebInterface() {
   if (shouldHost && (!apiServer || !apiServer.isRunning())) {
     // Sync e retenção vão junto: sem eles as telas do painel respondem 503.
     apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator, backupManager, {
-      syncManager, retentionManager, permissions: webPermissions,
+        syncManager, retentionManager, syncNetwork, permissions: webPermissions,
     });
     apiServer.start()
       .then((info) => logger.log('INFO', `Web interface started on ${info.url}`))
@@ -547,7 +556,6 @@ function registerIPC() {
   // ─── Wrapper + Deploy ───
   ipcMain.handle('generate-wrapper', (e, task) => wrapperGenerator.generateWrapper(task));
   ipcMain.handle('remove-wrapper', (e, taskId) => wrapperGenerator.removeWrapper(taskId));
-  ipcMain.handle('get-wrapper-path', (e, taskId) => wrapperGenerator.getWrapperPath(taskId));
   ipcMain.handle('list-wrappers', () => wrapperGenerator.listWrappers());
 
   // ─── Service Parameter Editing ───
@@ -903,6 +911,114 @@ function registerIPC() {
     }
   });
 
+  // ─── Rede de sincronismo (daemon Syncthing) ───
+  const syncNetworkCall = (channel, fn) => {
+    ipcMain.handle(channel, async (e, ...args) => {
+      try { return await fn(...args); }
+      catch (err) { return { ok: false, error: err.message }; }
+    });
+  };
+
+  syncNetworkCall('get-sync-network-identity', async () => ({
+    loggedIn: Boolean(syncNetworkActor),
+    user: syncNetworkActor ? { login: syncNetworkActor.githubLogin, id: syncNetworkActor.githubId, name: syncNetworkActor.githubName, avatar: syncNetworkActor.githubAvatar } : null,
+  }));
+  syncNetworkCall('start-github-device-flow', async () => {
+    try {
+      const flow = await desktopWebAuth.startDeviceFlow();
+      return { ok: true, deviceCode: flow.deviceCode, userCode: flow.userCode, verificationUri: flow.verificationUri, expiresIn: flow.expiresIn, interval: flow.interval };
+    } catch (err) { return { ok: false, error: err.message }; }
+  });
+  syncNetworkCall('poll-github-device-flow', async (deviceCode) => {
+    try {
+      const result = await desktopWebAuth.pollDeviceFlow(deviceCode);
+      // "pending" e "slow_down" não são erro: o usuário ainda não aprovou no
+      // navegador, e tratá-los como falha derrubaria o modal de login.
+      if (result.status === 'pending' || result.status === 'slow_down') {
+        return { ok: false, pending: true, interval: result.interval || 5 };
+      }
+      if (result.status !== 'token') return { ok: false, pending: false, error: result.message };
+
+      const user = await desktopWebAuth.fetchGithubUser(result.token);
+      // Só o id numérico devolvido pela API do GitHub entra aqui. O renderer
+      // recebe só este objeto; ele não escolhe o próprio githubId.
+      syncNetworkActor = {
+        githubId: user.id,
+        githubLogin: String(user.login || '').toLowerCase(),
+        githubName: user.name || '',
+        githubAvatar: user.avatar || '',
+        isAdmin: false,
+      };
+      logger.log('INFO', `SYNC_NETWORK_IDENTITY github=${syncNetworkActor.githubLogin}#${syncNetworkActor.githubId}`);
+      return { ok: true, user: { login: syncNetworkActor.githubLogin, id: syncNetworkActor.githubId, name: syncNetworkActor.githubName, avatar: syncNetworkActor.githubAvatar } };
+    } catch (err) { return { ok: false, pending: false, error: err.message }; }
+  });
+  syncNetworkCall('logout-github-device-flow', async () => {
+    if (syncNetworkActor) logger.log('INFO', `SYNC_NETWORK_LOGOUT github=${syncNetworkActor.githubLogin}#${syncNetworkActor.githubId}`);
+    syncNetworkActor = null;
+    return { ok: true };
+  });
+
+  syncNetworkCall('get-sync-network-status', () => syncNetwork.status());
+  syncNetworkCall('get-sync-network-instances', async () => ({ ok: true, instances: syncNetwork.listInstances() }));
+  syncNetworkCall('create-sync-network-instance', async (name) => {
+    const result = await syncNetwork.createInstance(name);
+    if (result.ok) logger.log('INFO', `SYNC_INSTANCE_CREATED id=${result.instance.Id} device=${result.deviceID}`);
+    return result;
+  });
+  syncNetworkCall('remove-sync-network-instance', async (id) => {
+    const result = await syncNetwork.removeInstance(id);
+    if (result.ok) logger.log('INFO', `SYNC_INSTANCE_REMOVED id=${id}`);
+    return result;
+  });
+  syncNetworkCall('start-sync-network-instance', async (id) => syncNetwork.startInstance(id));
+  syncNetworkCall('stop-sync-network-instance', async (id) => syncNetwork.stopInstance(id));  syncNetworkCall('install-syncthing', () => syncNetwork.install());
+  syncNetworkCall('start-syncthing', () => syncNetwork.start());
+  syncNetworkCall('stop-syncthing', () => syncNetwork.stop());
+  syncNetworkCall('get-sync-network-overview', () => syncNetwork.overview());
+  syncNetworkCall('get-sync-network-folders', () => syncNetwork.folders());
+  syncNetworkCall('get-sync-network-devices', () => syncNetwork.devices());
+  syncNetworkCall('get-sync-network-ignores', (id) => syncNetwork.ignores(id));
+  syncNetworkCall('save-sync-network-ignores', (id, lines) => syncNetwork.saveIgnores(id, lines));
+  syncNetworkCall('rescan-sync-network-folder', (id) => syncNetwork.rescanFolder(id));
+  // Compactar é irreversible no disco: o original sai depois que o container é
+  // conferido, e não há como desfazer sem o restore. Fica com auditoria.
+  syncNetworkCall('compress-sync-network-folder', async (id, policy) => {
+    const result = await syncNetwork.compressFolder(id, policy);
+    if (result.ok) logger.log('INFO', `SYNC_COMPRESSED folder=${id} mode=${result.mode || 'none'} added=${result.added || 0} removed=${result.removed || 0}`);
+    return result;
+  });
+  syncNetworkCall('restore-sync-network-folder', async (id, policy) => {
+    const result = await syncNetwork.restoreFolder(id, policy);
+    if (result.ok) logger.log('INFO', `SYNC_COMPRESSION_RESTORED folder=${id} files=${result.restored}`);
+    return result;
+  });
+  syncNetworkCall('save-sync-network-folder', async (folder) => {
+    const result = await syncNetwork.saveFolder(folder);
+    if (result.ok) logger.log('INFO', `SYNC_FOLDER_SAVED folder=${result.folder.id} type=${result.folder.type} devices=${(result.folder.devices || []).length}`);
+    return result;
+  });
+  syncNetworkCall('delete-sync-network-folder', async (id) => {
+    const result = await syncNetwork.deleteFolder(id);
+    if (result.ok) logger.log('INFO', `SYNC_FOLDER_DELETED folder=${id}`);
+    return result;
+  });
+  // A autorização exige o ator: só a sessão OAuth verificada decide quem entra
+  // na rede. O `actor` NUNCA vem do renderer - um ipcRenderer adulterado
+  // mandando githubId próprio passaria por qualquer verificação. A identidade
+  // usada aqui é a que o main guardou depois do device flow.
+  syncNetworkCall('authorize-sync-network-device', async (payload) => {
+    if (!syncNetworkActor) return { ok: false, reason: 'network.loginRequired' };
+    const result = await syncNetwork.authorizeDevice(payload, syncNetworkActor);
+    if (result.ok) logger.log('INFO', `SYNC_DEVICE_AUTHORIZED device=${result.entry.deviceID} github=${result.entry.githubLogin}#${result.entry.githubId}`);
+    return result;
+  });
+  syncNetworkCall('revoke-sync-network-device', async (deviceID) => {
+    const result = await syncNetwork.revokeDevice(deviceID);
+    logger.log('INFO', `SYNC_DEVICE_REVOKED device=${deviceID} actor=${(syncNetworkActor && syncNetworkActor.githubLogin) || 'unauthenticated'}`);
+    return result;
+  });
+
   ipcMain.handle('test-ftp-connection', async (e, config) => {
     try {
       const ftp = require('basic-ftp');
@@ -1082,7 +1198,7 @@ function registerIPC() {
     try {
       if (apiServer && apiServer.isRunning()) return { success: false, message: 'API server already running' };
       apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator, backupManager, {
-        syncManager, retentionManager, permissions: webPermissions,
+        syncManager, retentionManager, syncNetwork, permissions: webPermissions,
       });
       const result = await apiServer.start(port);
       config.setSetting('ApiEnabled', true);

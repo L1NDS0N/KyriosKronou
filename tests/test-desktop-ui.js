@@ -1,14 +1,11 @@
 // tests/test-desktop-ui.js
 //
-// The desktop task screens had four failures that no test would have caught:
-// the quick create preview died on a CronParser that only exists in the main
-// process, a task history rendered every entry into a scroll container whose
-// rows collapsed into each other, a Windows path lost its backslashes when it
-// went through an inline handler, and a log cell grew on hover instead of
-// opening the entry.
+// tests/test-desktop-ui.js
 //
-// The first block is static: it pins the shape of the code. The second runs the
-// real renderer in Electron and checks the behaviour.
+// The GitHub profile modal built its markup straight from the public API:
+// repository descriptions and the profile bio are free text written by third
+// parties, and they went into innerHTML unescaped. A description containing
+// <img onerror=...> is script running inside the app.
 
 const { expect } = require('chai');
 const fs = require('fs');
@@ -18,11 +15,69 @@ const { spawn } = require('child_process');
 const ROOT = path.join(__dirname, '..');
 const RENDERER = path.join(ROOT, 'src', 'renderer');
 const read = file => fs.readFileSync(path.join(RENDERER, file), 'utf8');
-const app = read('app.js');
-const quick = read('quickCreate.js');
+
+// The desktop task screens had four failures that no test would have caught:
+// the quick create preview died on a CronParser that only exists in the main
+// process, a task history rendered every entry into a scroll container whose
+// rows collapsed into each other, a Windows path lost its backslashes when it
+// went through an inline handler, and a log cell grew on hover instead of
+// opening the entry.
+//
+// The first block is static: it pins the shape of the code. The second runs the
+// real renderer in Electron and checks the behaviour.
+describe('GitHub profile modal', () => {
+  const appJs = read('app.js');
+  const bloco = appJs.slice(appJs.indexOf('async function showGitHubProfile'), appJs.indexOf("document.getElementById('credits-author')"));
+
+  it('escapes every field it takes from the API', () => {
+    // Todo buraco ${...} do bloco é inspecionado: os campos que a API devolve
+    // como texto livre precisam estar dentro de um escaper, em qualquer
+    // posição. Procurar o nome do campo logo depois de ${ não funciona, porque
+    // escapado o campo aparece dentro de ${escHtml(campo)}.
+    const buracos = bloco.match(/\$\{[^}]*\}/g) || [];
+    expect(buracos.length, 'o bloco deixou de usar template literal').to.be.above(5);
+
+    const camposApi = ['user.location', 'user.company', 'user.blog', 'user.name', 'user.login',
+      'user.bio', 'user.avatar_url', 'user.created_at', 'user.public_repos', 'user.followers',
+      'user.following', 'user.public_gists', 'r.name', 'r.description', 'r.language', 'r.html_url',
+      'r.stargazers_count'];
+
+    for (const buraco of buracos) {
+      const cita = camposApi.some((campo) => buraco.includes(campo));
+      if (!cita) continue;
+      const escapado = /esc(Html|Attr)\(/.test(buraco);
+      // Um número vai por Number(): a API mandar "7; DROP" não vira texto.
+      const numerico = /Number\(/.test(buraco) || /toLocaleDateString/.test(buraco);
+      expect(escapado || numerico, 'campo da API cru no innerHTML: ' + buraco).to.equal(true);
+    }
+  });
+
+  it('nao deixa o contador de estrelas virar o que a API mandar', () => {
+    expect(bloco).to.include('${Number(r.stargazers_count) || 0}');
+  });
+
+  it('abre links externos com noopener e noreferrer', () => {
+    const semProtecao = bloco.match(/<a[^>]*target="_blank"(?![^>]*rel="noopener noreferrer")/g) || [];
+    expect(semProtecao).to.deep.equal([]);
+  });
+
+  it('tem container proprio, escuro e com margem interna', () => {
+    expect(bloco).to.include('gh-shell');
+    const css = read('style.css');
+    const shell = /\.gh-shell\s*\{([^}]*)\}/.exec(css);
+    expect(shell, '.gh-shell precisa existir no CSS').to.not.equal(null);
+    expect(shell[1]).to.match(/padding:\s*22px 24px/);
+    // Vidro translucido vira cinza chapado sobre fundo escuro e o texto perde
+    // o degrau contra o papel de parede da janela.
+    expect(shell[1]).not.to.include('var(--glass)');
+  });
+});
+
 const index = read('index.html');
 const css = read('style.css');
 const i18nSource = read('i18n.js');
+const app = read('app.js');
+const quick = read('quickCreate.js');
 
 const ELECTRON = path.join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe');
 const RUNNER = path.join(__dirname, 'fixtures', 'desktop-ui-runner.js');

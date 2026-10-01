@@ -47,7 +47,7 @@ function fakeLogger() {
 describe('Permissões web: o catálogo', () => {
   it('cobre todas as telas do painel, com os nomes que a interface usa', () => {
     expect(WebPermissions.SCREENS).to.deep.equal([
-      'monitor', 'tasks', 'backups', 'sync', 'retention',
+      'monitor', 'tasks', 'backups', 'sync', 'retention', 'network',
       'services', 'scripts', 'history', 'logs', 'calendar', 'runs',
     ]);
   });

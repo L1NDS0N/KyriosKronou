@@ -38,6 +38,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h11l-3-3"/><path d="M20 17H9l3 3"/></svg>
       Sincronismo
     </div>
+    <div class="nav-item" data-page="network">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="6" height="6" rx="1"/><rect x="16" y="2" width="6" height="6" rx="1"/><rect x="16" y="16" width="6" height="6" rx="1"/><path d="M8 12h4a2 2 0 0 0 2-2V5"/><path d="M8 12h4a2 2 0 0 1 2 2v5"/></svg>
+      Rede
+    </div>
     <div class="nav-item" data-page="retention">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 4v16"/><circle cx="6" cy="20" r="2"/><circle cx="6" cy="4" r="2"/><path d="M20 4L8.5 15.5"/><path d="M14 5l5 5"/><path d="M17 9l3-3"/></svg>
       Retenção
@@ -270,6 +274,49 @@
         <table class="tbl">
           <thead><tr><th>Perfil</th><th>Origem → destino</th><th>Retenção</th><th>Agenda</th><th>Última execução</th><th></th></tr></thead>
           <tbody id="sync-body"><tr><td colspan="6" class="tbl-loading">carregando</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ═══ REDE ═══ -->
+    <section class="page" id="page-network">
+      <div class="page-head">
+        <div><div class="page-title">Rede de sincronismo</div><div class="page-sub" id="net-sub">—</div></div>
+        <div class="row-gap">
+          <button class="btn-ghost" id="btn-reload-net">Atualizar</button>
+        </div>
+      </div>
+
+      <div id="net-daemon" style="margin-bottom:18px"></div>
+
+      <div class="stats-grid">
+        <div class="stat-card stat-green"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="stat-net-recv">—</div><div class="stat-label">Velocidade de recepção</div>
+          <div class="stat-sub" id="stat-net-recv-sub">—</div></div></div>
+        <div class="stat-card stat-blue"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="stat-net-send">—</div><div class="stat-label">Velocidade de envio</div>
+          <div class="stat-sub" id="stat-net-send-sub">—</div></div></div>
+        <div class="stat-card stat-amber"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="stat-net-state">—</div><div class="stat-label">Estado local (total)</div>
+          <div class="stat-sub" id="stat-net-state-sub">—</div></div></div>
+        <div class="stat-card stat-red"><div class="stat-glow"></div><div class="stat-meta">
+          <div class="stat-value" id="stat-net-listen">—</div><div class="stat-label">Escutadores</div>
+          <div class="stat-sub" id="stat-net-listen-sub">—</div></div></div>
+      </div>
+
+      <div class="glass-card" style="margin-top:18px">
+        <div class="page-title" style="font-size:14px;margin-bottom:10px">Dispositivos</div>
+        <table class="tbl">
+          <thead><tr><th>Nome</th><th>ID do dispositivo</th><th>Estado</th><th>Liberado por</th><th></th></tr></thead>
+          <tbody id="net-devices"><tr><td colspan="5" class="tbl-loading">carregando</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="glass-card" style="margin-top:18px">
+        <div class="page-title" style="font-size:14px;margin-bottom:10px">Pastas compartilhadas</div>
+        <table class="tbl">
+          <thead><tr><th>Rótulo</th><th>ID</th><th>Caminho</th><th>Tipo</th><th>Dispositivos</th></tr></thead>
+          <tbody id="net-folders"><tr><td colspan="5" class="tbl-loading">carregando</td></tr></tbody>
         </table>
       </div>
     </section>

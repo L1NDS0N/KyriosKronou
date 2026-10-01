@@ -100,6 +100,7 @@ class SchedulerCore {
     this.backupManager = deps.backupManager;
     this.syncManager = deps.syncManager || null;
     this.retentionManager = deps.retentionManager || null;
+    this.syncNetwork = deps.syncNetwork || null;
     this.cronParser = deps.cronParser;
     this.logger = deps.logger;
     this.role = role;
@@ -184,9 +185,23 @@ class SchedulerCore {
       this.runDueBackups();
       this.runDueSyncs();
       this.runDueRetentionProfiles();
+      this.runPostSyncTasks();
     } catch (err) {
       this.logger.error(`[${this.role}] Scheduler tick error`, err);
     }
+  }
+
+  // Só o dono do lease chega aqui, então a tarefa pós-sincronismo não dispara em
+  // duplicata quando GUI e serviço estão os dois de pé. A promise fica fora do
+  // caminho do tique: a leitura de progresso vai à rede e não pode atrasar nem
+  // derrubar o que agenda.
+  runPostSyncTasks() {
+    const network = this.syncNetwork;
+    if (!network || typeof network.checkPostSync !== 'function') return;
+    if (this._guard('sync:post-sync')) return;
+    Promise.resolve(network.checkPostSync())
+      .catch((err) => this.logger.error(`[${this.role}] Post-sync check failed`, err))
+      .finally(() => this.running.delete('sync:post-sync'));
   }
 
   runDueTasks() {

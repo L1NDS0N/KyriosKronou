@@ -235,8 +235,15 @@
     $('rv-fill').className = 'run-progress-fill' + (detail.status === 'failed' ? ' failed' : detail.status === 'success' ? ' done' : '');
     $('rv-pct').textContent = detail.percent + '%';
 
-    $('rv-steps').innerHTML = (detail.steps || []).map(s => `
-      <div class="run-step ${s.state}">
+    // O estado vem do main, mas vai para dentro de um atributo class="...". Sem
+// uma lista fechada, uma aspa no valor fecharia o atributo e o resto da linha
+// viraria HTML. São três estados, e um estado desconhecido é neutro.
+  function runStateClass(state) {
+    return ['running', 'done', 'failed'].includes(state) ? state : 'pending';
+  }
+
+  $('rv-steps').innerHTML = (detail.steps || []).map(s => `
+      <div class="run-step ${runStateClass(s.state)}">
         <span class="run-step-mark"></span>
         <span class="run-step-label">${esc(s.label)}</span>
         ${s.detail ? `<span class="run-step-detail">${esc(s.detail)}</span>` : ''}

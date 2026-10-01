@@ -31,7 +31,7 @@
 
 /** Telas do painel. O nome é o mesmo em qualquer idioma de interface. */
 const SCREENS = [
-  'monitor', 'tasks', 'backups', 'sync', 'retention',
+  'monitor', 'tasks', 'backups', 'sync', 'retention', 'network',
   'services', 'scripts', 'history', 'logs', 'calendar', 'runs',
 ];
 
