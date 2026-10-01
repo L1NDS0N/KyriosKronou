@@ -933,11 +933,33 @@ button.th-entry:focus-visible { outline: 1px solid var(--primary); outline-offse
 .run-detail-output .th-output-text { max-height: min(46vh, 380px); }
 
 /* ═══ GITHUB PROFILE ═══ */
-/* ═══ GitHub profile ═══
+/* ═══ Aviso de atualização no rodapé ═══
+   Só aparece quando há versão nova. A cor de "disponível" é a mesma do
+   estado ativo do agendador, para não competir com o que está rodando. */
+.sb-update {
+  border: 1px solid var(--green-dim);
+  color: var(--green);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.sb-update:hover { background: var(--glass2); }
+.sb-update i { width: 13px; height: 13px; }
+.sb-update-new { animation: sb-update-pulse 2.4s ease-in-out infinite; }
+.sb-update-busy { color: var(--text2); border-color: var(--border); cursor: default; }
+.sb-update-busy:hover { background: none; }
+@keyframes sb-update-pulse {
+  0%, 100% { border-color: var(--green-dim); }
+  50% { border-color: var(--green); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sb-update-new { animation: none; }
+}
    Recarga no escuro: fundo do modal quase opaco, não o vidro translúcido do
    resto do app. Sobre um fundo escuro, vidro vira cinza uniforme e o texto
    perde degrau contra o papel de parede que vem da janela. O avatar perde
    saturação pela mesma razão. */
+/* ═══ GitHub profile ═══ */
 .gh-shell {
   background: #07070c;
   border: 1px solid #1c1c28;

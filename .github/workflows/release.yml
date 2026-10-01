@@ -1,7 +1,21 @@
 name: Build and Release
 
+# Publicar é automático: todo merge na master vira uma release com tag,
+# changelog e os assets gerados aqui.
+#
+# O paths-ignore não é decoração. O passo "Commit version and create release
+# tag" grava package.json, package-lock.json e CHANGELOG.md de volta na master,
+# e isso dispararia este workflow outra vez - que bumparia a versão outra vez,
+# para sempre. O GitHub só pula o workflow quando TODOS os arquivos alterados
+# estão na lista, então um commit de release (que mexe só nesses três) não
+# recria release, e um commit de feature continua disparando.
 on:
   push:
+    branches: [master]
+    paths-ignore:
+      - CHANGELOG.md
+      - package.json
+      - package-lock.json
     tags:
       - 'v*.*.*'
   workflow_dispatch:
@@ -68,15 +82,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "push" ]; then
+          EVENT="${{ github.event_name }}"
+          REF_TYPE="${{ github.ref_type }}"
+          TAG=""
+          PUBLISH="false"
+          NOTES_READY="false"
+
+          if [ "$EVENT" = "push" ] && [ "$REF_TYPE" = "tag" ]; then
+            # A tag chegou pronta: a versão do package.json tem de ser exatamente
+            # essa, senão o instalador seria gravado com um número e a release
+            # levaria outro.
             TAG="${GITHUB_REF_NAME}"
             PACKAGE_VERSION=$(node -p "require('./package.json').version")
             if [ "$TAG" != "v$PACKAGE_VERSION" ]; then
               echo "Tag $TAG does not match package.json version $PACKAGE_VERSION." >&2
               exit 1
             fi
-          elif [ "${{ inputs.publish }}" = "true" ]; then
-            if [ "${{ github.ref_type }}" != "branch" ]; then
+          elif [ "$EVENT" = "push" ] || [ "${{ inputs.publish }}" = "true" ]; then
+            if [ "$REF_TYPE" = "tag" ]; then
               echo "Publish must be dispatched from a branch, not a tag." >&2
               exit 1
             fi
@@ -84,19 +107,29 @@ jobs:
             if [ -n "${{ inputs.version }}" ]; then
               VERSION="${{ inputs.version }}"
             else
-              VERSION=$(node -e "const m=/^(\\d+)\\.(\\d+)\\.(\\d+)$/.exec(process.argv[1]); if(!m) process.exit(1); console.log(m[1]+'.'+m[2]+'.'+(Number(m[3])+1));" "$CURRENT")
+              VERSION=$(node scripts/generate-changelog.js --bump --print-version --quiet)
             fi
             if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "Release version must use MAJOR.MINOR.PATCH, received: $VERSION" >&2
               exit 1
             fi
             TAG="v$VERSION"
-            npm version "$VERSION" --no-git-tag-version --allow-same-version
-            node scripts/generate-changelog.js --version "$VERSION" --output CHANGELOG.md --notes-output release-notes.md
-          else
-            TAG=""
+            if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+              # A execução anterior tagueou e morreu antes de publicar a release.
+              # Reaproveitar a tag é o que impede cada re-run de subir a versão.
+              echo "A tag $TAG ja existe; reaproveitando em vez de subir a versao."
+            else
+              npm version "$VERSION" --no-git-tag-version --allow-same-version
+              node scripts/generate-changelog.js --version "$VERSION" --output CHANGELOG.md --notes-output release-notes.md
+              NOTES_READY="true"
+            fi
+            PUBLISH="true"
           fi
+
           echo "tag=$TAG" >> "$GITHUB_ENV"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
+          echo "notes_ready=$NOTES_READY" >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -116,7 +149,7 @@ jobs:
         run: .\Build-Installer.ps1
 
       - name: Commit version and create release tag
-        if: github.event_name == 'workflow_dispatch' && inputs.publish == true && github.ref_type == 'branch'
+        if: steps.version.outputs.publish == 'true'
         shell: bash
         env:
           TAG: ${{ steps.version.outputs.tag }}
@@ -125,31 +158,30 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add package.json package-lock.json CHANGELOG.md
+          # O commit de release só mexe nesses três arquivos, que são os
+          # paths-ignore do gatilho: ele não recria esta release.
           git commit -m "chore(release): $TAG"
           git tag -a "$TAG" -m "Kyrios Chronos $TAG"
           git push origin "HEAD:${{ github.ref_name }}"
           git push origin "$TAG"
 
       - name: Generate release notes
+        # Só quando a versão não bumped agora: nesse caso o changelog já foi
+        # escrito antes do build, com o histórico certo.
+        if: steps.version.outputs.notes_ready != 'true' && steps.version.outputs.tag != ''
         shell: bash
-        env:
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.publish }}" = "true" ]; then
-            :
-          elif [ -n "$RELEASE_TAG" ]; then
-            node scripts/generate-changelog.js --tag "$RELEASE_TAG" --output CHANGELOG.md --notes-output release-notes.md
-          else
-            node scripts/generate-changelog.js --version "$(node -p "require('./package.json').version")" --output CHANGELOG.md --notes-output release-notes.md
-          fi
-          if [ -n "$RELEASE_TAG" ]; then
-            {
-              echo "## Kyrios Chronos $RELEASE_TAG"
-              echo
-              cat release-notes.md
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
+          node scripts/generate-changelog.js --tag "${{ steps.version.outputs.tag }}" --output CHANGELOG.md --notes-output release-notes.md
+
+      - name: Summarize the release in the job summary
+        if: steps.version.outputs.tag != ''
+        shell: bash
+        run: |
+          {
+            echo "## Kyrios Chronos ${{ steps.version.outputs.tag }}"
+            echo
+            cat release-notes.md
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4

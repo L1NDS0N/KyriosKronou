@@ -15,6 +15,7 @@ const BackupManager = require('./backupManager');
 const SyncManager = require('./sync/syncManager');
 const RetentionManager = require('./retentionManager');
 const SyncNetwork = require('./syncthing/network');
+const UpdateManager = require('./updateManager');
 const KyrionService = require('./kyrionService');
 const paths = require('./paths');
 const { SchedulerCore, ROLE_GUI, readOwner } = require('./schedulerCore');
@@ -57,6 +58,7 @@ let retentionManager;
 let syncNetwork;
 let syncNetworkActor = null;
 let desktopWebAuth = null;
+let updateManager = null;
 let isQuitting = false;
 
 // ─── Push Notifications ───
@@ -157,6 +159,9 @@ function createWindow() {
     // the tray instead of flashing a window the user did not ask for.
     if (startedMinimized) return;
     mainWindow.show();
+    // A conferência espera a janela existir para poder empurrar o aviso no
+    // rodapé; o updateManager já tem a lista de janelas e a recebe aqui.
+    if (updateManager) updateManager.check();
   });
 
   // Close → minimize to tray if setting enabled
@@ -171,7 +176,7 @@ function createWindow() {
     if (logger) logger.flush();
   });
 
-  mainWindow.on('closed', () => { mainWindow = null; });
+    mainWindow.on('closed', () => { mainWindow = null; });
 }
 
 function createTray() {
@@ -302,6 +307,19 @@ function initComponents() {
   // Mesma implementação de device flow do painel web, sem sessão nem cookie: o
   // desktop só precisa da identidade verificada para autorizar dispositivos.
   desktopWebAuth = new WebAuth(config, logger);
+
+  // Atualização do próprio app. Fica ligado mesmo minimizado na bandeja: é
+  // quando o app passa a maior parte do tempo, e é o que faz o aviso
+  // aparecer sem o usuário precisar abrir nada.
+  updateManager = new UpdateManager({
+    logger,
+    getVersion: () => app.getVersion(),
+    hasRunningWork: () => {
+      // Instalar fecha o app; sair no meio de um backup ou de uma
+      // sincronização deixa a operação pela metade.
+      try { return runs.active().length; } catch (e) { return 0; }
+    },
+  });
 
   if (migration.migrated) {
     logger.log('INFO', `Migrated ${migration.copied} file(s) from ${migration.sources.join(', ')} to ${paths.dataDir()}`);
@@ -959,9 +977,25 @@ function registerIPC() {
     return { ok: true };
   });
 
+  // ─── Atualização do app ───
+  // O canal é 'update:*' e não entra no syncNetworkCall: o wrapper de erro
+  // daquele traduz motivos da rede, e aqui o estado tem forma própria.
+  ipcMain.handle('check-app-update', async () => {
+    try { return await updateManager.check(); }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+  ipcMain.handle('get-app-update-state', async () => updateManager.snapshot());
+  ipcMain.handle('download-app-update', async () => {
+    try { return await updateManager.download(); }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+  ipcMain.handle('install-app-update', async () => {
+    try { return updateManager.install(); }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+
   syncNetworkCall('get-sync-network-status', () => syncNetwork.status());
-  syncNetworkCall('get-sync-network-instances', async () => ({ ok: true, instances: syncNetwork.listInstances() }));
-  syncNetworkCall('create-sync-network-instance', async (name) => {
+  syncNetworkCall('get-sync-network-instances', async () => ({ ok: true, instances: syncNetwork.listInstances() }));  syncNetworkCall('create-sync-network-instance', async (name) => {
     const result = await syncNetwork.createInstance(name);
     if (result.ok) logger.log('INFO', `SYNC_INSTANCE_CREATED id=${result.instance.Id} device=${result.deviceID}`);
     return result;

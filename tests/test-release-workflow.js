@@ -31,6 +31,49 @@ describe('Release workflow', () => {
     expect(workflow).to.include('.\\Build-Installer.ps1');
   });
 
+  // The whole point of the workflow: merging to master publishes a release.
+  // Without the branch trigger it only ever ran for a tag someone made by
+  // hand, and a merge produced no release at all.
+  it('publica sozinho quando algo é mergeado na master', () => {
+    expect(workflow).to.include('branches: [master]');
+    expect(workflow).to.include('push:');
+  });
+
+  // Without this the release commit it pushes back to master re-triggers the
+  // workflow, which bumps the version again, forever. GitHub only skips a
+  // workflow when EVERY changed file is ignored, and the release commit touches
+  // exactly these three.
+  it('não se re-dispara com o próprio commit de release', () => {
+    const on = workflow.slice(0, workflow.indexOf('permissions:'));
+    expect(on, 'paths-ignore é o que corta o loop').to.include('paths-ignore:');
+    for (const arquivo of ['CHANGELOG.md', 'package.json', 'package-lock.json']) {
+      expect(on, arquivo).to.include(`- ${arquivo}`);
+    }
+    // E o commit de release não pode mexer em mais nada, senão sai da lista.
+    const commitStep = workflow.slice(
+      workflow.indexOf('Commit version and create release tag'),
+      workflow.indexOf('Generate release notes')
+    );
+    expect(commitStep).to.include('git add package.json package-lock.json CHANGELOG.md');
+  });
+
+  // A run that tagged and then died must not bump again on every re-run.
+  it('reaproveita a tag se a execução anterior morreu antes de publicar', () => {
+    expect(workflow).to.include('git rev-parse -q --verify "refs/tags/$TAG"');
+    expect(workflow).to.include('reaproveitando');
+  });
+
+  it('bumpa a versão com o helper do changelog, não com aritmética solta', () => {
+    expect(workflow).to.include('generate-changelog.js --bump --print-version');
+  });
+
+  it('o passo de tag roda por saída, não pelo tipo de evento', () => {
+    // Gatear por github.event_name deixava a publicação de branch fora: o
+    // passo não rodava num push, e a release nunca recebia a tag.
+    expect(workflow).to.include("if: steps.version.outputs.publish == 'true'");
+    expect(workflow).to.not.include("if: github.event_name == 'workflow_dispatch' && inputs.publish");
+  });
+
   it('keeps the package version and the release tag in sync', () => {
     expect(workflow).to.include('does not match package.json version');
     expect(workflow).to.include('npm version "$VERSION" --no-git-tag-version');

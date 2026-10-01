@@ -801,8 +801,26 @@ const translations = {
 
     // ─── Nav + standalone Retention screen ───
     'nav.retention': 'Retention',
-
     'nav.network': 'Network',
+
+    // ─── App update (status bar) ───
+    'update.available': 'Update to {v}',
+    'update.availableTitle': 'Click to download and install',
+    'update.downloading': 'Downloading {p}%',
+    'update.downloadingTitle': 'Downloading the update',
+    'update.ready': 'Install {v}',
+    'update.readyTitle': 'The update is ready. Click to install and restart',
+    'update.confirmTitle': 'Update Kyrios Chronos?',
+    'update.confirmBody': 'Version {v} will be downloaded and installed. The app will close at the end.',
+    'update.installTitle': 'Install the update?',
+    'update.installBody': 'The app will close and the new version will be installed. Anything running finishes first.',
+    'update.failed': 'Could not update',
+    'update.busyWithWork': 'Something is still running. Wait for it to finish and click again.',
+    'update.blockedEnv': 'Update disabled by configuration',
+    'update.blockedDev': 'Update is only available on the installed build',
+    'update.blockedPortable': 'The portable build does not update itself',
+    'update.nothingToDownload': 'No new version to download',
+    'update.notReady': 'The update has not finished downloading',
     'network.title': 'Sync Network',
     'network.tabDashboard': 'Dashboard',
     'network.tabDevices': 'Devices',
@@ -1978,6 +1996,25 @@ const translations = {
     'nav.retention': 'Retenção',
 
     'nav.network': 'Rede',
+
+    // ─── Atualização do app (rodapé) ───
+    'update.available': 'Nova versão {v}',
+    'update.availableTitle': 'Clique para baixar e instalar',
+    'update.downloading': 'Baixando {p}%',
+    'update.downloadingTitle': 'Baixando a atualização',
+    'update.ready': 'Instalar {v}',
+    'update.readyTitle': 'A atualização está pronta. Clique para instalar e reiniciar',
+    'update.confirmTitle': 'Atualizar o Kyrios Chronos?',
+    'update.confirmBody': 'A versão {v} será baixada e instalada. O app será fechado no final.',
+    'update.installTitle': 'Instalar a atualização?',
+    'update.installBody': 'O app será fechado e a nova versão será instalada. O que estiver rodando termina antes.',
+    'update.failed': 'Não foi possível atualizar',
+    'update.busyWithWork': 'Há uma execução em andamento. Espere terminar e clique de novo.',
+    'update.blockedEnv': 'Atualização desativada por configuração',
+    'update.blockedDev': 'A atualização só existe na versão instalada',
+    'update.blockedPortable': 'A versão portátil não se atualiza sozinha',
+    'update.nothingToDownload': 'Nenhuma versão nova para baixar',
+    'update.notReady': 'A atualização ainda não terminou de baixar',
     'network.title': 'Rede de Sincronismo',
     'network.tabDashboard': 'Painel',
     'network.tabDevices': 'Dispositivos',

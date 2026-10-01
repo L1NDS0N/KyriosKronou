@@ -573,6 +573,14 @@
 
     <div class="sb-spacer"></div>
 
+    <!-- Aviso de atualização. Fica escondido até haver versão nova; o botão
+         some durante o download e volta como "instalar" quando o instalador
+         já está baixado. -->
+    <button class="sb-item sb-update" id="sb-update" type="button" style="display:none">
+      <i data-lucide="download"></i>
+      <span id="sb-update-label">—</span>
+    </button>
+
     <div class="sb-item sb-sched" id="sb-scheduler">
       <span class="sb-sched-dot" id="sb-sched-dot"></span>
       <span id="sb-sched-label">—</span>
@@ -600,6 +608,7 @@
   <script src="syncPage.js"></script>
   <script src="retentionPage.js"></script>
   <script src="networkPage.js"></script>
+  <script src="updateBanner.js"></script>
   <script src="app.js"></script>
   <script src="webPermissionsUi.js"></script>
 </body>

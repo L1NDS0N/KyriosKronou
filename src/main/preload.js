@@ -99,6 +99,17 @@ contextBridge.exposeInMainWorld('api', {
   deployBackupNssm: (profileId) => ipcRenderer.invoke('deploy-backup-nssm', profileId),
 
   // Rede de sincronismo (daemon Syncthing)
+  // Atualização do app
+  checkAppUpdate: () => ipcRenderer.invoke('check-app-update'),
+  getAppUpdateState: () => ipcRenderer.invoke('get-app-update-state'),
+  downloadAppUpdate: () => ipcRenderer.invoke('download-app-update'),
+  installAppUpdate: () => ipcRenderer.invoke('install-app-update'),
+  onAppUpdateState: (callback) => {
+    const listener = (event, payload) => callback(payload);
+    ipcRenderer.on('update:state', listener);
+    return () => ipcRenderer.removeListener('update:state', listener);
+  },
+
   getSyncNetworkStatus: () => ipcRenderer.invoke('get-sync-network-status'),
   getSyncNetworkInstances: () => ipcRenderer.invoke('get-sync-network-instances'),
   createSyncNetworkInstance: (name) => ipcRenderer.invoke('create-sync-network-instance', name),
