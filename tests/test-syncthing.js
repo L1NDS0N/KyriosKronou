@@ -59,8 +59,16 @@ describe('Syncthing: deteccao de binario e versao', () => {
 
 describe('Syncthing: home do daemon', () => {
   it('lives under %ProgramData% so the service and the GUI share one identity', () => {
-    expect(syncthingHome().toLowerCase()).to.not.include('appdata');
-    expect(path.basename(syncthingHome())).to.equal('syncthing');
+    // O teste do cooldown grava KYRION_DATA_DIR para isolar o home; aqui é o
+    // valor real, sem override nenhum, que é o que o serviço vai enxergar.
+    const anterior = process.env.KYRION_DATA_DIR;
+    delete process.env.KYRION_DATA_DIR;
+    try {
+      expect(syncthingHome().toLowerCase(), 'o home não pode cair em %APPDATA%').to.not.include('appdata');
+      expect(path.basename(syncthingHome())).to.equal('syncthing');
+    } finally {
+      if (anterior !== undefined) process.env.KYRION_DATA_DIR = anterior;
+    }
   });
 
   it('reads the API key out of config.xml', () => {

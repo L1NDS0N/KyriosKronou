@@ -5,14 +5,32 @@
 // parada que reencontrasse 100% dispararia de novo a cada tique.
 
 const { expect } = require('chai');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { PostSyncBridge, normalizeTargets, normalizePreTargets, COMPLETE } = require('../src/main/syncthing/postSync');
 
 const FOLDER = 'docs-abc';
 const TASK = 'task-1';
 
+// O cooldown passou a ser consultado no disco, compartilhado entre GUI e
+// serviço. Cada teste precisa do seu próprio diretório, senão o carimbo de um
+// teste segura o gatilho do seguinte.
+let raizDeTeste;
+
 function bridge(options = {}) {
   return new PostSyncBridge(Object.assign({ minIntervalMs: 300000 }, options));
 }
+
+beforeEach(() => {
+  raizDeTeste = fs.mkdtempSync(path.join(os.tmpdir(), 'kyrios-hook-'));
+  process.env.KYRION_DATA_DIR = raizDeTeste;
+});
+
+afterEach(() => {
+  try { fs.rmSync(raizDeTeste, { recursive: true, force: true }); } catch (e) { /* já sumiu */ }
+  delete process.env.KYRION_DATA_DIR;
+});
 
 // O `needItems` é o que distingue "parada" de "tem trabalho": a completion fica
 // em 100 durante uma transferência longa, então só ele diz se há o que fazer.
@@ -232,6 +250,34 @@ describe('Rede de sincronismo: execucao da tarefa pre-sincronismo', () => {
     await b.check(fakeClient(50, 5), [folder]);
     await b.check(fakeClient(COMPLETE, 0), [folder]);
     expect(executadas).to.have.length(2);
+  });
+
+  // O cooldown em disco existe por causa disto: duas pontes em processos
+  // diferentes, como a GUI e o serviço na troca de lease. Com a janela só na
+  // memória de cada processo, as duas disparavam o mesmo gatilho.
+  it('dois processos não disparam o mesmo gatilho', async () => {
+    const executadas = [];
+    const taskManager = fakeTaskManager(executadas);
+    const gui = bridge({ taskManager });
+    const servico = bridge({ taskManager });
+
+    // O serviço vê a pasta com trabalho; a GUI, logo depois, já completa.
+    await servico.check(fakeClient(40, 9), [{ id: FOLDER, PreSyncTaskId: TASK }]);
+    await gui.check(fakeClient(COMPLETE, 0), [{ id: FOLDER, PreSyncTaskId: TASK }]);
+
+    expect(executadas).to.have.length(1);
+  });
+
+  it('o carimbo no disco sobrevive a um processo que renasce', () => {
+    // Depois de um reinício do app, a ponte nova não tem memória nenhuma. O
+    // carimbo em disco é o que impede o gatilho de rodar de novo logo após.
+    const primeira = bridge();
+    primeira.preDueFor({ folderId: FOLDER, taskId: TASK }, 0, Date.now());
+    primeira.markFired(FOLDER, 'pre', Date.now());
+
+    const segunda = bridge();
+    segunda.preState.clear();
+    expect(segunda.alreadyFired(FOLDER, 'pre', Date.now())).to.equal(true);
   });
 });
 

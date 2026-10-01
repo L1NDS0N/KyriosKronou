@@ -64,7 +64,12 @@ class SyncthingDaemon {
     this.logger = options.logger || null;
     this.home = options.home || syncthingHome();
     this.installer = options.installer;
+    // Injetável para os testes: verificar "o filho foi derrubado" exige
+    // controlar o spawn, e `spawn` desestruturado no topo não é alcançado
+    // por quem substitui o módulo depois do require.
+    this.spawn = options.spawn || spawn;
     this.process = null;
+    this.pid = null;
   }
 
   log(level, message) {
@@ -126,7 +131,18 @@ class SyncthingDaemon {
     return { ok: false, reason: 'no-port', ...base };
   }
 
-  async start() {
+  // Duas chamadas concorrentes de start() - a GUI e o serviço subindo no mesmo
+// minuto - passavam as duas pela verificação de porta livre, porque cada uma
+// via a porta antes de a outra ocupar. Resultado: dois daemons no mesmo home,
+// disputando o mesmo config.xml. Memoizar a promise fecha a janela, e ela é
+// liberada quando o start termina, para o próximo start de verdade.
+async start() {
+    if (this._starting) return this._starting;
+    this._starting = this._startOnce().finally(() => { this._starting = null; });
+    return this._starting;
+  }
+
+  async _startOnce() {
     if (isGenerated(this.home) === false) {
       const installed = await this.installer.checkInstalled();
       if (!installed.installed) return { ok: false, reason: 'not-installed' };
@@ -141,7 +157,7 @@ class SyncthingDaemon {
 
     const installed = await this.installer.checkInstalled();
     const port = picked.port;
-    const child = spawn(installed.path, this.serveArgs(installed.version.major, port), {
+    const child = this.spawn(installed.path, this.serveArgs(installed.version.major, port), {
       detached: true,
       windowsHide: true,
       stdio: 'ignore',
@@ -151,8 +167,46 @@ class SyncthingDaemon {
     this.log('INFO', `Syncthing iniciado: ${installed.path} (v${installed.version.text}) porta ${port}`);
 
     const status = await this.waitForApi(picked.client, 30000);
-    if (status.ok) await this.dropDefaultFolder(picked.client);
-    return { ok: status.ok, client: picked.client, port, executable: installed.path, version: installed.version, status: status.status };
+    if (status.ok) {
+      this.pid = child.pid;
+      await this.writePidFile(child.pid);
+      await this.dropDefaultFolder(picked.client);
+      return { ok: true, client: picked.client, port, executable: installed.path, version: installed.version, status: status.status, pid: child.pid };
+    }
+
+    // O binário subiu mas a API não respondeu em 30 s: ele está de pé, com o
+    // config.xml trancado, e ninguém mais conseguiria falar com ele. Deixar
+    // esse filho órfão é pior do que não ter daemon: derrubar e devolver a
+    // máquina ao estado em que ela estava.
+    this.log('WARN', `Syncthing subiu mas a API não respondeu em 30s; encerrando o processo ${child.pid}`);
+    try { process.kill(child.pid); } catch (e) { /* já morreu */ }
+    this.process = null;
+    this.pid = null;
+    return { ok: false, reason: 'start-timeout', client: picked.client, port, executable: installed.path, version: installed.version };
+  }
+
+  // O PID em disco é o que permite saber, depois de um reinício ou de um
+  // fechamento abrupto, se o daemon continua de pé e contra qual porta falar.
+  async writePidFile(pid) {
+    try {
+      await fs.promises.mkdir(this.home, { recursive: true });
+      await fs.promises.writeFile(path.join(this.home, 'daemon.pid'), String(pid), 'utf8');
+    } catch (e) {
+      this.log('WARN', `Nao consegui gravar o pid do Syncthing: ${e.message}`);
+    }
+  }
+
+  readPidFile() {
+    try {
+      const raw = fs.readFileSync(path.join(this.home, 'daemon.pid'), 'utf8').trim();
+      return Number(raw) > 0 ? Number(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async clearPidFile() {
+    try { fs.unlinkSync(path.join(this.home, 'daemon.pid')); } catch (e) { /* já não existe */ }
   }
 
   // A v2 não tem mais --no-default-folder, e a flag só valeria na primeira
@@ -191,11 +245,24 @@ class SyncthingDaemon {
       try {
         await client.systemStatus();
       } catch (e) {
+        await this.clearPidFile();
+        this.pid = null;
         return { ok: true };
       }
       await new Promise((r) => setTimeout(r, 500));
     }
-    return { ok: false, reason: 'still-running' };
+
+    // A API não confirmou a queda. O PID em disco é o que sobrou: encerrar o
+    // processo conhecido é melhor do que deixar o daemon de pé trancando o
+    // config.xml para o próximo start.
+    const pid = this.pid || this.readPidFile();
+    if (pid) {
+      this.log('WARN', `Syncthing nao confirmou o shutdown; encerrando o processo ${pid}`);
+      try { process.kill(pid); } catch (e) { /* já morreu, ou pertence a outro */ }
+    }
+    await this.clearPidFile();
+    this.pid = null;
+    return { ok: true, forced: Boolean(pid) };
   }
 
   async status() {

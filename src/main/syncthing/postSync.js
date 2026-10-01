@@ -26,6 +26,41 @@ function normalizePreTargets(folders) {
     .map((f) => ({ folderId: f.id, taskId: f.PreSyncTaskId, type: f.type, label: f.label || f.id }));
 }
 
+// GUI e serviço são dois processos, e cada um tinha sua própria janela de
+// 5 minutos. Na troca de lease, a checagem já em voo da GUI continuava e o
+// serviço disparava o mesmo gatilho: mesma tarefa pós-sincronismo, duas vezes.
+//
+// Um carimbo de execução em disco, sob o home compartilhado, faz a janela ser
+// do par de processos e não de um deles. O flock só segura contra corrida
+// dentro da mesma máquina, que é o caso de que falamos.
+const STAMP_DIR = () => {
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+  const dir = process.env.KYRION_DATA_DIR
+    ? path.join(process.env.KYRION_DATA_DIR, 'syncthing')
+    : path.join(process.env.ProgramData || 'C:\\ProgramData', 'KyriosChronos', 'syncthing');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch (e) { /* já existe */ }
+  return dir;
+};
+
+function stampPath(folderId, phase) {
+  const path = require('path');
+  return path.join(STAMP_DIR(), `.hook-${phase}-${folderId}.stamp`);
+}
+
+function readStamp(file) {
+  try {
+    return Number(require('fs').readFileSync(file, 'utf8').trim()) || 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+function writeStamp(file, at) {
+  try { require('fs').writeFileSync(file, String(at), 'utf8'); } catch (e) { /* sem disco, sem proteção */ }
+}
+
 class PostSyncBridge {
   constructor(options = {}) {
     this.logger = options.logger || null;
@@ -80,8 +115,26 @@ class PostSyncBridge {
 
     if (!hasWork) return null;
     if (previous && previous.hasWork) return null;
-    if (previous && previous.lastRunAt && now - previous.lastRunAt < this.minIntervalMs) return null;
+    if (this.alreadyFired(target.folderId, 'pre', now)) return null;
     return target;
+  }
+
+  /**
+   * A janela de cooldown é consultada no disco, não só no Map deste processo.
+   * Sem isso, o check em voo da GUI e o do serviço disparavam o mesmo
+   * gatilho logo após a troca de lease.
+   */
+  alreadyFired(folderId, phase, now) {
+    const fromMemory = (this.state.get(folderId) || {}).lastRunAt;
+    if (fromMemory && now - fromMemory < this.minIntervalMs) return true;
+    const fromDisk = readStamp(stampPath(folderId, phase));
+    return fromDisk > 0 && (now - fromDisk) < this.minIntervalMs;
+  }
+
+  markFired(folderId, phase, at) {
+    const state = this.state.get(folderId) || this.preState.get(folderId);
+    if (state) state.lastRunAt = at;
+    writeStamp(stampPath(folderId, phase), at);
   }
 
   async runPre(target) {
@@ -111,7 +164,7 @@ class PostSyncBridge {
       }
       const due = this.preDueFor(target, needItems, Date.now());
       if (!due) continue;
-      this.preState.get(target.folderId).lastRunAt = Date.now();
+      this.markFired(due.folderId, 'pre', Date.now());
 
       const result = await this.runPre(due);
       preFired.push({ folderId: due.folderId, taskId: due.taskId, result });
@@ -138,9 +191,7 @@ class PostSyncBridge {
 
       const due = this.dueFor(target, completion, Date.now());
       if (!due) continue;
-
-      const state = this.state.get(target.folderId);
-      state.lastRunAt = Date.now();
+      this.markFired(due.folderId, 'post', Date.now());
       const result = await this.run(due);
       fired.push({ folderId: due.folderId, taskId: due.taskId, result });
     }
