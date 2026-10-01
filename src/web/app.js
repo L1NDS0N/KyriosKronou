@@ -1909,6 +1909,17 @@
     if (rodar) return runSync(rodar.getAttribute('data-runsync'), rodar);
     const rodarRet = ev.target.closest('[data-runret]');
     if (rodarRet) return runRetention(rodarRet.getAttribute('data-runret'), rodarRet);
+
+    const daemon = ev.target.closest('[data-net-daemon]');
+    if (daemon) return acaoDaemon(daemon.getAttribute('data-net-daemon'), daemon);
+    const liberar = ev.target.closest('[data-net-allow]');
+    if (liberar) return api('/api/network/devices/' + encodeURIComponent(liberar.getAttribute('data-net-allow')) + '/authorize', {
+      method: 'POST', body: '{}',
+    }).then(loadNetwork).catch(() => loadNetwork());
+    const revogar = ev.target.closest('[data-net-revoke]');
+    if (revogar) return api('/api/network/devices/' + encodeURIComponent(revogar.getAttribute('data-net-revoke')) + '/authorize', {
+      method: 'DELETE',
+    }).then(loadNetwork).catch(() => loadNetwork());
     const apagar = ev.target.closest('[data-delsync]');
     if (apagar) {
       const nome = apagar.getAttribute('data-name') || '';
@@ -2003,6 +2014,116 @@
   }
 
   // ─── Serviços ───
+  // ═══ REDE DE SINCRONISMO ═══
+  // Mesmas rotas do desktop, com os mesmos escopos: sync:view para ler,
+  // sync:write para liberar dispositivo e salvar pasta, sync:run para o daemon.
+  const FOLDER_TYPES = {
+    sendreceive: 'Receber e Enviar', sendonly: 'Enviar',
+    receiveonly: 'Receber', receiveencrypted: 'Receber Criptografado',
+  };
+
+  async function loadNetwork() {
+    const devicesBody = $('net-devices');
+    const foldersBody = $('net-folders');
+    if (!can('network')) {
+      $('net-sub').textContent = 'Sem permissão para ver a rede';
+      linhaDeAviso(devicesBody, 5, 'Sem permissão');
+      linhaDeAviso(foldersBody, 5, 'Sem permissão');
+      return;
+    }
+
+    const st = await apiQuiet('/api/network/status');
+    if (!st.success) {
+      $('net-sub').textContent = falhaDeTela(st);
+      $('net-daemon').innerHTML = '<div class="wiz-tip wiz-tip-warn">O daemon não está disponível neste servidor.</div>';
+      linhaDeAviso(devicesBody, 5, falhaDeTela(st));
+      linhaDeAviso(foldersBody, 5, falhaDeTela(st));
+      return;
+    }
+    const status = st.data || {};
+    $('net-sub').textContent = status.running
+      ? 'daemon rodando · ' + (status.version ? 'v' + status.version.text : '')
+      : (status.installed ? 'daemon parado' : 'Syncthing não instalado');
+    desenharBotaoDaemon(status);
+
+    const ov = await apiQuiet('/api/network/overview');
+    if (ov.success && ov.data) {
+      const v = ov.data;
+      $('stat-net-recv').textContent = bytes(v.receive.rate) + '/s';
+      $('stat-net-recv-sub').textContent = bytes(v.receive.bytes);
+      $('stat-net-send').textContent = bytes(v.send.rate) + '/s';
+      $('stat-net-send-sub').textContent = bytes(v.send.bytes);
+      $('stat-net-state').textContent = v.localState.files;
+      $('stat-net-state-sub').textContent = v.localState.directories + ' · ~' + bytes(v.localState.bytes);
+      $('stat-net-listen').textContent = v.listeners.ok + '/' + v.listeners.total;
+      $('stat-net-listen-sub').textContent = v.discovery.available
+        ? 'descoberta ' + v.discovery.ok + '/' + v.discovery.total
+        : 'descoberta —';
+    }
+
+    const dev = await apiQuiet('/api/network/devices');
+    const lista = (dev.success && dev.data) || [];
+    devicesBody.innerHTML = lista.map((d) => '<tr>'
+      + '<td><strong>' + esc(d.name || d.deviceID) + '</strong></td>'
+      + '<td><code>' + esc(d.deviceID) + '</code></td>'
+      + '<td>' + (d.connected ? '<span class="pill pill-ok">conectado</span>' : '<span class="pill">desconectado</span>') + '</td>'
+      + '<td>' + (d.authorized
+        ? '<span class="pill pill-ok">' + esc(d.githubLogin) + '</span>'
+        : '<span class="pill pill-warn">não liberado</span>') + '</td>'
+      + '<td>' + (d.authorized
+        ? (can('sync', 'write') ? '<button class="btn-danger" data-net-revoke="' + esc(d.deviceID) + '">Remover</button>' : '')
+        : (can('network', 'write')
+          ? '<button class="btn-secondary-sm" data-net-allow="' + esc(d.deviceID) + '">Liberar</button>'
+          : '')) + '</td>'
+      + '</tr>').join('')
+      || '<tr><td colspan="5" class="tbl-empty">nenhum dispositivo</td></tr>';
+
+    const fol = await apiQuiet('/api/network/folders');
+    const pastas = (fol.success && fol.data) || [];
+    const bloqueadas = pastas.filter((f) => !f.authorized).length;
+    foldersBody.innerHTML = (bloqueadas
+      ? '<tr><td colspan="5"><div class="wiz-tip wiz-tip-warn">' + bloqueadas
+        + ' pasta(s) compartilham com um dispositivo não liberado aqui.</div></td></tr>'
+      : '')
+      + pastas.map((f) => '<tr>'
+        + '<td><strong>' + esc(f.label || f.id) + '</strong></td>'
+        + '<td><code>' + esc(f.id) + '</code></td>'
+        + '<td>' + esc(f.path) + '</td>'
+        + '<td>' + esc(FOLDER_TYPES[f.type] || f.type) + '</td>'
+        + '<td>' + (f.devices || []).length + '</td>'
+        + '</tr>').join('')
+      || (bloqueadas ? '' : '<tr><td colspan="5" class="tbl-empty">nenhuma pasta compartilhada</td></tr>');
+  }
+
+  // Instalar pelo painel é uma mudança no servidor inteiro (Chocolatey, com
+  // elevação). O botão fica escondido para quem não tem sync:run e a ação entra
+  // pela auditoria com autor e IP.
+  function desenharBotaoDaemon(status) {
+    const box = $('net-daemon');
+    const pode = can('network', 'run');
+    let acao = '';
+    if (!status.installed && pode) {
+      acao = '<button class="btn-primary" data-net-daemon="install">Instalar Syncthing</button>';
+    } else if (status.installed && !status.running && pode) {
+      acao = '<button class="btn-primary" data-net-daemon="start">Iniciar daemon</button>';
+    } else if (status.running && pode) {
+      acao = '<button class="btn-secondary-sm" data-net-daemon="stop">Parar daemon</button>';
+    }
+    box.innerHTML = '<div class="glass-card"><div class="row-gap" style="justify-content:space-between">'
+      + '<div><div class="stat-label">Identificação</div><code>' + esc(status.deviceID || '—') + '</code></div>'
+      + (acao ? '<div class="row-gap">' + acao + '</div>' : '')
+      + '</div></div>';
+  }
+
+  async function acaoDaemon(acao, botao) {
+    if (!can('network', 'run')) return;
+    botao.disabled = true;
+    try {
+      await api('/api/network/daemon/' + encodeURIComponent(acao), { method: 'POST', body: '{}' });
+    } catch (e) { /* falhaDeTela na proxima carga */ }
+    await loadNetwork();
+  }
+
   async function loadServices() {
     const body = $('services-body');
     body.innerHTML = '<tr><td colspan="5" class="tbl-loading">carregando</td></tr>';
@@ -2277,7 +2398,7 @@
   const loaders = {
     dashboard: loadDashboard, tasks: loadTasks, backups: loadBackups, history: loadHistory,
     calendar: loadCalendar, logs: loadLogs, services: loadServices, scripts: loadScripts,
-    sync: loadSync, retention: loadRetention,
+    sync: loadSync, retention: loadRetention, network: loadNetwork,
   };
 
   /** Carrega a tela só quando este login pode vê-la: pedir e receber 403 é ruído. */
@@ -2324,6 +2445,7 @@
   $('btn-reload-scripts').addEventListener('click', loadScripts);
   $('btn-reload-sync').addEventListener('click', loadSync);
   $('btn-reload-retention').addEventListener('click', loadRetention);
+  $('btn-reload-net').addEventListener('click', loadNetwork);
   $('btn-goto-calendar').addEventListener('click', () => goTo('calendar'));
   $('btn-goto-history').addEventListener('click', () => goTo('history'));
 

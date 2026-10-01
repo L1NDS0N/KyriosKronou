@@ -324,7 +324,7 @@ function syncWebInterface() {
   if (shouldHost && (!apiServer || !apiServer.isRunning())) {
     // Sync e retenção vão junto: sem eles as telas do painel respondem 503.
     apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator, backupManager, {
-      syncManager, retentionManager, permissions: webPermissions,
+        syncManager, retentionManager, syncNetwork, permissions: webPermissions,
     });
     apiServer.start()
       .then((info) => logger.log('INFO', `Web interface started on ${info.url}`))
@@ -1187,7 +1187,7 @@ function registerIPC() {
     try {
       if (apiServer && apiServer.isRunning()) return { success: false, message: 'API server already running' };
       apiServer = new ApiServer(taskManager, config, logger, serviceManager, wrapperGenerator, backupManager, {
-        syncManager, retentionManager, permissions: webPermissions,
+        syncManager, retentionManager, syncNetwork, permissions: webPermissions,
       });
       const result = await apiServer.start(port);
       config.setSetting('ApiEnabled', true);

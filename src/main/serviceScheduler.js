@@ -79,7 +79,7 @@ function bootstrap() {
       runRegistry: runs, cronParser,
       // No servidor o painel é a única interface: sem os dois managers as telas
       // de sincronismo e de retenção respondem 503 e ninguém mexe nelas.
-      syncManager, retentionManager,
+      syncManager, retentionManager, syncNetwork,
     });
     apiServer.start()
       .then((info) => logger.log('INFO', `Web interface listening on ${info.url} (bound to ${info.host})`))

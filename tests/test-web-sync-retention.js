@@ -58,6 +58,16 @@ function snapshot(dir, rel, isoDate) {
   return full;
 }
 
+// Data relativa a hoje, para o arquivo "recente" destes testes não envelhecer
+// junto com o calendário. Com data fixa, um '2026-09-24' visto de 2026-10-01
+// tem mais de 7 dias e a retenção o apaga: o teste passa a falhar sozinho,
+// culpando código que está certo.
+function diasAtras(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
 // ─── O registro das rotas ───
 
 describe('API web de sync e retention: as rotas ficam registradas com escopo', () => {
@@ -364,7 +374,7 @@ describe('API web de sync: CRUD, execução e leitura', function () {
   it('previsualiza a retenção do destino sem apagar nada', async () => {
     const destino = path.join(temp, 'preview-destino');
     const velho = snapshot(destino, 'daily/2020-01-01/db.7z', '2020-01-01T10:00:00Z');
-    const recente = snapshot(destino, 'daily/2026-09-24/db.7z', '2026-09-24T10:00:00Z');
+    const recente = snapshot(destino, `daily/${diasAtras(1)}/db.7z`, `${diasAtras(1)}T10:00:00Z`);
 
     const res = await request('/api/sync/retention/preview', {
       method: 'POST',
@@ -597,7 +607,7 @@ describe('API web de retention: agenda de limpeza', function () {
     const alvo = path.join(temp, 'execucao');
     fs.mkdirSync(alvo, { recursive: true });
     const velho = snapshot(alvo, '2020-01-01/db.7z', '2020-01-01T10:00:00Z');
-    const novo = snapshot(alvo, '2026-09-24/db.7z', '2026-09-24T10:00:00Z');
+    const novo = snapshot(alvo, `${diasAtras(1)}/db.7z`, `${diasAtras(1)}T10:00:00Z`);
 
     const criado = await criar({ Name: 'Executada', FolderPath: alvo });
     const res = await request('/api/retention/' + criado.json.data.Id + '/run', { method: 'POST' });
