@@ -12,6 +12,19 @@ const DEFAULT_PORT = 8384;
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_TIMEOUT = 10000;
 
+// Nomes que o loopback assume no Windows. 'localhost' passa porque o resolução
+// local nunca sai da máquina, e o Syncthing ouve em todas as formas de
+// loopback ao mesmo tempo.
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '0:0:0:0:0:0:0:1', '127.0.0.53']);
+
+function isLoopback(host) {
+  const h = String(host || '').trim().toLowerCase();
+  if (LOOPBACK_HOSTS.has(h)) return true;
+  // Todo o bloco 127.0.0.0/8 é loopback, não só o .1.
+  if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
+  return false;
+}
+
 class SyncthingApiError extends Error {
   constructor(message, status, body) {
     super(message);
@@ -31,8 +44,21 @@ class SyncthingClient {
 
   get baseUrl() { return `http://${this.host}:${this.port}`; }
 
+  // A única proteção que a API key do Syncthing tem: o Syncthing não
+  // autentica requisição nenhuma, e quem tiver a key controla tudo. A barreira
+  // é não sair da máquina. '0.0.0.0' parece loopback e não é: é o endereço que
+  // o daemon escuta em TODA interface, então um host remoto apontando para ele
+  // receberia a key num pacote que sai da máquina.
+  assertLoopback() {
+    if (!isLoopback(this.host)) {
+      throw new Error(`Refusing to talk to Syncthing at a non-loopback host (${this.host}): the API key is the only access control`);
+    }
+    return true;
+  }
+
   request(method, restPath, body) {
     return new Promise((resolve, reject) => {
+      try { this.assertLoopback(); } catch (e) { reject(e); return; }
       const payload = body === undefined ? null : Buffer.from(JSON.stringify(body), 'utf8');
       const req = http.request({
         host: this.host,
@@ -120,3 +146,4 @@ module.exports.SyncthingClient = SyncthingClient;
 module.exports.SyncthingApiError = SyncthingApiError;
 module.exports.DEFAULT_PORT = DEFAULT_PORT;
 module.exports.DEFAULT_HOST = DEFAULT_HOST;
+module.exports.isLoopback = isLoopback;
