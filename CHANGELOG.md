@@ -2,10 +2,11 @@
 
 All notable changes to Kyrios Chronos.
 
-## 1.0.0 - 2026-09-25
+## 1.0.0 - 2026-10-01
 
 ### Added
 
+- feat: complete guided histories and web panel parity (`b5d889a`) — l1nds0n
 - feat: add file tree view to retention preview (`d51059a`) — l1nds0n
 - feat: expand retention scheduling and previews (`b87e801`) — l1nds0n
 - feat: sync source watcher, cron as secondary trigger and retention simulator modal (`d8083bc`) — l1nds0n
@@ -20,6 +21,8 @@ All notable changes to Kyrios Chronos.
 
 ### Changed
 
+- ci: build from the repository root and cache the toolchain (`bf1be7f`) — l1nds0n
+- ci: publish tagged Windows releases with artifacts (`895a630`) — l1nds0n
 - style: standardize responsive layouts and buttons (`3f86d7f`) — l1nds0n
 
 ### Documentation
@@ -29,5 +32,9 @@ All notable changes to Kyrios Chronos.
 ### Tests
 
 - test: make cookie tampering assertion deterministic (`8d4e13d`) — l1nds0n
+
+### Other
+
+- Rede de sincronismo entre maquinas, com autorizacao por GitHub (#2) (`a9cc219`) — Lindson França
 
 **Changes since v0.0.3**

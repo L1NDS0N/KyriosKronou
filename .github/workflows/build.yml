@@ -51,6 +51,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          # O teste do release gera o changelog a partir do histórico real. Com
+          # o checkout raso padrão (1 commit) só existe o commit de merge, ele
+          # não casa com feat:/fix:/test: e o changelog inteiro cai em "Other".
+          # A profundidade é o que faz a categorização funcionar no CI.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:

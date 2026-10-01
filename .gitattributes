@@ -1,0 +1,24 @@
+# Line endings: the test suite compares the workflow's own text against string
+# literals, and the Windows runner had core.autocrlf=true with no rule here, so
+# the checked-out YAML came back with CRLF and every literal with a \n missed.
+# Pin the text files to LF on checkout so the file the test reads is the file
+# git stored. PowerShell build scripts stay CRLF to match Windows tooling.
+* text=auto eol=lf
+
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.js    text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.nsi   text eol=lf
+*.ps1   text eol=crlf
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# Binary: never touch these.
+*.ico   binary
+*.png   binary
+*.jpg   binary
+*.exe   binary
+*.7z    binary
+*.zip   binary
