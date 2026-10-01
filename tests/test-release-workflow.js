@@ -63,10 +63,32 @@ describe('Release workflow', () => {
     expect(workflow).to.include('reaproveitando');
   });
 
-  // O CI falhou aqui: --bump imprimia a versão atual E a próxima, e a
-  // validação MAJOR.MINOR.PATCH recebia as duas numa variável só. A flag
-  // dedicada imprime uma linha e não escreve arquivo nenhum.
-  it('pede a próxima versão por uma flag que imprime uma linha só', () => {
+  // A primeira execução automática chegou até o publish e morreu assim:
+  //   line 7: TAG: unbound variable
+  // A etapa declarava `TAG:` no env:, mas o runner já exporta um `TAG` e o
+  // valor não chegava no script; com `set -u` isso mata a etapa antes do
+  // primeiro comando. A variável do passo virou RELEASE_TAG.
+  it('não usa TAG como nome de variável de ambiente, que colide com o runner', () => {
+    const bloco = workflow.slice(workflow.indexOf('Attach artifacts to GitHub Release'));
+    expect(bloco).to.include('RELEASE_TAG: ${{ steps.version.outputs.tag }}');
+    expect(bloco, 'TAG no env: colide com a do runner').to.not.include('  TAG: ${{ steps.version.outputs.tag }}');
+    // E o script transforma em TAG local, que é o nome que o resto do passo usa.
+    expect(bloco).to.include('TAG="$RELEASE_TAG"');
+  });
+
+  // Toda etapa que roda bash com `set -u` e lê a versão direto da expressão
+  // está correta; a que usava env: foi a que quebrou.
+  it('nenhuma etapa de bash deixa a tag vinda só do env:', () => {
+    const etapas = workflow.split(/\n(?=      - name: )/).slice(1);
+    for (const etapa of etapas) {
+      if (!/shell:\s*bash/.test(etapa)) continue;
+      if (!/set -euo pipefail/.test(etapa)) continue;
+      const usaTag = /\$\{?\{?\s*steps\.version\.outputs\.tag/.test(etapa);
+      if (usaTag) expect(etapa, 'a versão tem de vir interpolada, não do env:').to.not.match(/^\s*TAG:\s*\$\{\{/m);
+    }
+  });
+
+  it('bumps a versão com um valor limpo, que é o que a validação exige', () => {
     expect(workflow).to.include('generate-changelog.js --print-next');
     expect(workflow).to.not.include('--bump --print-version');
 

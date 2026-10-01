@@ -199,11 +199,15 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.tag }}
+          # O nome da variável é RELEASE_TAG, não TAG: um `TAG` no env: colide
+          # com a variável que o runner já exporta e chega vazio no script, e
+          # com `set -u` isso mata a etapa antes do primeiro comando.
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
           PRERELEASE: ${{ inputs.prerelease || false }}
           DRAFT: ${{ inputs.draft || false }}
         run: |
           set -euo pipefail
+          TAG="$RELEASE_TAG"
           mapfile -t ASSETS < <(find dist -maxdepth 1 -type f \( -name '*.exe' -o -name '*.blockmap' -o -name 'latest.yml' \) | sort)
           if [ "${#ASSETS[@]}" -eq 0 ]; then
             echo "No release assets were produced." >&2
