@@ -12,10 +12,12 @@
 //    agendador no meio da operação deixa o trabalho pela metade.
 
 const { expect } = require('chai');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { EventEmitter } = require('events');
+const { execFileSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(ROOT, file), 'utf8');
@@ -166,6 +168,66 @@ describe('Atualização: os eventos viram estado', () => {
     updater.checkForUpdates = async () => { throw new Error('x'); };
     // Um aviso para uma janela fechada é normal, não é motivo para erro.
     expect(() => manager.broadcast({ status: 'available' })).to.not.throw();
+  });
+  it('o lado da release produz o manifesto que este cliente consome', () => {
+    const workflow = read('.github/workflows/release.yml');
+    // O instalador publicado é montado pelo NSIS a partir do .nsi, e esse não é
+    // o caminho do electron-builder - que é quem normalmente gera o latest.yml.
+    // Sem um passo que gere o manifesto, a release vai sem ele e o atualizador
+    // nunca descobre que existe versão nova, mesmo com todo o resto certo.
+    expect(workflow, 'release.yml tem que gerar o manifesto').to.include('generate-update-manifest.js');
+    const i = workflow.indexOf('generate-update-manifest.js');
+    const build = workflow.indexOf('Run tests and build installer');
+    expect(i, 'o manifesto vem depois do build, senão descreve o instalador velho').to.be.greaterThan(build);
+    expect(workflow).to.include('dist/latest.yml');
+  });
+
+  it('o manifesto aponta para o instalador que a release publica', () => {
+    const nsi = read('installer/KyriosChronos-Installer.nsi');
+    // O nome no .nsi e o nome que o manifesto assume precisam ser o mesmo.
+    expect(nsi).to.include('SETUP_EXE "KyriosChronos-Setup-${APP_VERSION}.exe"');
+    const script = read('scripts/generate-update-manifest.js');
+    expect(script).to.include('KyriosChronos-Setup-${version}.exe');
+  });
+
+  it('o manifesto gerado tem versão, url relativa e sha512 do instalador', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kyrios-manifest-'));
+    try {
+      const conteudo = Buffer.from(' instalador de teste ');
+      fs.writeFileSync(path.join(dir, 'KyriosChronos-Setup-1.0.9.exe'), conteudo);
+      execFileSync(process.execPath, [
+        'scripts/generate-update-manifest.js', '--version', 'v1.0.9', '--dist', dir, '--quiet',
+      ], { cwd: ROOT });
+
+      const m = fs.readFileSync(path.join(dir, 'latest.yml'), 'utf8');
+      expect(m, 'a tag chega com "v" e o manifesto quer a versão crua').to.match(/^version: 1\.0\.9$/m);
+      // Relativa: o updater resolve a partir do feed, então um caminho
+      // absoluto deixaria de funcionar se o repositório fosse movido.
+      expect(m).to.match(/url: KyriosChronos-Setup-1\.0\.9\.exe$/m);
+      expect(m).to.not.match(/https?:\/\//);
+      expect(m).to.include(crypto.createHash('sha512').update(conteudo).digest('base64'));
+      expect(m).to.include(`size: ${conteudo.length}`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('falha em vez de publicar um manifesto que aponta para arquivo inexistente', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kyrios-manifest2-'));
+    try {
+      // Um latest.yml apontando para um 404 transformaria "não há versão nova"
+      // num erro de download confuso.
+      let falhou = false;
+      try {
+        execFileSync(process.execPath, [
+          'scripts/generate-update-manifest.js', '--version', '9.9.9', '--dist', dir, '--quiet',
+        ], { cwd: ROOT });
+      } catch (e) { falhou = true; }
+      expect(falhou, 'sem instalador, tem de falhar').to.equal(true);
+      expect(fs.existsSync(path.join(dir, 'latest.yml')), 'não pode gravar manifesto mentiroso').to.equal(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

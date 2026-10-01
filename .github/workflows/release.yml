@@ -148,6 +148,15 @@ jobs:
         shell: pwsh
         run: .\Build-Installer.ps1
 
+      # O instalador é montado pelo NSIS a partir do .nsi, e esse caminho não é
+      # o do electron-builder: sem este passo a release vai sem latest.yml e o
+      # atualizador do app não tem como saber que existe uma versão nova.
+      - name: Generate the update manifest
+        shell: bash
+        # A tag vem como v1.0.2 e o manifesto quer 1.0.2: o nome do instalador
+        # é montado a partir da versão, sem o "v".
+        run: node scripts/generate-update-manifest.js --version "${{ steps.version.outputs.tag }}" --quiet
+
       - name: Commit version and create release tag
         if: steps.version.outputs.publish == 'true'
         shell: bash
