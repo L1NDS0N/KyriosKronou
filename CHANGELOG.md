@@ -2,6 +2,14 @@
 
 All notable changes to Kyrios Chronos.
 
+## 1.0.2 - 2026-10-01
+
+### Fixed
+
+- fix(release): the publish step read a variable the runner already owns (`d939876`) — l1nds0n
+
+**Changes since v1.0.1**
+
 ## 1.0.1 - 2026-10-01
 
 ### Added
