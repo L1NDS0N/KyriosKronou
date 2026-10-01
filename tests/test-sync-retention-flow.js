@@ -141,6 +141,12 @@ describe('SyncManager: retention end to end (local engine, real files)', () => {
 
   it('count policy keeps only the newest N snapshot folders', async () => {
     // 5 dated snapshot folders in the source; only 2 may survive in the dest.
+    // The newest folder is named from the same UTC calendar the retention
+    // engine parses from a name (retention.js uses getUTCFullYear). The CI on
+    // windows-latest runs in UTC; on a machine behind UTC the "newest" name
+    // could sort as tomorrow while the engine kept the wrong two, and the
+    // failure only appeared at the day boundary.
+    const hoje = new Date().toISOString().slice(0, 10);
     for (let i = 4; i >= 0; i--) {
       const d = new Date(Date.now() - i * DAY);
       write(src, `${d.toISOString().slice(0, 10)}/dump.sql`, 'snap ' + i);
@@ -152,8 +158,8 @@ describe('SyncManager: retention end to end (local engine, real files)', () => {
     expect(r.retention.deleted).to.equal(3);
     const left = fs.readdirSync(dst).filter(f => fs.statSync(path.join(dst, f)).isDirectory()).sort();
     expect(left).to.have.lengthOf(2);
-    // The newest two.
-    expect(left[1]).to.equal(new Date().toISOString().slice(0, 10));
+    // The newest two, in UTC - the same calendar the names were built from.
+    expect(left[1]).to.equal(hoje);
   });
 
   it('history records how many files retention removed', async () => {

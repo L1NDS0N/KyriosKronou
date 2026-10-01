@@ -545,13 +545,24 @@ function compile(cfg) {
   return { ok: true, rules, minKeep, dateSource, extensions };
 }
 
-/** Local calendar day of an mtime; UTC calendar day of a name date. */
-function _calendarDay(ms, fromName) {
+/**
+ * Calendar day a snapshot belongs to, for comparing against "today".
+ *
+ * Both sides use UTC, always. Mixing calendars here meant a folder named
+ * 2026-10-01 was dated in UTC while "today" was dated in local time, so
+ * anywhere behind UTC the snapshot's own day and the current day disagreed
+ * around midnight - and the age rules acted on the wrong side of the boundary.
+ * The CI runs in UTC and the developer machines often do not, which is how the
+ * divergence showed up as a flaky test.
+ */
+function _calendarDay(ms) {
   const d = new Date(ms);
-  const y = fromName ? d.getUTCFullYear() : d.getFullYear();
-  const m = fromName ? d.getUTCMonth() : d.getMonth();
-  const dd = fromName ? d.getUTCDate() : d.getDate();
-  return { y, m, d: dd, num: Math.floor(Date.UTC(y, m, dd) / DAY_MS) };
+  return {
+    y: d.getUTCFullYear(),
+    m: d.getUTCMonth(),
+    d: d.getUTCDate(),
+    num: Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) / DAY_MS),
+  };
 }
 
 /**
@@ -585,7 +596,7 @@ function _snapshots(group, dateSource) {
     const nameDate = dateSource === 'names' ? parseDateFromName(unit.label) : null;
     unit.time = nameDate ? nameDate.getTime() : unit.newestMtime;
     unit.dateFrom = nameDate ? 'name' : 'metadata';
-    unit.day = unit.time ? _calendarDay(unit.time, !!nameDate) : null;
+    unit.day = unit.time ? _calendarDay(unit.time) : null;
     out.push(unit);
   }
   // Newest first; the mtime breaks ties between snapshots of the same day.
@@ -638,7 +649,7 @@ function planDeletion(files, compiled, hooks = {}) {
   const doomedBy = new Map();    // unit -> { reason, detail }
   const keepRules = compiled.rules.filter(r => r.kind === 'keep');
 
-  const today = _calendarDay(now, false);
+  const today = _calendarDay(now);
   for (const g of groups) {
     g.units.slice(0, compiled.minKeep).forEach(u => protectedBy.set(u, { reason: 'minKeep', detail: `${compiled.minKeep}` }));
 
