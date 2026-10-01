@@ -174,8 +174,19 @@ class NetworkPage {
     this.renderSetup();
     const result = await window.api.installSyncthing();
     this.busy = null;
-    if (result && result.success) showToast(i18n.t('network.installed'), 'success');
-    else showToast(i18n.t('network.installFailed'), 'error');
+    if (result && result.success) {
+      showToast(i18n.t('network.installed'), 'success');
+    } else {
+      // O motivo vem do main e é específico: hash divergente significa que o
+      // instalador do Chocolatey mudou e ninguém executou nada. Um "falhou"
+      // genérico esconderia justamente o que o operador precisa fazer.
+      const reason = result && result.reason;
+      let texto = i18n.t(reason || 'network.installFailed');
+      if (reason === 'sync.install.chocoHashMismatch') {
+        texto += ` ${i18n.t('network.chocoHashMismatchHint')}`;
+      }
+      showToast(texto, 'error');
+    }
     await this.load();
   }
 
