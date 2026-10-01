@@ -272,6 +272,65 @@ describe('Rede de sincronismo: execucao da tarefa pos-sincronismo', () => {
     expect(out.fired).to.deep.equal([]);
   });
 
+  // Este era o pior bug da compactação: o laço roda a cada tique do
+  // agendador e comprimia a pasta sem olhar se ela tinha terminado. Um
+  // arquivo pela metade vira um container truncado com cara de completo, e o
+  // original é apagado logo em seguida.
+  describe('Compactação só depois que a pasta terminou', () => {
+    const PASTA = 'docs';
+    const politica = { mode: 'perFile' };
+
+    function comCompressor() {
+      const estado = { chamadas: [], logs: [] };
+      const b = bridge({
+        compressor: {
+          compressFolder: async (pasta) => { estado.chamadas.push(pasta); return { ok: true, added: 1 }; },
+        },
+        logger: { log: (lvl, m) => estado.logs.push(`${lvl}: ${m}`) },
+      });
+      return { b, estado };
+    }
+
+    it('não comprime uma pasta que ainda está sincronizando', async () => {
+      const { b, estado } = comCompressor();
+      const out = await b.check(fakeClient(40, 10), [{ id: PASTA, path: 'C:\\docs', Compression: politica }]);
+      expect(out.compressed).to.deep.equal([]);
+      expect(estado.chamadas).to.deep.equal([]);
+    });
+
+    it('comprime quando a pasta está completa e parada', async () => {
+      const { b, estado } = comCompressor();
+      const out = await b.check(fakeClient(COMPLETE, 0), [{ id: PASTA, path: 'C:\\docs', Compression: politica }]);
+      expect(out.compressed).to.have.length(1);
+      expect(estado.chamadas).to.deep.equal(['C:\\docs']);
+    });
+
+    it('não comprime enquanto houver item pendente, mesmo com 99%', async () => {
+      const { b, estado } = comCompressor();
+      await b.check(fakeClient(99, 3), [{ id: PASTA, path: 'C:\\docs', Compression: politica }]);
+      expect(estado.chamadas).to.deep.equal([]);
+    });
+
+    it('não comprime a pasta se não conseguir ler o progresso dela', async () => {
+      // Sem o número, compactar seria adivinhar; não compactar é o estado
+      // seguro, e o motivo precisa ir para o log.
+      const { b, estado } = comCompressor();
+      const client = { dbCompletion: async () => { throw new Error('conexão perdida'); } };
+      const out = await b.check(client, [{ id: PASTA, path: 'C:\\docs', Compression: politica }]);
+      expect(out.compressed).to.deep.equal([]);
+      expect(estado.logs.some((l) => l.includes('conexão perdida'))).to.equal(true);
+    });
+
+    it('pula a pasta sem política de compactação', async () => {
+      const { b, estado } = comCompressor();
+      await b.check(fakeClient(COMPLETE, 0), [
+        { id: PASTA, path: 'C:\\docs', Compression: { mode: 'none' } },
+        { id: PASTA, path: 'C:\\docs' },
+      ]);
+      expect(estado.chamadas).to.deep.equal([]);
+    });
+  });
+
   it('registra a execucao no log de execucoes quando ha registry', async () => {
     const started = [];
     const finished = [];

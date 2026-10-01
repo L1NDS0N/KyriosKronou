@@ -4,6 +4,10 @@
 // interface que o app, o serviço headless e o painel web chamam igual. Sem
 // `electron`: o serviço Windows carrega este arquivo como Node puro.
 
+const fs = require('fs');
+const path = require('path');
+
+const paths = require('../paths');
 const { SyncthingInstaller } = require('./installer');
 const { SyncthingManager, normalizeFolder, normalizeDevice } = require('./manager');
 const { PostSyncBridge } = require('./postSync');
@@ -203,6 +207,40 @@ class SyncNetwork {
     };
   }
 
+/**
+ * O path da pasta vem do renderer, e essa é a única validação entre ele e o
+ * que sai da máquina. Sem esta checagem, apontar a pasta para o home do
+ * Syncthing replicaria cert.pem, key.pem e config.xml - e o config.xml
+ * contém a <apikey>, que é o único controle de acesso do daemon - para
+ * todos os dispositivos pareados.
+ */
+  validateFolderPath(folderPath) {
+    if (typeof folderPath !== 'string' || !folderPath.trim()) return 'network.folderPathRequired';
+    const raw = folderPath.trim();
+    // A absolutidade é checada ANTES de resolver: path.resolve transformaria
+    // "docs\sub" em um caminho dentro do diretório atual, que no serviço
+    // (LocalSystem) é C:\Windows\System32.
+    if (!path.isAbsolute(raw)) return 'network.folderPathNotAbsolute';
+    const target = path.normalize(raw);
+
+    // Recusa por substring seria errada: "C:\dados\syncthing-bkp" não está
+    // dentro de "C:\dados\syncthing". O teste é o mesmo do backupArtifacts.
+    // path.relative dá "" quando os dois caminhos são o mesmo, e esse caso
+    // conta como dentro: apontar a pasta para o dataDir ou para a instalação
+    // seria copiar os perfis e a senha do banco para os outros dispositivos.
+    const contido = (pai) => {
+      const rel = path.relative(pai, target);
+      if (rel === '') return true;
+      return !rel.startsWith('..') && !path.isAbsolute(rel);
+    };
+
+    const zonasProibidas = [paths.syncthingHome(), paths.dataDir(), paths.appRoot()];
+    for (const proibido of zonasProibidas) {
+      if (contido(proibido)) return 'network.folderPathReserved';
+    }
+    return null;
+  }
+
   async saveFolder(input) {
     const ready = await this.manager.ready();
     if (!ready.ok) return { ok: false, reason: reasonOf(ready) };
@@ -210,8 +248,11 @@ class SyncNetwork {
     const folder = normalizeFolder(input);
     if (!folder.id) return { ok: false, error: 'network.folderNeedsId' };
 
+    const pathProblem = this.validateFolderPath(folder.path);
+    if (pathProblem) return { ok: false, error: pathProblem };
+
     // Última barreira antes do dado cruzar a rede: uma pasta compartilhada com
-    // um dispositivo que ninguém autorizou vazaria para a máquina dele.
+    // um dispositivo que ninguém autorizado vazaria para a máquina dele.
     const deviceIDs = (folder.devices || []).map((d) => d.deviceID);
     const gate = deviceAuth.assertShareAllowed(this.deviceRegistry(), deviceIDs);
     if (!gate.ok) return { ok: false, error: 'network.deviceNotAuthorized', blocked: gate.blocked };

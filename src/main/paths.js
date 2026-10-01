@@ -37,6 +37,11 @@ function ownerFile() { return path.join(configDir(), 'scheduler-owner.json'); }
 // Syncthing's own config/cert/index. Deliberately NOT %LOCALAPPDATA%\Syncthing:
 // the service runs as LocalSystem and would spin up a second, invisible instance
 // with a different device ID, so devices paired with the GUI would never see it.
+// The installed application tree. Exposed so callers can refuse to sync it:
+// handing this folder to Syncthing would copy node_modules and the app.asar to
+// every paired machine.
+function appRoot() { return path.resolve(__dirname, '..', '..'); }
+
 function syncthingHome(instance) {
   if (!instance) return path.join(dataDir(), 'syncthing');
   // Uma segunda instancia precisa de um home próprio porque a chave do
@@ -119,6 +124,7 @@ module.exports = {
   logsDir,
   ownerFile,
   syncthingHome,
+  appRoot,
   legacyDirs,
   ensureDirs,
   migrateLegacyData,

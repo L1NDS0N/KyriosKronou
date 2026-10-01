@@ -90,6 +90,66 @@ describe('Rede de sincronismo: controller', () => {
     expect(result.error).to.equal('network.folderNeedsId');
   });
 
+  // O path da pasta é a única coisa entre o que o usuário digita e o que sai
+  // da máquina. Sem esta barreira, apontar a pasta para o home do Syncthing
+  // replicaria cert.pem, key.pem e config.xml - que tem a <apikey>, o único
+  // controle de acesso do daemon - para todos os dispositivos pareados.
+  it('recusa o home do Syncthing, que guarda a chave de API e o certificado', async () => {
+    const { syncthingHome } = require('../src/main/paths');
+    const network = build(fakeClient(), []);
+    const result = await network.saveFolder({
+      id: 'docs', label: 'Docs', type: 'sendreceive',
+      path: syncthingHome(), devices: [],
+    });
+    expect(result.ok).to.equal(false);
+    expect(result.error).to.equal('network.folderPathReserved');
+  });
+
+  it('recusa uma subpasta do home do Syncthing', async () => {
+    const { syncthingHome } = require('../src/main/paths');
+    const path = require('path');
+    const network = build(fakeClient(), []);
+    const result = await network.saveFolder({
+      id: 'docs', path: path.join(syncthingHome(), 'sub'), devices: [],
+    });
+    expect(result.error).to.equal('network.folderPathReserved');
+  });
+
+  it('recusa o dataDir e a pasta do app instalado', async () => {
+    const paths = require('../src/main/paths');
+    const network = build(fakeClient(), []);
+    for (const proibido of [paths.dataDir(), paths.appRoot()]) {
+      const result = await network.saveFolder({ id: 'docs', path: proibido, devices: [] });
+      expect(result.error, proibido).to.equal('network.folderPathReserved');
+    }
+  });
+
+  it('recusa caminho relativo, que resolveria dentro do System32 sob o serviço', async () => {
+    const network = build(fakeClient(), []);
+    const result = await network.saveFolder({ id: 'docs', path: 'Documentos\\x', devices: [] });
+    expect(result.error).to.equal('network.folderPathNotAbsolute');
+  });
+
+  it('recusa pasta sem caminho', async () => {
+    const network = build(fakeClient(), []);
+    for (const vazio of ['', '   ', null, undefined, 42]) {
+      const result = await network.saveFolder({ id: 'docs', path: vazio, devices: [] });
+      expect(result.error, String(vazio)).to.equal('network.folderPathRequired');
+    }
+  });
+
+  it('não confunde uma pasta vizinha com uma dentro da zona proibida', async () => {
+    // "C:\dados\syncthing-bkp" NÃO está dentro de "C:\dados\syncthing", e uma
+    // comparação por substring recusaria uma pasta legítima do usuário.
+    const path = require('path');
+    const { dataDir } = require('../src/main/paths');
+    const vizinha = path.join(path.dirname(dataDir()), 'dados', 'syncthing-bkp');
+    const network = build(fakeClient(), []);
+    const result = await network.saveFolder({ id: 'docs', path: vizinha, devices: [] });
+    expect(result.error).to.equal(undefined);
+    expect(result.ok).to.equal(true);
+  });
+
   it('normaliza a pasta antes de gravar, em vez de confiar no renderer', async () => {
     let written = null;
     const client = fakeClient({ putFolder: async (id, folder) => { written = folder; } });

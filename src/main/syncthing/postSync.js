@@ -147,20 +147,36 @@ class PostSyncBridge {
 
     // A compactação não é a tarefa pós-sincronismo: é o passo que vem DEPOIS
     // dela, e roda para toda pasta com política de compactação, mesmo sem
-    // tarefa associada. Aqui a pasta acabou de ficar completa, que é a única
-    // hora em que comprimir é seguro.
+    // tarefa associada.
+    //
+    // Só quando a pasta está em 100%. Este laço roda a cada tique do
+    // agendador, e comprimir um arquivo pela metade produziria um container
+    // truncado com cara de completo - com o original já apagado logo abaixo.
+    // Sem esta checagem era exatamente a perda de dado que o comentário
+    // dizia evitar.
     if (this.compressor) {
       for (const folder of folders || []) {
         const policy = folder && folder.Compression;
         if (!policy || policy.mode === 'none') continue;
+
+        let completion = null;
+        try {
+          const status = await client.dbCompletion(folder.id);
+          completion = status && status.completion;
+        } catch (e) {
+          this.log('WARN', `Compactação: não consegui ler o progresso de ${folder.id}: ${e.message}`);
+          continue;
+        }
+        if (!this.isComplete(completion)) continue;
+
         try {
           const outcome = await this.compressor.compressFolder(folder.path, policy);
           compressed.push({ folderId: folder.id, ok: Boolean(outcome.ok), result: outcome });
           if (!outcome.ok) {
-            this.log('WARN', `PostSync: compactação de ${folder.id} falhou: ${outcome.reason} ${outcome.detail || ''}`);
+            this.log('WARN', `Compactação de ${folder.id} falhou: ${outcome.reason} ${outcome.detail || ''}`);
           }
         } catch (err) {
-          this.log('WARN', `PostSync: compactação de ${folder.id} lançou: ${err.message}`);
+          this.log('WARN', `Compactação de ${folder.id} lançou: ${err.message}`);
         }
       }
     }

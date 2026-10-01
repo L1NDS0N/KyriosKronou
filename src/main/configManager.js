@@ -41,10 +41,49 @@ class ConfigManager {
     }
   }
 
+  // Relê o arquivo antes de gravar.
+//
+// GUI e serviço são dois processos apontando para o MESMO
+// profiles/default.json, e cada um mantinha uma cópia do objeto em memória.
+// Quem escrevesse por último apagava a chave que o outro tinha acabado de
+// adicionar - o registro de dispositivos da rede, o segredo de sessão do
+// painel, a chave de API. Reler antes de gravar é o que transforma "o último
+// vence" em "o último aplica só a sua chave".
+reloadFromDisk() {
+    const profileFile = path.join(this.profilesDir, `${this.currentProfile}.json`);
+    if (!fs.existsSync(profileFile)) return false;
+    try {
+      this.settings = JSON.parse(fs.readFileSync(profileFile, 'utf8'));
+      return true;
+    } catch (e) {
+      // Arquivo momentaneamente ilegível não pode virar "config zerada": as
+      // entradas em memória são a melhor cópia disponível.
+      return false;
+    }
+  }
+
+  /**
+   * Grava por arquivo temporário e rename.
+   *
+   * writeFileSync direto trunca o destino: uma queda no meio deixava JSON pela
+   * metade, e o catch do loadProfile engolia o erro e zerava a configuração
+   * inteira em silêncio - tarefas, senhas e permissões sumiam juntas. O
+   * rename é atômico no mesmo volume, então o arquivo é antigo ou o novo,
+   * nunca os dois pela metade.
+   */
   saveProfile(profileName) {
     if (!profileName) profileName = this.currentProfile;
     const profileFile = path.join(this.profilesDir, `${profileName}.json`);
-    fs.writeFileSync(profileFile, JSON.stringify(this.settings, null, 2), 'utf8');
+    const tmp = `${profileFile}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(this.settings, null, 2), 'utf8');
+    try {
+      fs.renameSync(tmp, profileFile);
+    } catch (e) {
+      // Um rename pode falhar se o antivírus estiver segurando o destino.
+      // Tentar o caminho direto é melhor do que perder a configuração.
+      try { fs.unlinkSync(tmp); } catch (e2) { /* já não existe */ }
+      fs.writeFileSync(profileFile, JSON.stringify(this.settings, null, 2), 'utf8');
+    }
   }
 
   save() {
@@ -52,11 +91,12 @@ class ConfigManager {
   }
 
   getSetting(key, defaultValue) {
-    if (this.settings.hasOwnProperty(key)) return this.settings[key];
+    if (Object.prototype.hasOwnProperty.call(this.settings, key)) return this.settings[key];
     return defaultValue !== undefined ? defaultValue : null;
   }
 
   setSetting(key, value) {
+    this.reloadFromDisk();
     this.settings[key] = value;
     this.save();
   }
