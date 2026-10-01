@@ -63,8 +63,38 @@ describe('Release workflow', () => {
     expect(workflow).to.include('reaproveitando');
   });
 
-  it('bumpa a versão com o helper do changelog, não com aritmética solta', () => {
-    expect(workflow).to.include('generate-changelog.js --bump --print-version');
+  // O CI falhou aqui: --bump imprimia a versão atual E a próxima, e a
+  // validação MAJOR.MINOR.PATCH recebia as duas numa variável só. A flag
+  // dedicada imprime uma linha e não escreve arquivo nenhum.
+  it('pede a próxima versão por uma flag que imprime uma linha só', () => {
+    expect(workflow).to.include('generate-changelog.js --print-next');
+    expect(workflow).to.not.include('--bump --print-version');
+
+    const out = execFileSync(process.execPath, ['scripts/generate-changelog.js', '--print-next'], {
+      cwd: ROOT, encoding: 'utf8',
+    });
+    const linhas = out.trim().split(/\r?\n/);
+    expect(linhas, 'tem de ser uma linha só').to.have.lengthOf(1);
+    expect(linhas[0], 'e no formato que a validação exige').to.match(/^\d+\.\d+\.\d+$/);
+  });
+
+  it('o helper de bump não deixa resíduo nem depende de pegar a última linha', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kyrios-next-'));
+    try {
+      const changelog = path.join(dir, 'CHANGELOG.md');
+      const notes = path.join(dir, 'notes.md');
+      const out = execFileSync(
+        process.execPath,
+        ['scripts/generate-changelog.js', '--print-next', '--output', changelog, '--notes-output', notes],
+        { cwd: ROOT, encoding: 'utf8' }
+      );
+      expect(out.trim().split(/\r?\n/)).to.have.lengthOf(1);
+      // Só calcular a próxima versão não pode mexer no changelog do repositório.
+      expect(fs.existsSync(changelog), 'não deve criar changelog').to.equal(false);
+      expect(fs.existsSync(notes), 'não deve criar release notes').to.equal(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('o passo de tag roda por saída, não pelo tipo de evento', () => {
@@ -152,6 +182,9 @@ describe('Release workflow', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kyrios-changelog-'));
     const output = path.join(dir, 'CHANGELOG.md');
     const notes = path.join(dir, 'notes.md');
+    // --output e --notes-output são obrigatórios aqui: sem eles o script usa
+    // CHANGELOG.md na raiz do repositório e o teste passa reescrevendo o
+    // changelog de verdade a cada execução da suíte.
     execFileSync(process.execPath, ['scripts/generate-changelog.js', '--version', '1.0.0', '--output', output, '--notes-output', notes], { cwd: ROOT });
     execFileSync(process.execPath, ['scripts/generate-changelog.js', '--version', '1.0.0', '--output', output, '--notes-output', notes], { cwd: ROOT });
     const changelog = fs.readFileSync(output, 'utf8');
@@ -160,5 +193,21 @@ describe('Release workflow', () => {
     expect(changelog).to.include('## 1.0.0');
     expect(releaseNotes).to.match(/### (Added|Fixed|Changed|Documentation|Tests)/);
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('deixa o changelog do repositório intacto ao rodar a suíte', () => {
+    const changelog = path.join(ROOT, 'CHANGELOG.md');
+    const antes = fs.readFileSync(changelog, 'utf8');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kyrios-cl-'));
+    try {
+      execFileSync(
+        process.execPath,
+        ['scripts/generate-changelog.js', '--version', '1.0.0', '--output', path.join(dir, 'c.md'), '--notes-output', path.join(dir, 'n.md')],
+        { cwd: ROOT }
+      );
+      expect(fs.readFileSync(changelog, 'utf8'), 'a suíte não pode reescrever o changelog versionado').to.equal(antes);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

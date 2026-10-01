@@ -92,6 +92,15 @@ if (fs.existsSync(output)) {
     sections = lines.join('\n').trim();
   }
 }
+// --print-next imprime SÓ a próxima versão, e nada mais. exists para o workflow
+// precisar de uma linha limpa: --bump sozinho imprime a atual e a próxima
+// juntas, e a validação MAJOR.MINOR.PATCH recebia as duas de uma vez. Uma flag
+// dedicada é menos frágil do que pegar a última linha da saída.
+if (args['print-next']) {
+  process.stdout.write(`${bumpPatch(pkg.version)}\n`);
+  process.exit(0);
+}
+
 const changelog = `# Changelog\n\nAll notable changes to Kyrios Chronos.\n\n${sections}\n`;
 fs.writeFileSync(output, changelog);
 fs.writeFileSync(notesOutput, `${notesText}\n`);
@@ -99,4 +108,3 @@ if (args['print']) process.stdout.write(notesText);
 if (!args.quiet) process.stdout.write(`Changelog written for ${tag} (${previous || 'initial release'}).\n`);
 
 if (args['print-version']) process.stdout.write(`${version}\n`);
-if (!args.version && !args.tag && args.bump) process.stdout.write(`${bumpPatch(pkg.version)}\n`);
