@@ -2,6 +2,14 @@
 
 All notable changes to Kyrios Chronos.
 
+## 1.0.10 - 2026-10-02
+
+### Added
+
+- feat(build): drop the native build leftovers and the deps nothing imports (`57f4b74`) — l1nds0n
+
+**Changes since v1.0.9**
+
 ## 1.0.9 - 2026-10-02
 
 ### Added
