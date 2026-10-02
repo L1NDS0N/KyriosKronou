@@ -33,6 +33,21 @@ describe('Packaging: ignore rules', () => {
     expect(ignore('/.github/workflows/build.yml')).to.equal(true);
   });
 
+  // A build com cache aquecido é exatamente quando o instalador deveria ser
+  // mais leve, e ele ficou 2,3x maior: o .cache do workflow de release
+  // (~400 MB de Electron, NSIS e winCodeSign) mora dentro do workspace e
+  // ninguém o excluía, então o packager o copiou para dentro do app.asar.
+  it('excludes the toolchain cache, or a cached build ships 400 MB of Electron', () => {
+    expect(ignore('/.cache')).to.equal(true);
+    expect(ignore('/.cache/electron/electron-v28.3.3-win32-x64.zip')).to.equal(true);
+    expect(ignore('/.cache/electron-builder')).to.equal(true);
+  });
+
+  it('excludes as configuracoes locais do Claude, que nao pertencem ao app', () => {
+    expect(ignore('/.claude')).to.equal(true);
+    expect(ignore('/.claude/settings.local.json')).to.equal(true);
+  });
+
   // The regression: an unanchored /dist matched every nested dist/ and quietly
   // removed dependency code, producing a build that died before opening a window.
   it('NEVER excludes a nested dist/ inside node_modules', () => {

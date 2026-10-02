@@ -17,7 +17,13 @@ const ROOT = path.join(__dirname, '..');
 
 // Paths arrive relative to the project root. Normalise separators so one set
 // of rules works regardless of platform.
-const EXCLUDED_ROOT_DIRS = ['dist', 'build', 'tests', '.git', '.github', '.freebuff'];
+// .cache is where the release workflow keeps the downloaded Electron, NSIS and
+// winCodeSign toolchains - roughly 400 MB. It sits inside the workspace and
+// nothing excludes it, so the packager copied it into app.asar and the NSIS
+// installer shipped it: the installer went from 89 MB to 196 MB on the first
+// run that had a warm cache, which is exactly when a cached build should be
+// cheapest, not heaviest.
+const EXCLUDED_ROOT_DIRS = ['dist', 'build', 'tests', '.git', '.github', '.freebuff', '.cache', '.claude'];
 const EXCLUDED_ROOT_FILES = ['logo.png', 'Build-Installer.ps1', 'package-lock.json'];
 
 function ignore(filePath) {
