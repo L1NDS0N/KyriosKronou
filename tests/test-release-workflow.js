@@ -15,6 +15,24 @@ describe('Release workflow', () => {
   // The regression that broke CI: every path still pointed at the old
   // CronMasterJS/ layout, so setup-node aborted the job on an unresolved
   // cache-dependency-path before a single line of the project was built.
+  // Recorta o bloco de um job pelo nome, para os testes falarem pelo job certo
+  // em vez de procurarem no arquivo inteiro. Não usa um parser de YAML de
+  // propósito: js-yaml aqui é dependência transitiva, e um teste não deve
+  // depender de algo que o package.json não declara.
+  function blocoDoJob(nome) {
+    const inicio = workflow.indexOf(`\n  ${nome}:`);
+    if (inicio < 0) throw new Error(`job ${nome} não encontrado`);
+    const resto = workflow.slice(inicio + 1);
+    const fim = resto.search(/\n  [a-z][a-zA-Z]*:/);
+    return fim < 0 ? workflow.slice(inicio) : workflow.slice(inicio, inicio + 1 + fim);
+  }
+  function jobs() {
+    const secao = workflow.slice(workflow.indexOf('\njobs:'));
+    const nomes = secao.match(/^  ([a-z][a-zA-Z]*):/gm) || [];
+    return nomes.map((linha) => linha.trim().replace(':', ''));
+  }
+  function job(nome) { return blocoDoJob(nome); }
+
   it('builds from the repository root, not the removed CronMasterJS folder', () => {
     for (const file of ['.github/workflows/build.yml', '.github/workflows/release.yml']) {
       const source = read(file);
@@ -50,10 +68,7 @@ describe('Release workflow', () => {
       expect(on, arquivo).to.include(`- ${arquivo}`);
     }
     // E o commit de release não pode mexer em mais nada, senão sai da lista.
-    const commitStep = workflow.slice(
-      workflow.indexOf('Commit version and create release tag'),
-      workflow.indexOf('Generate release notes')
-    );
+    const commitStep = job('publish');
     expect(commitStep).to.include('git add package.json package-lock.json CHANGELOG.md');
   });
 
@@ -70,8 +85,8 @@ describe('Release workflow', () => {
   // primeiro comando. A variável do passo virou RELEASE_TAG.
   it('não usa TAG como nome de variável de ambiente, que colide com o runner', () => {
     const bloco = workflow.slice(workflow.indexOf('Attach artifacts to GitHub Release'));
-    expect(bloco).to.include('RELEASE_TAG: ${{ steps.version.outputs.tag }}');
-    expect(bloco, 'TAG no env: colide com a do runner').to.not.include('  TAG: ${{ steps.version.outputs.tag }}');
+    expect(bloco).to.include('RELEASE_TAG: ${{ needs.build.outputs.tag }}');
+    expect(bloco, 'TAG no env: colide com a do runner').to.not.include('  TAG: ${{ needs.build.outputs.tag }}');
     // E o script transforma em TAG local, que é o nome que o resto do passo usa.
     expect(bloco).to.include('TAG="$RELEASE_TAG"');
   });
@@ -122,8 +137,55 @@ describe('Release workflow', () => {
   it('o passo de tag roda por saída, não pelo tipo de evento', () => {
     // Gatear por github.event_name deixava a publicação de branch fora: o
     // passo não rodava num push, e a release nunca recebia a tag.
-    expect(workflow).to.include("if: steps.version.outputs.publish == 'true'");
+    expect(workflow).to.include("if: needs.build.outputs.publish == 'true'");
     expect(workflow).to.not.include("if: github.event_name == 'workflow_dispatch' && inputs.publish");
+  });
+
+  // ─── Testes em paralelo com a build, publicação travada pelos dois ───
+  //
+  // A build é a etapa longa e a suíte não precisa esperar por ela. O que
+  // impede um teste vermelho de virar release publicada é o job publish
+  // depender dos dois: sem isso o artefato subiria e a release sairia.
+
+  it('tem um job de testes e um de build, e nenhum espera o outro', () => {
+    expect(jobs().map((n) => n.trim()), 'três jobs: teste, build e publicação').to.have.lengthOf(3);
+    expect(blocoDoJob('test')).to.not.include('needs:');
+    expect(blocoDoJob('build')).to.not.include('needs:');
+  });
+
+  it('a publicação depende dos dois, e é isso que barra o teste vermelho', () => {
+    expect(blocoDoJob('publish')).to.match(/needs:\s*\[\s*test\s*,\s*build\s*\]/);
+    // E a publicação é onde mora tudo que escreve no repositório.
+    const publish = blocoDoJob('publish');
+    for (const passo of ['git push origin "$TAG"', 'gh release create "$TAG"']) {
+      expect(publish, passo).to.include(passo);
+    }
+    // Nada disso pode existir no job de build: seria publicar sem esperar os
+    // testes, que é exatamente o que se quer evitar.
+    const build = blocoDoJob('build');
+    expect(build, 'build não pode empurrar tag').to.not.include('git push origin');
+    expect(build, 'build não pode criar release').to.not.include('gh release create');
+  });
+
+  it('a suíte roda uma vez só: o build não repete os testes', () => {
+    expect(blocoDoJob('test'), 'a suíte fica no job de testes').to.include('run: npm test');
+    expect(blocoDoJob('build'), 'o build pula a suíte, que já corre em paralelo').to.include('Build-Installer.ps1 -SkipTests');
+    expect(blocoDoJob('build')).to.not.include('run: npm test');
+  });
+
+  it('o passo de npm test não pode transformar suite vermelha em pipeline verde', () => {
+    const linhas = blocoDoJob('test').split('\n').filter((l) => /^\s*run:/.test(l) && l.includes('npm test'));
+    expect(linhas).to.have.lengthOf(1);
+    expect(linhas[0].trim()).to.equal('run: npm test');
+  });
+
+  it('a publicação recebe a versão bumpeada, senão o commit de release seria vazio', () => {
+    const build = blocoDoJob('build');
+    const publish = blocoDoJob('publish');
+    // O bump acontece no build; o publish faz checkout limpo.
+    expect(build, 'a versão bumpeada sobe no artefato').to.include('package.json');
+    expect(publish, 'o publish restaura antes de commitar').to.include('Restore the bumped version');
+    expect(publish).to.include('download-artifact');
   });
 
   it('keeps the package version and the release tag in sync', () => {
@@ -133,10 +195,14 @@ describe('Release workflow', () => {
   });
 
   it('publishes the tag only after tests and the build succeed', () => {
-    const buildStep = workflow.indexOf('Run tests and build installer');
-    const tagStep = workflow.indexOf('Commit version and create release tag');
-    expect(buildStep).to.be.greaterThan(-1);
-    expect(tagStep).to.be.greaterThan(buildStep);
+    // Com testes e build em paralelo, a ordem deixa de ser "testes, depois
+    // build" no mesmo job: o que garante é o publish depender dos dois. Taguear
+    // dentro do job de build publicaria sem esperar a suíte.
+    const buildStep = workflow.indexOf('Build installer');
+    expect(buildStep, 'o build compila o instalador').to.be.greaterThan(-1);
+    expect(job('build'), 'a tag é criada na publicação, não no build').to.not.include('git tag -a');
+    expect(job('publish'), 'a tag é criada na publicação').to.include('git tag -a "$TAG"');
+    expect(blocoDoJob('publish')).to.match(/needs:\s*\[\s*test\s*,\s*build\s*\]/);
   });
 
   it('attaches every installer, portable build and updater file to the release', () => {

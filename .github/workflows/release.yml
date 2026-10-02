@@ -48,10 +48,45 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  # Testes e build correm em paralelo. A build é a etapa longa - baixa o
+  # Electron, compila o instalador - e esperar a suíte antes de começar custava
+  # minutos sem mudar o resultado.
+  #
+  # O que garante que um teste vermelho não publica nada é o job `publish`, que
+  # depende dos dois. A build acontece, os artefatos sobem, e no fim ninguém
+  # tagueia nem cria release porque `needs` falhou.
+  test:
+    name: Tests
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `npm test` precisa falhar o job. Um `|| true` aqui transformaria toda
+      # suíte vermelha em pipeline verde - e o job publish acharia que pode
+      # publicar.
+      - name: Run tests
+        run: npm test
+
+  build:
     name: Build Windows artifacts
     runs-on: windows-latest
     timeout-minutes: 45
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      publish: ${{ steps.version.outputs.publish }}
     env:
       NODE_VERSION: '20'
       # electron-builder downloads Electron, the winCodeSign helpers and the NSIS
@@ -143,10 +178,12 @@ jobs:
       - name: Install NSIS
         shell: pwsh
         run: choco install nsis --no-progress -y
-
-      - name: Run tests and build installer
+# -SkipTests: a suíte roda no job `test`, em paralelo com este. Rodar de
+      # novo aqui seria duplicar os minutos mais caros do pipeline sem
+      # encontrar nada que o outro job não tenha encontrado.
+      - name: Build installer
         shell: pwsh
-        run: .\Build-Installer.ps1
+        run: .\Build-Installer.ps1 -SkipTests
 
       # O instalador é montado pelo NSIS a partir do .nsi, e esse caminho não é
       # o do electron-builder: sem este passo a release vai sem latest.yml e o
@@ -157,12 +194,74 @@ jobs:
         # é montado a partir da versão, sem o "v".
         run: node scripts/generate-update-manifest.js --version "${{ steps.version.outputs.tag }}" --quiet
 
-      - name: Commit version and create release tag
-        if: steps.version.outputs.publish == 'true'
+      # Quando a tag chega pronta em vez de ser bumpeada aqui, o changelog ainda
+      # não existe. Precisa ser escrito antes do upload, senão o publish recebe
+      # um artefato sem release-notes.md e o `--notes-file` aponta para nada.
+      - name: Generate release notes when the tag arrived ready
+        if: steps.version.outputs.notes_ready != 'true' && steps.version.outputs.tag != ''
+        shell: bash
+        run: node scripts/generate-changelog.js --tag "${{ steps.version.outputs.tag }}" --output CHANGELOG.md --notes-output release-notes.md
+
+            # package.json e o lockfile vão junto porque o bump de versão aconteceu
+      # neste job. O publish faz checkout limpo da master e precisa receber os
+      # dois para poder commitar a versão - sem eles o `git commit` seria vazio
+      # e falharia.
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kyrios-chronos-${{ steps.version.outputs.tag || 'build' }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/*.exe
+            dist/latest.yml
+            CHANGELOG.md
+            release-notes.md
+            package.json
+            package-lock.json
+
+  # Só chega aqui com os dois jobs acima verdes. É este `needs` que impede um
+  # teste vermelho de virar uma release publicada: a build pode ter terminado e
+  # os artefatos podem ter subido, mas ninguém tagueia nem publica.
+  publish:
+    name: Tag and publish the GitHub Release
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout source and tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          # O bot commita por cima do que está na origin/master.
+          token: ${{ github.token }}
+
+      - name: Download the built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: kyrios-chronos-${{ needs.build.outputs.tag || 'build' }}
+          path: dist
+
+      # O job de build bumpeou a versão no workspace dele, e aqui o checkout
+      # está limpo. Sem restaurar os arquivos o commit de release seria vazio.
+      - name: Restore the bumped version into the checkout
         shell: bash
         run: |
           set -euo pipefail
-          TAG="${{ steps.version.outputs.tag }}"
+          for arquivo in package.json package-lock.json CHANGELOG.md; do
+            if [ -f "dist/$arquivo" ]; then
+              cp "dist/$arquivo" "$arquivo"
+            fi
+          done
+          node -p "'versao a publicar: ' + require('./package.json').version"
+
+      - name: Commit version and create release tag
+        if: needs.build.outputs.publish == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.build.outputs.tag }}"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add package.json package-lock.json CHANGELOG.md
@@ -173,45 +272,25 @@ jobs:
           git push origin "HEAD:${{ github.ref_name }}"
           git push origin "$TAG"
 
-      - name: Generate release notes
-        # Só quando a versão não bumped agora: nesse caso o changelog já foi
-        # escrito antes do build, com o histórico certo.
-        if: steps.version.outputs.notes_ready != 'true' && steps.version.outputs.tag != ''
-        shell: bash
-        run: |
-          node scripts/generate-changelog.js --tag "${{ steps.version.outputs.tag }}" --output CHANGELOG.md --notes-output release-notes.md
       - name: Summarize the release in the job summary
-        if: steps.version.outputs.tag != ''
+        if: needs.build.outputs.tag != ''
         shell: bash
         run: |
           {
-            echo "## Kyrios Chronos ${{ steps.version.outputs.tag }}"
+            echo "## Kyrios Chronos ${{ needs.build.outputs.tag }}"
             echo
-            cat release-notes.md
+            cat dist/release-notes.md
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: kyrios-chronos-${{ steps.version.outputs.tag || 'build' }}
-          if-no-files-found: error
-          retention-days: 30
-          path: |
-            dist/*.exe
-            dist/*.blockmap
-            dist/latest.yml
-            CHANGELOG.md
-            release-notes.md
-
       - name: Attach artifacts to GitHub Release
-        if: steps.version.outputs.tag != ''
+        if: needs.build.outputs.tag != ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           # O nome da variável é RELEASE_TAG, não TAG: um `TAG` no env: colide
           # com a variável que o runner já exporta e chega vazio no script, e
           # com `set -u` isso mata a etapa antes do primeiro comando.
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
           PRERELEASE: ${{ inputs.prerelease || false }}
           DRAFT: ${{ inputs.draft || false }}
         run: |
@@ -222,7 +301,7 @@ jobs:
             echo "No release assets were produced." >&2
             exit 1
           fi
-          FLAGS=(--title "Kyrios Chronos $TAG" --notes-file release-notes.md)
+          FLAGS=(--title "Kyrios Chronos $TAG" --notes-file dist/release-notes.md)
           if [ "$PRERELEASE" = "true" ]; then FLAGS+=(--prerelease); fi
           if [ "$DRAFT" = "true" ]; then FLAGS+=(--draft); fi
           if gh release view "$TAG" >/dev/null 2>&1; then
