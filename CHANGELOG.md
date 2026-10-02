@@ -2,6 +2,14 @@
 
 All notable changes to Kyrios Chronos.
 
+## 1.0.12 - 2026-10-02
+
+### Added
+
+- feat(tray): a real menu in the tray, in the language of the user (`9b3bca7`) — l1nds0n
+
+**Changes since v1.0.11**
+
 ## 1.0.11 - 2026-10-02
 
 ### Fixed
