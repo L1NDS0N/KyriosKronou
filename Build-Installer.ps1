@@ -55,15 +55,17 @@ try {
     $npmVersion = npm --version 2>$null
     Write-Host "  npm: $npmVersion" -ForegroundColor DarkGray
 
-    $packageInfo = Get-Content "package.json" -Raw | ConvertFrom-Json
+$packageInfo = Get-Content "package.json" -Raw | ConvertFrom-Json
     # -Version tem precedência: no CI o instalador é da próxima versão, e ela
-    # só é gravada no package.json no job de deploy.
-    $version = if ($Version) { $Version } else { $packageInfo.version }
+    # só é gravada no package.json no job de publish. O "v" da tag é removido
+    # aqui: o NSIS usa o valor em VIProductVersion e exige X.X.X.X, e um "v"
+    # na frente aborta a compilação inteira.
+    $version = if ($Version) { $Version -replace '^v', '' } else { $packageInfo.version }
     if (-not $version) {
         Write-Host "  [ERROR] package.json has no version!" -ForegroundColor Red
         exit 1
     }
-    if ($Version -and $Version -ne $packageInfo.version) {
+    if ($Version -and $version -ne $packageInfo.version) {
         Write-Host "  Version: $version (package.json still says $($packageInfo.version))" -ForegroundColor DarkGray
     } else {
         Write-Host "  Version: $version" -ForegroundColor DarkGray

@@ -97,7 +97,9 @@ describe('Release workflow', () => {
 
     const script = read('Build-Installer.ps1');
     expect(script, 'o script aceita a versão por parâmetro').to.include('[string]$Version');
-    expect(script, 'e ela tem precedência sobre o package.json').to.include('if ($Version) { $Version }');
+    // E tira o "v" da tag: o NSIS usa o valor em VIProductVersion e exige
+    // X.X.X.X, e um "v" na frente aborta a compilação inteira.
+    expect(script).to.include("-replace '^v', ''");
 
     // O publish só roda com os dois jobs verdes, então é aí - e só aí - que a
     // versão sobe.

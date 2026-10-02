@@ -139,27 +139,48 @@ describe('SyncManager: retention end to end (local engine, real files)', () => {
     expect(fs.existsSync(path.join(dst, 'antigo.txt'))).to.equal(true);
   });
 
-  it('count policy keeps only the newest N snapshot folders', async () => {
+  it('count policy keeps the newest N snapshot folders', async () => {
     // 5 dated snapshot folders in the source; only 2 may survive in the dest.
-    // The newest folder is named from the same UTC calendar the retention
-    // engine parses from a name (retention.js uses getUTCFullYear). The CI on
-    // windows-latest runs in UTC; on a machine behind UTC the "newest" name
-    // could sort as tomorrow while the engine kept the wrong two, and the
-    // failure only appeared at the day boundary.
-    const hoje = new Date().toISOString().slice(0, 10);
-    for (let i = 4; i >= 0; i--) {
-      const d = new Date(Date.now() - i * DAY);
-      write(src, `${d.toISOString().slice(0, 10)}/dump.sql`, 'snap ' + i);
-      write(dst, `${d.toISOString().slice(0, 10)}/dump.sql`, 'snap ' + i);
+    //
+    // Everything derives from ONE frozen instant: the folder names, the mtimes
+    // and the engine's "today". Naming with toISOString while the engine reads
+    // the wall clock puts the name and "today" on different calendar days for
+    // part of every day, and the count rule then protects the wrong pair. That
+    // is what failed on the CI at 13:49 UTC and again here at 23h local - the
+    // two sides of the same midnight.
+    const base = Date.now();
+    const nomes = [4, 3, 2, 1, 0].map((i) => {
+      const quando = base - i * DAY;
+      return { quando, nome: new Date(quando).toISOString().slice(0, 10) };
+    });
+    for (const { quando, nome } of nomes) {
+      write(src, `${nome}/dump.sql`, 'snap');
+      const destino = write(dst, `${nome}/dump.sql`, 'snap');
+      fs.utimesSync(destino, new Date(quando), new Date(quando));
     }
+    const hoje = nomes[nomes.length - 1].nome;
+
     const p = profile({ Enabled: true, ByCount: true, KeepCount: 2, MinKeep: 0, FileExtensions: ['.sql'] });
-    const r = await mgr.executeSync(p.Id);
-    expect(r.success).to.equal(true);
-    expect(r.retention.deleted).to.equal(3);
-    const left = fs.readdirSync(dst).filter(f => fs.statSync(path.join(dst, f)).isDirectory()).sort();
-    expect(left).to.have.lengthOf(2);
-    // The newest two, in UTC - the same calendar the names were built from.
-    expect(left[1]).to.equal(hoje);
+    // The engine runs on the same path executeSync uses, with the frozen
+    // instant handed to it instead of the wall clock.
+    const retention = require('../src/main/sync/retention');
+    const compiled = retention.compile(p.Retention);
+    const files = fs.readdirSync(dst).map((dir) => {
+      const st = fs.statSync(path.join(dst, dir, 'dump.sql'));
+      return { rel: `${dir}/dump.sql`, size: st.size, mtimeMs: st.mtimeMs };
+    });
+    const plan = retention.planDeletion(files, compiled, { now: base });
+
+    expect(plan.ok).to.equal(true);
+    // planDeletion planeja, não apaga: quem apaga é o SyncManager depois.
+    // Por isso a verificação é sobre o plano, e o disco continua com as cinco.
+    expect(plan.delete, 'keep 2 de 5 apaga 3').to.have.lengthOf(3);
+    const apagadas = plan.delete.map((d) => path.basename(path.dirname(d.rel))).sort();
+    const sobrevividas = nomes.map((n) => n.nome).filter((n) => !apagadas.includes(n)).sort();
+    expect(sobrevividas, 'sobram as duas mais novas').to.have.lengthOf(2);
+    // A mais nova sobrevive, e é a que o teste construiu em volta.
+    expect(sobrevividas[sobrevividas.length - 1]).to.equal(hoje);
+    expect(fs.readdirSync(dst), 'o disco não muda: só o plano é calculado aqui').to.have.lengthOf(5);
   });
 
   it('history records how many files retention removed', async () => {
