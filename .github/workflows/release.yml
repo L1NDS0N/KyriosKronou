@@ -153,11 +153,12 @@ jobs:
               # A execução anterior tagueou e morreu antes de publicar a release.
               # Reaproveitar a tag é o que impede cada re-run de subir a versão.
               echo "A tag $TAG ja existe; reaproveitando em vez de subir a versao."
-            else
-              npm version "$VERSION" --no-git-tag-version --allow-same-version
-              node scripts/generate-changelog.js --version "$VERSION" --output CHANGELOG.md --notes-output release-notes.md
-              NOTES_READY="true"
             fi
+            # O build NÃO bumpeia a versão nem escreve o changelog. Ele só
+            # descobre qual será a próxima versão e monta o instalador com esse
+            # número. Quem grava a versão no package.json e cria a tag é o
+            # publish, e só depois que o job de testes ficou verde - assim um
+            # teste vermelho não sobe a versão de ninguém.
             PUBLISH="true"
           fi
 
@@ -181,9 +182,23 @@ jobs:
 # -SkipTests: a suíte roda no job `test`, em paralelo com este. Rodar de
       # novo aqui seria duplicar os minutos mais caros do pipeline sem
       # encontrar nada que o outro job não tenha encontrado.
+      #
+      # -Version: o instalador sai da próxima versão sem que este job precise
+      # escrever no package.json. O bump de verdade é do job `publish`, e só
+      # acontece com os testes verdes - se eles ficarem vermelhos, a versão
+      # não sobe.
       - name: Build installer
         shell: pwsh
-        run: .\Build-Installer.ps1 -SkipTests
+        run: .\Build-Installer.ps1 -SkipTests -Version "${{ steps.version.outputs.tag }}"
+
+      # O portable é um .exe único (o que a build já monta é a pasta
+      # descompactada, de 168 MB, que não serve para download). electron-builder
+      # monta o alvo `portable` declarado no package.json, com o nome versionado.
+      - name: Build the portable .exe
+        shell: pwsh
+        run: npx electron-builder --win portable --x64 --publish never
+        env:
+          ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\.cache\electron-builder
 
       # O instalador é montado pelo NSIS a partir do .nsi, e esse caminho não é
       # o do electron-builder: sem este passo a release vai sem latest.yml e o
@@ -193,14 +208,6 @@ jobs:
         # A tag vem como v1.0.2 e o manifesto quer 1.0.2: o nome do instalador
         # é montado a partir da versão, sem o "v".
         run: node scripts/generate-update-manifest.js --version "${{ steps.version.outputs.tag }}" --quiet
-
-      # Quando a tag chega pronta em vez de ser bumpeada aqui, o changelog ainda
-      # não existe. Precisa ser escrito antes do upload, senão o publish recebe
-      # um artefato sem release-notes.md e o `--notes-file` aponta para nada.
-      - name: Generate release notes when the tag arrived ready
-        if: steps.version.outputs.notes_ready != 'true' && steps.version.outputs.tag != ''
-        shell: bash
-        run: node scripts/generate-changelog.js --tag "${{ steps.version.outputs.tag }}" --output CHANGELOG.md --notes-output release-notes.md
 
             # package.json e o lockfile vão junto porque o bump de versão aconteceu
       # neste job. O publish faz checkout limpo da master e precisa receber os
@@ -215,10 +222,6 @@ jobs:
           path: |
             dist/*.exe
             dist/latest.yml
-            CHANGELOG.md
-            release-notes.md
-            package.json
-            package-lock.json
 
   # Só chega aqui com os dois jobs acima verdes. É este `needs` que impede um
   # teste vermelho de virar uma release publicada: a build pode ter terminado e
@@ -247,17 +250,25 @@ jobs:
           # foi produzido - sendo que os 89 MB estão no disco.
           path: build
 
-      # O bump de versão aconteceu no job de build, e aqui o checkout
-      # está limpo. Sem restaurar os arquivos o commit de release seria vazio.
-      - name: Restore the bumped version into the checkout
+      # O bump usa o npm e o changelog usa node, e este job roda em Ubuntu.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      # Só chega aqui com os testes verdes, e é aqui que a versão sobe: o
+      # package.json é bumpado, o changelog é escrito e a tag é criada. Se os
+      # testes falharam, este job nem rodou e a versão de ninguém mudou.
+      - name: Bump the version and write the changelog
+        if: needs.build.outputs.publish == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          for arquivo in package.json package-lock.json CHANGELOG.md; do
-            if [ -f "build/$arquivo" ]; then
-              cp "build/$arquivo" "$arquivo"
-            fi
-          done
+          TAG="${{ needs.build.outputs.tag }}"
+          VERSION="${TAG#v}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          node scripts/generate-changelog.js --version "$VERSION" --output CHANGELOG.md --notes-output release-notes.md
           node -p "'versao a publicar: ' + require('./package.json').version"
 
       - name: Commit version and create release tag
@@ -283,7 +294,7 @@ jobs:
           {
             echo "## Kyrios Chronos ${{ needs.build.outputs.tag }}"
             echo
-            cat build/release-notes.md
+            cat release-notes.md
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Attach artifacts to GitHub Release
@@ -305,7 +316,7 @@ jobs:
             echo "No release assets were produced." >&2
             exit 1
           fi
-          FLAGS=(--title "Kyrios Chronos $TAG" --notes-file build/release-notes.md)
+          FLAGS=(--title "Kyrios Chronos $TAG" --notes-file release-notes.md)
           if [ "$PRERELEASE" = "true" ]; then FLAGS+=(--prerelease); fi
           if [ "$DRAFT" = "true" ]; then FLAGS+=(--draft); fi
           if gh release view "$TAG" >/dev/null 2>&1; then

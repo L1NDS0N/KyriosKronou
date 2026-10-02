@@ -20,7 +20,14 @@ param(
     # CI runs the suite in its own step so the failure is visible in the log and
     # not swallowed inside the build. Re-running it here would double the slowest
     # part of the pipeline for no extra signal.
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    # Versão a estampar no instalador, quando ela é diferente da do package.json.
+    # O CI precisa disso: o job de build monta o instalador da próxima versão
+    # sem precisar escrever no package.json, e o bump de verdade acontece só
+    # no job de deploy, depois que os testes ficaram verdes. Sem este parâmetro o
+    # build teria de mutar o package.json para o instalador sair com a versão
+    # certa - e aí um teste vermelho deixaria o bump feito à toa.
+    [string]$Version = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -49,12 +56,18 @@ try {
     Write-Host "  npm: $npmVersion" -ForegroundColor DarkGray
 
     $packageInfo = Get-Content "package.json" -Raw | ConvertFrom-Json
-    $version = $packageInfo.version
+    # -Version tem precedência: no CI o instalador é da próxima versão, e ela
+    # só é gravada no package.json no job de deploy.
+    $version = if ($Version) { $Version } else { $packageInfo.version }
     if (-not $version) {
         Write-Host "  [ERROR] package.json has no version!" -ForegroundColor Red
         exit 1
     }
-    Write-Host "  Version: $version" -ForegroundColor DarkGray
+    if ($Version -and $Version -ne $packageInfo.version) {
+        Write-Host "  Version: $version (package.json still says $($packageInfo.version))" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  Version: $version" -ForegroundColor DarkGray
+    }
     Write-Host ""
 
     # Install dependencies if needed

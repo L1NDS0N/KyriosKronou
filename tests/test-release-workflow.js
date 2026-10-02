@@ -53,21 +53,56 @@ describe('Release workflow', () => {
   // Without the branch trigger it only ever ran for a tag someone made by
   // hand, and a merge produced no release at all.
   it('a publicação lê os assets do mesmo caminho em que o download os deixou', () => {
-    // O upload usa "dist/*.exe" e o download-artifact preserva essa árvore: os
-    // arquivos chegam em build/dist/, não em build/. O primeiro run com os jobs
-    // separados morreu com "No release assets were produced" tendo 89 MB no
-    // disco - o find apontava para um nível acima de onde o instalador estava.
-    const publish = job('publish');
-    expect(publish, 'o download precisa ir para build/').to.include('path: build');
-    expect(publish, 'o find tem de olhar em build/dist').to.include('find build/dist');
-    // Nada pode voltar a referenciar dist/ num caminho do job de publicação.
-    const caminhos = publish.match(/(?:find|cat|cp|--notes-file)\s+[^\n|]*/g) || [];
+    // O job de download-artifact preserva a árvore do upload: o caminho precisa
+    // ser build/, porque os arquivos chegam em build/dist/.
+    expect(job('publish'), 'o download precisa ir para build/').to.include('path: build');
+    expect(job('publish'), 'o find tem de olhar em build/dist').to.include('find build/dist');
+    const caminhos = job('publish').match(/(?:find|cat|cp|--notes-file)\s+[^\n|]*/g) || [];
     for (const linha of caminhos) {
       expect(linha, `caminho relativo a dist/ no publish: ${linha}`).to.not.match(/(^|\s|\/)dist\//);
     }
-    // E as notas e a versão restauradas vêm do mesmo lugar.
-    expect(publish).to.include('build/release-notes.md');
-    expect(publish).to.include('build/$arquivo');
+  });
+
+  it('publica o portable além do instalador', () => {
+    // A build já produzia a pasta descompactada (168 MB em build/), que não
+    // serve para download. O alvo `portable` do electron-builder é o .exe
+    // único, com nome versionado, e sem ele a release oferece só instalador.
+    const pkg = JSON.parse(read('package.json'));
+    const alvos = pkg.build.win.target.map((t) => (typeof t === 'string' ? t : t.target));
+    expect(alvos, 'o alvo portable precisa estar declarado').to.include('portable');
+    expect(pkg.build.portable.artifactName, 'e nomeado com a versão').to.include('${version}');
+
+    expect(job('build'), 'o portable é construído no job de build').to.include('electron-builder --win portable');
+    // O manifesto continua apontando para o instalador: é ele que substitui uma
+    // instalação. O portable não se atualiza sozinho.
+    const script = read('scripts/generate-update-manifest.js');
+    expect(script).to.include('KyriosChronos-Setup-${version}.exe');
+    expect(script).to.not.include('-portable.exe');
+  });
+
+  it('o build não mexe na versão: quem sobe é o publish, depois dos testes', () => {
+    // O instalador precisa sair com a versão da release, mas escrevê-la no
+    // package.json no build faria o bump acontecer antes dos testes ficarem
+    // verdes. O parâmetro -Version resolve: o script estampa o número sem
+    // tocar no arquivo.
+    const build = job('build');
+    const publish = job('publish');
+
+    expect(build, 'o build passa a versão em vez de bumpear').to.include('-Version');
+    expect(build, 'o build não bumpeia').to.not.include('npm version');
+    expect(build, 'o build não escreve changelog').to.not.include('generate-changelog.js --version');
+
+    expect(publish, 'o bump é do publish').to.include('npm version');
+    expect(publish, 'e o changelog também').to.include('generate-changelog.js --version');
+
+    const script = read('Build-Installer.ps1');
+    expect(script, 'o script aceita a versão por parâmetro').to.include('[string]$Version');
+    expect(script, 'e ela tem precedência sobre o package.json').to.include('if ($Version) { $Version }');
+
+    // O publish só roda com os dois jobs verdes, então é aí - e só aí - que a
+    // versão sobe.
+    expect(publish).to.match(/needs:\s*\[\s*test\s*,\s*build\s*\]/);
+    expect(publish.indexOf('Bump the version')).to.be.greaterThan(-1);
   });
 
   it('publica sozinho quando algo é mergeado na master', () => {
@@ -195,15 +230,6 @@ describe('Release workflow', () => {
     const linhas = blocoDoJob('test').split('\n').filter((l) => /^\s*run:/.test(l) && l.includes('npm test'));
     expect(linhas).to.have.lengthOf(1);
     expect(linhas[0].trim()).to.equal('run: npm test');
-  });
-
-  it('a publicação recebe a versão bumpeada, senão o commit de release seria vazio', () => {
-    const build = blocoDoJob('build');
-    const publish = blocoDoJob('publish');
-    // O bump acontece no build; o publish faz checkout limpo.
-    expect(build, 'a versão bumpeada sobe no artefato').to.include('package.json');
-    expect(publish, 'o publish restaura antes de commitar').to.include('Restore the bumped version');
-    expect(publish).to.include('download-artifact');
   });
 
   it('keeps the package version and the release tag in sync', () => {
