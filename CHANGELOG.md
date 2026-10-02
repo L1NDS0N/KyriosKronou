@@ -2,6 +2,14 @@
 
 All notable changes to Kyrios Chronos.
 
+## 1.0.14 - 2026-10-02
+
+### Changed
+
+- build: Node 22 in the workflows, dependencies updated, and honest numbers (`4557fab`) — l1nds0n
+
+**Changes since v1.0.13**
+
 ## 1.0.13 - 2026-10-02
 
 ### Fixed
