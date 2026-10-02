@@ -2,6 +2,18 @@
 
 All notable changes to Kyrios Chronos.
 
+## 1.0.6 - 2026-10-02
+
+### Added
+
+- feat(release): publish the portable too, and let only the deploy move the version (`815f139`) — l1nds0n
+
+### Fixed
+
+- fix(release): strip the tag prefix, and pin the retention test to an instant (`a7237bb`) — l1nds0n
+
+**Changes since v1.0.5**
+
 ## 1.0.5 - 2026-10-02
 
 ### Fixed
