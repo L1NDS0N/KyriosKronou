@@ -2,6 +2,14 @@
 
 All notable changes to Kyrios Chronos.
 
+## 1.0.13 - 2026-10-02
+
+### Fixed
+
+- fix(ui): open external links in the browser, not inside the app (`5232d0e`) — l1nds0n
+
+**Changes since v1.0.12**
+
 ## 1.0.12 - 2026-10-02
 
 ### Added
