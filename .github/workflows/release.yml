@@ -86,6 +86,7 @@ jobs:
     timeout-minutes: 45
     outputs:
       tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
       publish: ${{ steps.version.outputs.publish }}
     env:
       NODE_VERSION: '20'
@@ -164,6 +165,9 @@ jobs:
 
           echo "tag=$TAG" >> "$GITHUB_ENV"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          # A versão sem o "v" da tag: é o que vai no nome do portable e no
+          # manifesto de atualização, e o que o publish bumpeia.
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
           echo "notes_ready=$NOTES_READY" >> "$GITHUB_OUTPUT"
 
@@ -189,14 +193,19 @@ jobs:
       # não sobe.
       - name: Build installer
         shell: pwsh
-        run: .\Build-Installer.ps1 -SkipTests -Version "${{ steps.version.outputs.tag }}"
+        run: .\Build-Installer.ps1 -SkipTests -Version "${{ steps.version.outputs.version }}"
 
-      # O portable é um .exe único (o que a build já monta é a pasta
-      # descompactada, de 168 MB, que não serve para download). electron-builder
-      # monta o alvo `portable` declarado no package.json, com o nome versionado.
+# O portable é um .exe único (o que a build já monta é a pasta
+        # descompactada, de 168 MB, que não serve para download). electron-builder
+        # monta o alvo `portable` declarado no package.json, com o nome versionado.
+        #
+        # --config.extraMetadata.version é o que faz o portable sair com a versão
+        # da release. Sem ele o electron-builder lê o package.json, que ainda
+        # diz a versão anterior porque o bump é do job de publish - e a release
+        # ia com um instalador 1.0.6 e um portable 1.0.5.
       - name: Build the portable .exe
         shell: pwsh
-        run: npx electron-builder --win portable --x64 --publish never
+        run: npx electron-builder --win portable --x64 --publish never --config.extraMetadata.version="${{ steps.version.outputs.version }}"
         env:
           ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\.cache\electron-builder
 
@@ -207,12 +216,8 @@ jobs:
         shell: bash
         # A tag vem como v1.0.2 e o manifesto quer 1.0.2: o nome do instalador
         # é montado a partir da versão, sem o "v".
-        run: node scripts/generate-update-manifest.js --version "${{ steps.version.outputs.tag }}" --quiet
+        run: node scripts/generate-update-manifest.js --version "${{ steps.version.outputs.version }}" --quiet
 
-            # package.json e o lockfile vão junto porque o bump de versão aconteceu
-      # neste job. O publish faz checkout limpo da master e precisa receber os
-      # dois para poder commitar a versão - sem eles o `git commit` seria vazio
-      # e falharia.
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -244,10 +249,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: kyrios-chronos-${{ needs.build.outputs.tag || 'build' }}
-          # O upload usa caminhos tipo dist/*.exe, e o download preserva essa
-          # árvore: os arquivos chegam em build/dist/, não em build/. Sem esta
-          # correção o find não acha o instalador e a etapa diz que nenhum asset
-          # foi produzido - sendo que os 89 MB estão no disco.
+          # O upload usa o glob dist/*.exe, e o actions/upload-artifact tira o prefixo
+          # comum de todos os arquivos - que é "dist/". O download então entrega
+          # os arquivos soltos na raiz, e não em build/dist/. Um find atrás de
+          # build/dist/ falhou com "No such file or directory" mesmo com os
+          # arquivos baixados.
           path: build
 
       # O bump usa o npm e o changelog usa node, e este job roda em Ubuntu.
@@ -311,7 +317,7 @@ jobs:
         run: |
           set -euo pipefail
           TAG="$RELEASE_TAG"
-          mapfile -t ASSETS < <(find build/dist -maxdepth 1 -type f \( -name '*.exe' -o -name '*.blockmap' -o -name 'latest.yml' \) | sort)
+          mapfile -t ASSETS < <(find build -maxdepth 1 -type f \( -name '*.exe' -o -name '*.blockmap' -o -name 'latest.yml' \) | sort)
           if [ "${#ASSETS[@]}" -eq 0 ]; then
             echo "No release assets were produced." >&2
             exit 1

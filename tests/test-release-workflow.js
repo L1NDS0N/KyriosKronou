@@ -53,10 +53,13 @@ describe('Release workflow', () => {
   // Without the branch trigger it only ever ran for a tag someone made by
   // hand, and a merge produced no release at all.
   it('a publicação lê os assets do mesmo caminho em que o download os deixou', () => {
-    // O job de download-artifact preserva a árvore do upload: o caminho precisa
-    // ser build/, porque os arquivos chegam em build/dist/.
+    // O upload usa o glob dist/*.exe, e o upload-artifact tira o prefixo comum
+    // de todos os arquivos - que é "dist/". O download entrega os arquivos
+    // soltos na raiz, e não em build/dist/. Um find atrás de build/dist/ falhou
+    // com "No such file or directory" mesmo com os arquivos baixados.
     expect(job('publish'), 'o download precisa ir para build/').to.include('path: build');
-    expect(job('publish'), 'o find tem de olhar em build/dist').to.include('find build/dist');
+    expect(job('publish'), 'o find tem de olhar na raiz do download').to.include('find build -maxdepth 1');
+    expect(job('publish'), 'nada de build/dist/ em comando').to.not.match(/(find|cat|cp)\s+[^\n|]*build\/dist/);
     const caminhos = job('publish').match(/(?:find|cat|cp|--notes-file)\s+[^\n|]*/g) || [];
     for (const linha of caminhos) {
       expect(linha, `caminho relativo a dist/ no publish: ${linha}`).to.not.match(/(^|\s|\/)dist\//);
@@ -73,6 +76,10 @@ describe('Release workflow', () => {
     expect(pkg.build.portable.artifactName, 'e nomeado com a versão').to.include('${version}');
 
     expect(job('build'), 'o portable é construído no job de build').to.include('electron-builder --win portable');
+    // E sai com a versão da release, não com a do package.json: o bump é do
+    // publish, então o package.json ainda diz a anterior e o portable saía uma
+    // versão atrás do instalador.
+    expect(job('build'), 'a versão do portable vem do passo de resolução').to.include('extraMetadata.version=');
     // O manifesto continua apontando para o instalador: é ele que substitui uma
     // instalação. O portable não se atualiza sozinho.
     const script = read('scripts/generate-update-manifest.js');
