@@ -2236,7 +2236,7 @@ const GH_USERNAME = 'l1nds0n';
 
 async function showGitHubProfile() {
   showModal(`<div class="gh-shell">
-    <div class="gh-loading" id="gh-loading"><i data-lucide="loader"></i><p>Loading profile...</p></div>
+    <div class="gh-loading" id="gh-loading"><i data-lucide="loader"></i><p>${escHtml(i18n.t('credits.loading'))}</p></div>
     <div id="gh-content" style="display:none"></div>
   </div>`);
   try {
@@ -2261,7 +2261,7 @@ async function showGitHubProfile() {
     if (repos.length > 0) {
       reposHtml = `
         <div class="gh-repos">
-          <h4><i data-lucide="folder-git-2"></i> Top Repositories</h4>
+          <h4><i data-lucide="folder-git-2"></i> ${escHtml(i18n.t('credits.reposTitle'))}</h4>
           <div class="gh-repo-list">
             ${repos.map(r => `
               <a class="gh-repo" href="${escAttr(r.html_url)}" target="_blank" rel="noopener noreferrer">
@@ -2291,20 +2291,31 @@ async function showGitHubProfile() {
               ${location}
               ${company}
               ${blog}
-              <span><i data-lucide="calendar"></i>Joined ${new Date(user.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</span>
+              <span><i data-lucide="calendar"></i>${escHtml(i18n.t('credits.joined').replace('{when}', new Date(user.created_at).toLocaleDateString(i18n.getLang() === 'pt-BR' ? 'pt-BR' : 'en-US', { month: 'short', year: 'numeric' })))}</span>
             </div>
           </div>
         </div>
         <div class="gh-actions">
           <a class="gh-coffee-btn" href="https://www.buymeacoffee.com/lindsonfranca" target="_blank" rel="noopener noreferrer">
-            <i data-lucide="coffee"></i> Buy me a coffee
+            <i data-lucide="coffee"></i> ${escHtml(i18n.t('credits.donate'))}
           </a>
+          <div class="gh-coffee-note">
+            <i data-lucide="sparkles"></i> ${escHtml(i18n.t('credits.donateNote'))}
+          </div>
+          <div class="gh-secondary-links">
+            <a href="https://github.com/${escAttr(user.login)}" target="_blank" rel="noopener noreferrer">
+              <i data-lucide="github"></i> ${escHtml(i18n.t('credits.viewProfile'))}
+            </a>
+            <a href="https://github.com/L1NDS0N/KyriosKronou/releases" target="_blank" rel="noopener noreferrer">
+              <i data-lucide="download"></i> ${escHtml(i18n.t('credits.releases'))}
+            </a>
+          </div>
         </div>
         <div class="gh-stats">
-          <div class="gh-stat"><div class="gh-stat-value">${Number(user.public_repos) || 0}</div><div class="gh-stat-label">Repos</div></div>
-          <div class="gh-stat"><div class="gh-stat-value">${Number(user.followers) || 0}</div><div class="gh-stat-label">Followers</div></div>
-          <div class="gh-stat"><div class="gh-stat-value">${Number(user.following) || 0}</div><div class="gh-stat-label">Following</div></div>
-          <div class="gh-stat"><div class="gh-stat-value">${Number(user.public_gists) || 0}</div><div class="gh-stat-label">Gists</div></div>
+          <div class="gh-stat"><div class="gh-stat-value">${Number(user.public_repos) || 0}</div><div class="gh-stat-label">${escHtml(i18n.t('credits.statRepos'))}</div></div>
+          <div class="gh-stat"><div class="gh-stat-value">${Number(user.followers) || 0}</div><div class="gh-stat-label">${escHtml(i18n.t('credits.statFollowers'))}</div></div>
+          <div class="gh-stat"><div class="gh-stat-value">${Number(user.following) || 0}</div><div class="gh-stat-label">${escHtml(i18n.t('credits.statFollowing'))}</div></div>
+          <div class="gh-stat"><div class="gh-stat-value">${Number(user.public_gists) || 0}</div><div class="gh-stat-label">${escHtml(i18n.t('credits.statGists'))}</div></div>
         </div>
         ${reposHtml}
       </div>`;
@@ -2314,7 +2325,7 @@ async function showGitHubProfile() {
     lucide.createIcons();
   } catch (e) {
     const loading = document.getElementById('gh-loading');
-    if (loading) loading.innerHTML = `<p style="color:var(--red);">Failed to load GitHub profile</p>`;
+    if (loading) loading.innerHTML = `<p style="color:var(--red);">${escHtml(i18n.t('credits.loadFailed'))}</p>`;
   }
 }
 

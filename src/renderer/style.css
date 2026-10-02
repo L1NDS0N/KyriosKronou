@@ -955,17 +955,22 @@ button.th-entry:focus-visible { outline: 1px solid var(--primary); outline-offse
 @media (prefers-reduced-motion: reduce) {
   .sb-update-new { animation: none; }
 }
+
+/* ═══ GitHub profile ═══
    Recarga no escuro: fundo do modal quase opaco, não o vidro translúcido do
    resto do app. Sobre um fundo escuro, vidro vira cinza uniforme e o texto
-   perde degrau contra o papel de parede que vem da janela. O avatar perde
-   saturação pela mesma razão. */
-/* ═══ GitHub profile ═══ */
+   perde degrau contra o papel de parede que vem da janela.
+
+   A paleta tem três degraus em vez de dois. Com o cartão e o painel quase
+   iguais e a borda em #1c1c28, a borda ficava com 1.1:1 contra o próprio
+   cartão: invisível, e o cartão parecia parte do fundo. As bordas aqui ficam
+   acima de 1.5:1, o que ainda é discreto mas é uma aresta de verdade. */
 .gh-shell {
-  background: #07070c;
-  border: 1px solid #1c1c28;
+  background: #0a0a12;
+  border: 1px solid #2b2b3e;
   border-radius: 14px;
   padding: 22px 24px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, .7), inset 0 1px 0 rgba(255, 255, 255, .03);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .8), inset 0 1px 0 rgba(255, 255, 255, .04);
 }
 .gh-profile { display: flex; flex-direction: column; gap: 20px; }
 .gh-header { display: flex; align-items: center; gap: 16px; }
@@ -974,37 +979,71 @@ button.th-entry:focus-visible { outline: 1px solid var(--primary); outline-offse
   filter: grayscale(.35) brightness(.6) contrast(1.05);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, .04), 0 8px 24px rgba(0, 0, 0, .5);
 }
+.gh-info { min-width: 0; }
 .gh-info h3 { font-size: 18px; font-weight: 700; margin-bottom: 2px; color: #f2f2f7; }
 .gh-info .gh-login { font-size: 13px; color: #a8a8b8; font-weight: 600; }
-.gh-info .gh-bio { font-size: 12px; color: #8a8a9a; margin-top: 5px; line-height: 1.5; }
-.gh-info .gh-meta { display: flex; gap: 12px; margin-top: 8px; font-size: 11px; color: #7a7a8c; flex-wrap: wrap; }
+.gh-info .gh-bio { font-size: 12px; color: #9e9eb2; margin-top: 5px; line-height: 1.5; }
+.gh-info .gh-meta { display: flex; gap: 12px; margin-top: 8px; font-size: 11px; color: #8e8ea3; flex-wrap: wrap; }
 .gh-info .gh-meta span, .gh-info .gh-meta a { display: flex; align-items: center; gap: 4px; }
 .gh-info .gh-meta a { color: var(--primary); }
 .gh-info .gh-meta i { width: 13px; height: 13px; }
-.gh-actions { display: flex; justify-content: center; margin: 14px 0; }
-.gh-coffee-btn { display: inline-flex; align-items: center; gap: 8px; padding: 9px 18px; border-radius: 10px; background: #FFDD00; color: #0D0C22; font-weight: 700; font-size: 13px; text-decoration: none; transition: transform .15s ease, box-shadow .15s ease; }
-.gh-coffee-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(255, 221, 0, .35); }
+
+/* Doação: é o objetivo do modal, então ocupa a largura toda e tem a
+   palavra certa. Um botão pequeno e centralizado some entre os cartões de
+   estatística, e a pessoa não sabe se aquilo é um link de Command Prompt. */
+.gh-actions { display: flex; flex-direction: column; gap: 10px; margin: 0; }
+.gh-coffee-btn {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 13px 20px; border-radius: 12px;
+  background: linear-gradient(180deg, #FFE45C, #FFDD00);
+  color: #0D0C22; font-weight: 700; font-size: 14px; letter-spacing: .2px;
+  text-decoration: none; border: 1px solid rgba(0, 0, 0, .12);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .5) inset, 0 6px 18px rgba(255, 221, 0, .16);
+  transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
+}
+.gh-coffee-btn i, .gh-coffee-btn svg { width: 17px; height: 17px; }
+.gh-coffee-btn:hover { transform: translateY(-1px); box-shadow: 0 1px 0 rgba(255, 255, 255, .5) inset, 0 10px 26px rgba(255, 221, 0, .3); }
+.gh-coffee-btn:active { transform: translateY(0); }
+.gh-coffee-btn:focus-visible { outline: 2px solid #FFDD00; outline-offset: 3px; }
+/* O texto secundário diz o que a pessoa recebe de volta - "apoie" sozinho
+   não explica nada, e a dúvida trava a doação. */
+.gh-coffee-note {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  font-size: 11px; color: #8e8ea3; text-align: center;
+}
+.gh-coffee-note svg { width: 13px; height: 13px; flex: 0 0 auto; }
+/* Um link secundário, para quem não quer doar mas quer olhar o código. */
+.gh-secondary-links { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
+.gh-secondary-links a {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; color: #8e8ea3; text-decoration: none;
+  padding: 5px 9px; border-radius: 8px; border: 1px solid #33334a;
+  transition: color var(--transition), border-color var(--transition), background var(--transition);
+}
+.gh-secondary-links a:hover { color: #dcdcea; border-color: #454564; background: #14141f; }
+.gh-secondary-links svg { width: 13px; height: 13px; }
+
 .gh-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .gh-stat {
-  background: #101018; border: 1px solid #1c1c28; border-radius: 10px;
-  padding: 14px 8px; text-align: center; transition: border-color var(--transition);
+  background: #14141f; border: 1px solid #33334a; border-radius: 10px;
+  padding: 14px 8px; text-align: center; transition: border-color var(--transition), background var(--transition);
 }
-.gh-stat:hover { border-color: #2f2f42; }
+.gh-stat:hover { border-color: #454564; background: #191926; }
 .gh-stat-value { font-size: 22px; font-weight: 800; color: #f2f2f7; }
-.gh-stat-label { font-size: 9px; color: #7a7a8c; text-transform: uppercase; letter-spacing: .5px; margin-top: 3px; font-weight: 600; }
-.gh-repos h4 { font-size: 12px; font-weight: 600; color: #8a8a9a; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+.gh-stat-label { font-size: 9px; color: #8e8ea3; text-transform: uppercase; letter-spacing: .5px; margin-top: 3px; font-weight: 600; }
+.gh-repos h4 { font-size: 12px; font-weight: 600; color: #a0a0b4; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
 .gh-repos h4 i { width: 14px; height: 14px; }
 .gh-repo-list { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
 .gh-repo {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 10px 14px; background: #0d0d14; border: 1px solid #1c1c28;
+  padding: 10px 14px; background: #101018; border: 1px solid #33334a;
   border-radius: 8px; transition: border-color var(--transition), background var(--transition); cursor: pointer;
   text-decoration: none;
 }
-.gh-repo:hover { border-color: #2f2f42; background: #12121c; }
+.gh-repo:hover { border-color: #454564; background: #171724; }
 .gh-repo-name { font-size: 12px; font-weight: 600; color: #e8e8f0; }
-.gh-repo-desc { font-size: 10px; color: #8a8a9a; margin-top: 2px; }
-.gh-repo-lang { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #8a8a9a; }
+.gh-repo-desc { font-size: 10px; color: #9a9ab0; margin-top: 2px; }
+.gh-repo-lang { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #9a9ab0; }
 .gh-repo-lang::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #8a8a9a; opacity: .5; }
 .gh-loading { text-align: center; padding: 40px; color: #8a8a9a; }
 .gh-loading i { width: 32px; height: 32px; animation: spin 1.5s linear infinite; margin-bottom: 12px; }
