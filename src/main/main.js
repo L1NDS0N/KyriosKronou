@@ -22,6 +22,7 @@ const { SchedulerCore, ROLE_GUI, readOwner } = require('./schedulerCore');
 const WebPermissions = require('./webPermissions');
 const WebAuth = require('./webAuth');
 const trayI18n = require('./trayI18n');
+const linkPolicy = require('./linkPolicy');
 const RunRegistry = require('./runRegistry');
 
 // ─── Single instance ───
@@ -154,6 +155,20 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+
+  // Link clicado vai para o navegador do sistema, nunca para uma janela dentro
+  // do app. Sem isto, uma página de terceiros abre com o preload em cima e
+  // recebe window.api inteira - mudar configuração, parar o servidor web, abrir
+  // diálogo de arquivo. A política fica aqui, no main, e não em cada âncora:
+  // o app monta links em runtime (a descrição de uma tarefa aceita http,
+  // https e mailto digitados pela pessoa) e corrigir um por um deixaria
+  // exatamente esses de fora.
+  linkPolicy.aplicarEm(mainWindow.webContents, {
+    paginaDoApp: `file://${path.join(__dirname, '..', 'renderer', 'index.html').replace(/\\/g, '/')}`,
+    avisar: (reason) => {
+      if (logger) logger.warn?.(`Link recusado (${reason}); nada foi aberto.`);
+    },
+  });
 
   mainWindow.once('ready-to-show', () => {
     // Launched by the Windows startup entry with --minimized: go straight to
