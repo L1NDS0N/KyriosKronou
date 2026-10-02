@@ -2,6 +2,14 @@
 
 All notable changes to Kyrios Chronos.
 
+## 1.0.4 - 2026-10-02
+
+### Added
+
+- feat(release): run the tests beside the build and gate the release on both (`a1e75a1`) — l1nds0n
+
+**Changes since v1.0.3**
+
 ## 1.0.3 - 2026-10-01
 
 ### Fixed
