@@ -2,6 +2,14 @@
 
 All notable changes to Kyrios Chronos.
 
+## 1.0.9 - 2026-10-02
+
+### Added
+
+- feat(build): halve the app.asar by dropping what the runtime never loads (`464f10c`) — l1nds0n
+
+**Changes since v1.0.8**
+
 ## 1.0.8 - 2026-10-02
 
 ### Fixed
