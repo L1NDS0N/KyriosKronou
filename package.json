@@ -75,16 +75,16 @@
     "electron-builder": "^24.13.3",
     "electron-packager": "^17.1.2",
     "electron-updater": "^6.3.9",
-    "mocha": "^11.8.0"
+    "lucide": "^1.33.0",
+    "mocha": "^11.8.0",
+    "pngjs": "^7.0.0"
   },
   "dependencies": {
     "basic-ftp": "^6.2.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
-    "lucide": "^1.33.0",
     "mssql": "^12.7.2",
     "mysql2": "^3.23.4",
-    "pngjs": "^7.0.0",
     "ssh2-sftp-client": "^12.1.1"
   },
   "repository": {

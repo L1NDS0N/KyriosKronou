@@ -184,10 +184,21 @@ describe('Packaging: dependencies survive the ignore rules', () => {
 
     expect(dropped, `these loadable dependency paths would be stripped: ${dropped.slice(0, 10).join(', ')}`)
       .to.deep.equal([]);
-    // And the exclusions that were applied are only the noise categories.
+    // And the exclusions that were applied are only the noise categories:
+    // source maps, types, native build leftovers, tests, docs and licences.
+    const CATEGORIAS_RUIDO = new RegExp([
+      /\.(map|d\.ts|ts|md|markdown|pdb|obj|iobj|ilk|exp|lib|txt)$/i.source,
+      /(^|\/)(test|tests|spec|specs|__tests__|__mocks__|example|examples|docs?)\//i.source,
+      // Nome de licença é o último segmento do caminho, com ou sem extensão
+      // (cors entrega "/LICENSE", mysql2 "/License", outros "/LICENSE.txt").
+      // Um "(^|/)" aqui viraria "^(^|/)" e a alternativa de início casaria a
+      // string inteira, nunca o final.
+      /\/[Ll][Ii][Cc][Ee][Nn][SsCc][Ee]\.?$/i.source,
+      /\/[Nn][Oo][Tt][Ii][Cc][Ee]\.?$/i.source,
+      /\/[Cc][Oo][Pp][Yy][Ii][Nn][Gg]\.?$/i.source,
+    ].join('|'));
     for (const caminho of ignorados) {
-      expect(caminho, 'so sourcemap, tipos, testes e readme podem sair')
-        .to.match(/\.(map|d\.ts|ts|md|markdown)$|(\/|^)(test|tests|__tests__|example|examples)\//i);
+      expect(caminho, 'so ruido pode sair, nunca codigo: ' + caminho).to.match(CATEGORIAS_RUIDO);
     }
   });
 

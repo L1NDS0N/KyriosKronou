@@ -36,12 +36,30 @@ const EXCLUDED_PACKAGES = ['lucide'];
 // Dead weight inside the dependencies that do ship. All of it is either source
 // maps for a stack trace nobody can read from inside a packed app, or type
 // declarations and TypeScript sources that no JavaScript runtime ever loads.
+//
+// The build artifacts are the other half. ssh2 and cpu-features ship a
+// node-gyp build tree, and only the .node inside it is ever dlopen'd: the .pdb
+// symbols, the .obj and .iobj link intermediates and the static .lib exist for
+// whoever compiled the native module on the build machine, and they are 16 MB of
+// the asar on their own.
 const NODE_MODULE_NOISE = [
-  /\.map$/,                                  // 35 MB of source maps
-  /\.d\.ts$/,                                // 10 MB of type declarations
+  /\.map$/,                                  // source maps
+  /\.d\.ts$/,                                // type declarations
   /\.ts$/,                                   // TypeScript sources, .d.ts already matched
-  /(^|\/)(test|tests|__tests__|example|examples)\//,
+  /\.(pdb|obj|iobj|ilk|exp)$/i,              // native build artifacts
+  /\.lib$/i,                                 // static libraries
+  /(^|\/)(test|tests|spec|specs|__tests__|__mocks__|example|examples)\//,
   /\.(md|markdown)$/,
+  /\/(LICEN[SC]E|NOTICE|COPYING)(\.[A-Za-z]+)?$/i,
+  /(^|\/)docs?\//i,
+];
+
+// pngjs ships both a node build and a browserified one. Only the node entry is
+// reachable from the app, and this is the one that matters: nothing in src/ ever
+// required pngjs, so the whole dependency is a candidate for removal on its own.
+const EXCLUDED_FILES = [
+  // A second, CommonJS copy of every bundle. The app is ESM and never loads it.
+  /^\/node_modules\/@azure\/msal-browser\/.*\.cjs$/,
 ];
 
 // node_modules/<pkg>/ - matched whole, with everything below it.
@@ -67,6 +85,7 @@ function ignore(filePath) {
     if (p === `/${file}`) return true;
   }
   if (isExcludedPackage(p)) return true;
+  if (EXCLUDED_FILES.some((rx) => rx.test(p))) return true;
   if (isNodeModuleNoise(p)) return true;
   return false;
 }
