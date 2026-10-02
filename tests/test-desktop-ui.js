@@ -79,36 +79,11 @@ const i18nSource = read('i18n.js');
 const app = read('app.js');
 const quick = read('quickCreate.js');
 
-const ELECTRON = path.join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe');
 const RUNNER = path.join(__dirname, 'fixtures', 'desktop-ui-runner.js');
 
-function runDesktop() {
-  return new Promise((resolve, reject) => {
-    const child = spawn(ELECTRON, [RUNNER], {
-      cwd: ROOT,
-      env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: '1' },
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
-    let stdout = '';
-    let stderr = '';
-    const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error(`desktop renderer did not finish. stderr:\n${stderr}`));
-    }, 60000);
-    child.stdout.on('data', chunk => { stdout += chunk.toString(); });
-    child.stderr.on('data', chunk => { stderr += chunk.toString(); });
-    child.on('error', reject);
-    child.on('exit', code => {
-      clearTimeout(timer);
-      if (code !== 0) return reject(new Error(`desktop renderer exited ${code}. stderr:\n${stderr}`));
-      const line = stdout.split(/\r?\n/).reverse().find(value => value.startsWith('DESKTOP_UI_RESULT='));
-      if (!line) return reject(new Error(`desktop renderer returned no result. stdout:\n${stdout}\nstderr:\n${stderr}`));
-      try { resolve(JSON.parse(line.slice('DESKTOP_UI_RESULT='.length))); }
-      catch (error) { reject(error); }
-    });
-  });
-}
+const { rodar, ELECTRON } = require('./fixtures/electron-runner');
+
+const runDesktop = () => rodar(RUNNER, 'desktop renderer');
 
 describe('Desktop tasks: the renderer never instantiates the cron parser', () => {
   // CronParser is a main-process module (module.exports). The renderer asked

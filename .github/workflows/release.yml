@@ -68,7 +68,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
 
       - name: Install dependencies
@@ -89,7 +89,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       publish: ${{ steps.version.outputs.publish }}
     env:
-      NODE_VERSION: '20'
+      NODE_VERSION: '22'
       # electron-builder downloads Electron, the winCodeSign helpers and the NSIS
       # binaries into these; without a stable path the release run re-downloads
       # ~400 MB that the previous run already cached.
@@ -260,7 +260,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
 
       # Só chega aqui com os testes verdes, e é aqui que a versão sobe: o

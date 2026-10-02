@@ -35,7 +35,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: '20'
+  NODE_VERSION: '22'
   # electron-builder downloads Electron, the winCodeSign helpers and the NSIS
   # binaries into these. Left at the default they land in LOCALAPPDATA, which is
   # fine locally but is what makes every CI run re-download ~400 MB.

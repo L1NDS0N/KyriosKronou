@@ -72,11 +72,11 @@
   "devDependencies": {
     "chai": "^4.5.0",
     "electron": "^28.0.0",
-    "electron-builder": "^24.13.3",
+    "electron-builder": "^26.15.3",
     "electron-packager": "^17.1.2",
     "electron-updater": "^6.3.9",
     "lucide": "^1.33.0",
-    "mocha": "^11.8.0",
+    "mocha": "^12.0.3",
     "pngjs": "^7.0.0"
   },
   "dependencies": {

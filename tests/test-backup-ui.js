@@ -4,37 +4,15 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
-const ELECTRON = path.join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe');
 const RUNNER = path.join(__dirname, 'fixtures', 'backup-ui-runner.js');
 
-function runBackup() {
-  return new Promise((resolve, reject) => {
-    const child = spawn(ELECTRON, [RUNNER], {
-      cwd: ROOT,
-      env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: '1' },
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
-    let stdout = '';
-    let stderr = '';
-    const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error(`backup renderer did not finish. stderr:\n${stderr}`));
-    }, 30000);
-    child.stdout.on('data', chunk => { stdout += chunk.toString(); });
-    child.stderr.on('data', chunk => { stderr += chunk.toString(); });
-    child.on('error', reject);
-    child.on('exit', code => {
-      clearTimeout(timer);
-      if (code !== 0) return reject(new Error(`backup renderer exited ${code}. stderr:\n${stderr}`));
-      const line = stdout.split(/\r?\n/).reverse().find(value => value.startsWith('BACKUP_UI_RESULT='));
-      if (!line) return reject(new Error(`backup renderer returned no result. stdout:\n${stdout}\nstderr:\n${stderr}`));
-      try { resolve(JSON.parse(line.slice('BACKUP_UI_RESULT='.length))); }
-      catch (error) { reject(error); }
-    });
-  });
-}
+// Sobe o renderer pelo helper compartilhado. Ver tests/fixtures/electron-runner.js:
+// o primeiro spawn numa maquina fria passa de 30s (medido: 47s), e o timeout
+// curto matava um processo que so estava lento. O helper repete uma vez e
+// distingue lentidao de travamento.
+const { rodar, ELECTRON } = require('./fixtures/electron-runner');
 
+const runBackup = () => rodar(RUNNER, 'backup renderer');
 describe('Backup UI in the real Electron renderer', () => {
   let result;
 
