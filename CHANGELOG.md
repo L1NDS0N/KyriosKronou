@@ -2,6 +2,14 @@
 
 All notable changes to Kyrios Chronos.
 
+## 1.0.5 - 2026-10-02
+
+### Fixed
+
+- fix(release): read the artifacts from where the download actually put them (`016580e`) — l1nds0n
+
+**Changes since v1.0.4**
+
 ## 1.0.4 - 2026-10-02
 
 ### Added
