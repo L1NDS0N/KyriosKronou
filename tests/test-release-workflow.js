@@ -52,6 +52,24 @@ describe('Release workflow', () => {
   // The whole point of the workflow: merging to master publishes a release.
   // Without the branch trigger it only ever ran for a tag someone made by
   // hand, and a merge produced no release at all.
+  it('a publicação lê os assets do mesmo caminho em que o download os deixou', () => {
+    // O upload usa "dist/*.exe" e o download-artifact preserva essa árvore: os
+    // arquivos chegam em build/dist/, não em build/. O primeiro run com os jobs
+    // separados morreu com "No release assets were produced" tendo 89 MB no
+    // disco - o find apontava para um nível acima de onde o instalador estava.
+    const publish = job('publish');
+    expect(publish, 'o download precisa ir para build/').to.include('path: build');
+    expect(publish, 'o find tem de olhar em build/dist').to.include('find build/dist');
+    // Nada pode voltar a referenciar dist/ num caminho do job de publicação.
+    const caminhos = publish.match(/(?:find|cat|cp|--notes-file)\s+[^\n|]*/g) || [];
+    for (const linha of caminhos) {
+      expect(linha, `caminho relativo a dist/ no publish: ${linha}`).to.not.match(/(^|\s|\/)dist\//);
+    }
+    // E as notas e a versão restauradas vêm do mesmo lugar.
+    expect(publish).to.include('build/release-notes.md');
+    expect(publish).to.include('build/$arquivo');
+  });
+
   it('publica sozinho quando algo é mergeado na master', () => {
     expect(workflow).to.include('branches: [master]');
     expect(workflow).to.include('push:');

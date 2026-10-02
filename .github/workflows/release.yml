@@ -241,17 +241,21 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: kyrios-chronos-${{ needs.build.outputs.tag || 'build' }}
-          path: dist
+          # O upload usa caminhos tipo dist/*.exe, e o download preserva essa
+          # árvore: os arquivos chegam em build/dist/, não em build/. Sem esta
+          # correção o find não acha o instalador e a etapa diz que nenhum asset
+          # foi produzido - sendo que os 89 MB estão no disco.
+          path: build
 
-      # O job de build bumpeou a versão no workspace dele, e aqui o checkout
+      # O bump de versão aconteceu no job de build, e aqui o checkout
       # está limpo. Sem restaurar os arquivos o commit de release seria vazio.
       - name: Restore the bumped version into the checkout
         shell: bash
         run: |
           set -euo pipefail
           for arquivo in package.json package-lock.json CHANGELOG.md; do
-            if [ -f "dist/$arquivo" ]; then
-              cp "dist/$arquivo" "$arquivo"
+            if [ -f "build/$arquivo" ]; then
+              cp "build/$arquivo" "$arquivo"
             fi
           done
           node -p "'versao a publicar: ' + require('./package.json').version"
@@ -279,7 +283,7 @@ jobs:
           {
             echo "## Kyrios Chronos ${{ needs.build.outputs.tag }}"
             echo
-            cat dist/release-notes.md
+            cat build/release-notes.md
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Attach artifacts to GitHub Release
@@ -296,12 +300,12 @@ jobs:
         run: |
           set -euo pipefail
           TAG="$RELEASE_TAG"
-          mapfile -t ASSETS < <(find dist -maxdepth 1 -type f \( -name '*.exe' -o -name '*.blockmap' -o -name 'latest.yml' \) | sort)
+          mapfile -t ASSETS < <(find build/dist -maxdepth 1 -type f \( -name '*.exe' -o -name '*.blockmap' -o -name 'latest.yml' \) | sort)
           if [ "${#ASSETS[@]}" -eq 0 ]; then
             echo "No release assets were produced." >&2
             exit 1
           fi
-          FLAGS=(--title "Kyrios Chronos $TAG" --notes-file dist/release-notes.md)
+          FLAGS=(--title "Kyrios Chronos $TAG" --notes-file build/release-notes.md)
           if [ "$PRERELEASE" = "true" ]; then FLAGS+=(--prerelease); fi
           if [ "$DRAFT" = "true" ]; then FLAGS+=(--draft); fi
           if gh release view "$TAG" >/dev/null 2>&1; then
