@@ -26,6 +26,35 @@ const ROOT = path.join(__dirname, '..');
 const EXCLUDED_ROOT_DIRS = ['dist', 'build', 'tests', '.git', '.github', '.freebuff', '.cache', '.claude'];
 const EXCLUDED_ROOT_FILES = ['logo.png', 'Build-Installer.ps1', 'package-lock.json'];
 
+// The renderer loads src/renderer/lucide.min.js with a plain <script> tag, and
+// nothing in src/main or src/renderer does require('lucide'). The npm package
+// is 20 MB of the same icons in three module formats, shipped three times over,
+// and the app never reads it. Dropping the whole package is the single biggest
+// win in the asar and costs nothing at runtime.
+const EXCLUDED_PACKAGES = ['lucide'];
+
+// Dead weight inside the dependencies that do ship. All of it is either source
+// maps for a stack trace nobody can read from inside a packed app, or type
+// declarations and TypeScript sources that no JavaScript runtime ever loads.
+const NODE_MODULE_NOISE = [
+  /\.map$/,                                  // 35 MB of source maps
+  /\.d\.ts$/,                                // 10 MB of type declarations
+  /\.ts$/,                                   // TypeScript sources, .d.ts already matched
+  /(^|\/)(test|tests|__tests__|example|examples)\//,
+  /\.(md|markdown)$/,
+];
+
+// node_modules/<pkg>/ - matched whole, with everything below it.
+const isExcludedPackage = (p) => {
+  const m = /^\/node_modules\/((?:@[^/]+\/)?[^/]+)(\/|$)/.exec(p);
+  return Boolean(m) && EXCLUDED_PACKAGES.includes(m[1]);
+};
+
+// Only inside node_modules: the project's own files are never touched, so a
+// source file in src/ named something.ts keeps shipping if it ever needs to.
+const isNodeModuleNoise = (p) => p.startsWith('/node_modules/')
+  && NODE_MODULE_NOISE.some((rx) => rx.test(p));
+
 function ignore(filePath) {
   if (!filePath) return false;
   const p = filePath.replace(/\\/g, '/');
@@ -37,6 +66,8 @@ function ignore(filePath) {
   for (const file of EXCLUDED_ROOT_FILES) {
     if (p === `/${file}`) return true;
   }
+  if (isExcludedPackage(p)) return true;
+  if (isNodeModuleNoise(p)) return true;
   return false;
 }
 

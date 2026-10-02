@@ -48,12 +48,63 @@ describe('Packaging: ignore rules', () => {
     expect(ignore('/.claude/settings.local.json')).to.equal(true);
   });
 
+  // O renderer carrega src/renderer/lucide.min.js com uma tag <script> comum e
+  // nada em src/ faz require('lucide'). O pacote npm são 20 MB dos mesmos
+  // ícones em três formatos de módulo, e o app nunca o lê.
+  it('exclui o pacote lucide, que o app carrega de um arquivo local', () => {
+    expect(ignore('/node_modules/lucide')).to.equal(true);
+    expect(ignore('/node_modules/lucide/dist/umd/lucide.js')).to.equal(true);
+    expect(ignore('/node_modules/lucide/dist/esm/icons/clock.mjs')).to.equal(true);
+    // E o arquivo local, que é o que o index.html realmente usa, continua.
+    expect(ignore('/src/renderer/lucide.min.js')).to.equal(false);
+  });
+
+  it('exclui source maps, tipos e testes das dependencias', () => {
+    expect(ignore('/node_modules/express/index.js.map')).to.equal(true);
+    expect(ignore('/node_modules/mssql/lib/base.d.ts')).to.equal(true);
+    expect(ignore('/node_modules/mssql/lib/base.ts')).to.equal(true);
+    expect(ignore('/node_modules/lodash/test/test.js')).to.equal(true);
+    expect(ignore('/node_modules/express/Readme.md')).to.equal(true);
+  });
+
+  it('nao toca nos arquivos do projeto que tenham esses nomes', () => {
+    // O filtro de node_modules é o que separa "limpar dependência" de "apagar o
+    // código do app". Um .ts ou um .map em src/ é do projeto.
+    expect(ignore('/src/main/types.ts')).to.equal(false);
+    expect(ignore('/src/renderer/app.js.map')).to.equal(false);
+    expect(ignore('/docs/tests.md')).to.equal(false);
+  });
+
+  it('mantem o codigo que o app executa de verdade', () => {
+    for (const caminho of [
+      '/src/main/main.js',
+      '/src/main/syncthing/network.js',
+      '/src/renderer/index.html',
+      '/src/renderer/app.js',
+      '/src/renderer/i18n.js',
+      '/src/renderer/style.css',
+      '/node_modules/express/index.js',
+      '/node_modules/mssql/lib/base.js',
+      '/package.json',
+    ]) {
+      expect(ignore(caminho), caminho).to.equal(false);
+    }
+  });
+
   // The regression: an unanchored /dist matched every nested dist/ and quietly
   // removed dependency code, producing a build that died before opening a window.
+  // Este bloco existe para o bug do `/dist` sem âncora, que removia o diretório
+  // dist/ e build/ de dentro de node_modules - onde eles carregam código real
+  // (basic-ftp/dist, cpu-features/build/Release/*.node) - e produzia um app que
+  // morria antes de abrir a janela. tests/ nunca foi o caso: um diretório de
+  // testes dentro de uma dependência não é carregado por ninguém.
   it('NEVER excludes a nested dist/ inside node_modules', () => {
     expect(ignore('/node_modules/basic-ftp/dist')).to.equal(false);
     expect(ignore('/node_modules/basic-ftp/dist/Client.js')).to.equal(false);
-    expect(ignore('/node_modules/lucide/dist/umd/lucide.js')).to.equal(false);
+    // lucide é a exceção deliberada: o pacote inteiro sai, porque o renderer
+    // carrega src/renderer/lucide.min.js e não require('lucide') em lugar
+    // nenhum. Se algum dia o app passar a importar o pacote, este teste falha.
+    expect(ignore('/node_modules/lucide')).to.equal(true);
   });
 
   it('NEVER excludes a nested build/ inside node_modules', () => {
@@ -61,8 +112,8 @@ describe('Packaging: ignore rules', () => {
     expect(ignore('/node_modules/cpu-features/build/Release/cpufeatures.node')).to.equal(false);
   });
 
-  it('NEVER excludes a nested tests/ inside node_modules', () => {
-    expect(ignore('/node_modules/mysql2/tests/helper.js')).to.equal(false);
+  it('excludes a nested tests/ inside node_modules, que ninguem carrega', () => {
+    expect(ignore('/node_modules/mysql2/tests/helper.js')).to.equal(true);
   });
 
   it('keeps build-resources, whose icon the app loads at runtime', () => {
@@ -97,14 +148,24 @@ describe('Packaging: ignore rules', () => {
 
 describe('Packaging: dependencies survive the ignore rules', () => {
   // Walk the real node_modules for the runtime dependencies and assert the
-  // rules never strip a file from them.
-  it('does not drop any file from a runtime dependency', () => {
+  // rules never strip a file the runtime could actually load. This started as
+  // "no file at all", which was the right instinct - an unanchored /dist gutted
+  // basic-ftp/dist and the app crashed - but it was too broad once source maps
+  // and type declarations were excluded: none of those is ever loaded. The
+  // invariant that matters is that executable code survives, and that is what
+  // this checks, with the noise categories allowed through explicitly.
+  const RUNTIME_LOADABLE = /\.(js|mjs|cjs|json|node)$/i;
+
+  it('does not drop any loadable file from a runtime dependency', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
     const deps = Object.keys(pkg.dependencies || {});
     expect(deps.length).to.be.above(0);
 
     const dropped = [];
+    const ignorados = [];
     for (const dep of deps) {
+      // lucide is deliberately out: the renderer loads lucide.min.js directly.
+      if (dep === 'lucide') continue;
       const root = path.join(__dirname, '..', 'node_modules', dep);
       if (!fs.existsSync(root)) continue;
 
@@ -112,14 +173,43 @@ describe('Packaging: dependencies survive the ignore rules', () => {
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
           const full = path.join(dir, entry.name);
           const rel = '/' + path.relative(path.join(__dirname, '..'), full).replace(/\\/g, '/');
-          if (ignore(rel)) dropped.push(rel);
-          else if (entry.isDirectory()) walk(full);
+          if (ignore(rel)) {
+            if (RUNTIME_LOADABLE.test(rel)) dropped.push(rel);
+            else ignorados.push(rel);
+          } else if (entry.isDirectory()) walk(full);
         }
       };
       walk(root);
     }
 
-    expect(dropped, `these dependency paths would be stripped: ${dropped.slice(0, 10).join(', ')}`)
+    expect(dropped, `these loadable dependency paths would be stripped: ${dropped.slice(0, 10).join(', ')}`)
       .to.deep.equal([]);
+    // And the exclusions that were applied are only the noise categories.
+    for (const caminho of ignorados) {
+      expect(caminho, 'so sourcemap, tipos, testes e readme podem sair')
+        .to.match(/\.(map|d\.ts|ts|md|markdown)$|(\/|^)(test|tests|__tests__|example|examples)\//i);
+    }
+  });
+
+  it('keeps the entry point of every runtime dependency', () => {
+    // The file a package.json "main" points at is what the runtime resolves
+    // first. Losing it is what turns a trim into a crash.
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    const root = path.join(__dirname, '..', 'node_modules');
+    const verificados = [];
+    for (const dep of Object.keys(pkg.dependencies || {})) {
+      if (dep === 'lucide') continue;
+      const dir = path.join(root, dep);
+      if (!fs.existsSync(dir)) continue;
+      const manifest = path.join(dir, 'package.json');
+      if (!fs.existsSync(manifest)) continue;
+      let entry;
+      try { entry = JSON.parse(fs.readFileSync(manifest, 'utf8')).main; } catch (e) { continue; }
+      if (!entry) continue;
+      const rel = '/' + path.relative(path.join(__dirname, '..'), path.join(dir, entry)).replace(/\\/g, '/');
+      expect(ignore(rel), `${dep} perdeu o main (${entry})`).to.equal(false);
+      verificados.push(dep);
+    }
+    expect(verificados.length, 'nenhum pacote verificado').to.be.above(3);
   });
 });
