@@ -2,6 +2,14 @@
 
 All notable changes to Kyrios Chronos.
 
+## 1.0.11 - 2026-10-02
+
+### Fixed
+
+- fix(ui): the GitHub profile modal had no padding, because a comment ate its CSS (`69bd07d`) — l1nds0n
+
+**Changes since v1.0.10**
+
 ## 1.0.10 - 2026-10-02
 
 ### Added
