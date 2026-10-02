@@ -2,6 +2,14 @@
 
 All notable changes to Kyrios Chronos.
 
+## 1.0.7 - 2026-10-02
+
+### Fixed
+
+- fix(release): the portable was a version behind and the find missed it (`55bda5c`) — l1nds0n
+
+**Changes since v1.0.6**
+
 ## 1.0.6 - 2026-10-02
 
 ### Added
