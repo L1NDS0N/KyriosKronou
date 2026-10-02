@@ -2,6 +2,14 @@
 
 All notable changes to Kyrios Chronos.
 
+## 1.0.8 - 2026-10-02
+
+### Fixed
+
+- fix(build): the toolchain cache was being shipped inside the installer (`c817f32`) — l1nds0n
+
+**Changes since v1.0.7**
+
 ## 1.0.7 - 2026-10-02
 
 ### Fixed
