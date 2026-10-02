@@ -21,6 +21,7 @@ const paths = require('./paths');
 const { SchedulerCore, ROLE_GUI, readOwner } = require('./schedulerCore');
 const WebPermissions = require('./webPermissions');
 const WebAuth = require('./webAuth');
+const trayI18n = require('./trayI18n');
 const RunRegistry = require('./runRegistry');
 
 // ─── Single instance ───
@@ -179,6 +180,188 @@ function createWindow() {
     mainWindow.on('closed', () => { mainWindow = null; });
 }
 
+// ============================================================================
+// Menu da bandeja
+// ============================================================================
+//
+// O menu é montado aqui e não no renderer porque ele precisa funcionar com a
+// janela escondida - que é justamente o estado em que a bandeja é usada.
+//
+// Duas decisões que vieram de medir o app, não de ler o código:
+//
+//  - "Run due tasks" abre um submenu com as tarefas vencidas, nome por nome. Um
+//    item único que roda tudo é irreversível: a pessoa clica sem saber o quê.
+//    O item que roda todas continua lá, abaixo de um separador.
+//  - O menu mostra o que está rodando agora. Fechar a janela é a forma comum de
+//    disparar um backup de vinte minutos e depois perguntar onde ele foi parar.
+//
+// Os rótulos vêm do mesmo dicionário da janela (trayI18n carrega o i18n.js do
+// renderer), porque antes este menu era o único lugar da interface inteiramente
+// em inglês dentro de um app em português.
+
+function showWindow(page) {
+  if (!mainWindow) {
+    createWindow();
+  } else {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+  if (page && mainWindow && mainWindow.webContents) {
+    mainWindow.webContents.send('navigate-to', page);
+  }
+}
+
+function notifyTray(title, body) {
+  try {
+    new Notification({ title, body }).show();
+  } catch (e) { /* notificação é cortesia, não garantia */ }
+}
+
+function refreshTrayMenu() {
+  if (tray) tray.setContextMenu(buildTrayMenu());
+}
+
+// Um submenu com até N itens e o resto resumido. Um menu de 40 perfis não é um
+// menu, é uma lista rolável que ninguém usa.
+function listaLimitada(itens, vazio, limite = 8) {
+  if (itens.length === 0) return [{ label: vazio, enabled: false }];
+  const visiveis = itens.slice(0, limite);
+  const resto = itens.slice(limite);
+  if (resto.length) visiveis.push({ type: 'separator' }, { label: `+${resto.length}`, enabled: false });
+  return visiveis;
+}
+
+function buildTrayMenu() {
+  const t = (chave, params) => trayI18n.t(chave, params);
+
+  const agora = [];
+  try {
+    if (runs && typeof runs.active === 'function') {
+      for (const run of runs.active()) {
+        agora.push({
+          label: `${trayI18n.t('tray.runningNow')}: ${run.name || run.targetId || run.Id || ''}`,
+          enabled: false,
+        });
+      }
+    }
+  } catch (e) { /* registro pode não existir ainda */ }
+
+  const vencidas = taskManager ? taskManager.getDueTasks() : [];
+  const perfisBackup = backupManager ? backupManager.getAllProfiles() : [];
+  const perfisRetencao = retentionManager ? retentionManager.getAllProfiles() : [];
+
+  return Menu.buildFromTemplate([
+    { label: t('tray.show'), click: () => showWindow() },
+    { type: 'separator' },
+
+    ...(agora.length ? [{ label: t('tray.runningNow'), submenu: agora }, { type: 'separator' }] : []),
+
+    {
+      label: t('tray.runDue'),
+      submenu: [
+        ...listaLimitada(
+          vencidas.map((task) => ({
+            label: task.Name || task.Id,
+            click: async () => {
+              const result = await taskManager.executeTask(task);
+              if (logger && logger.auditTaskExecuted) logger.auditTaskExecuted(task.Id, task.Name, result);
+              sendTaskNotification(task, result);
+              notifyTray(t('tray.title'), t('tray.notifyDone'));
+              refreshTrayMenu();
+            },
+          })),
+          t('tray.noDue')
+        ),
+        ...(vencidas.length ? [{ type: 'separator' }, { label: `${t('tray.runDue')} (${vencidas.length})`, click: () => { runDueTasksFromTray(); } }] : []),
+      ],
+    },
+    { type: 'separator' },
+
+    {
+      label: t('tray.backups'),
+      submenu: listaLimitada(
+        perfisBackup.map((p) => ({
+          label: p.Name || p.Id,
+          click: () => {
+            backupManager.executeBackup(p.Id)
+              .then(() => { refreshTrayMenu(); })
+              .catch((e) => notifyTray(t('tray.title'), e.message));
+          },
+        })),
+        t('tray.noBackups')
+      ),
+    },
+    {
+      label: t('tray.retention'),
+      submenu: listaLimitada(
+        perfisRetencao.map((p) => ({
+          label: p.Name || p.Id,
+          click: () => {
+            retentionManager.runProfile(p.Id)
+              .then(() => { refreshTrayMenu(); })
+              .catch((e) => notifyTray(t('tray.title'), e.message));
+          },
+        })),
+        t('tray.noRetention')
+      ),
+    },
+    { label: t('tray.syncNetwork'), click: () => showWindow('network') },
+    { type: 'separator' },
+
+    {
+      label: t('tray.checkUpdates'),
+      click: async () => {
+        notifyTray(t('tray.title'), t('tray.checking'));
+        const r = await updateManager.check();
+        refreshTrayMenu();
+        if (!r.ok) { notifyTray(t('tray.title'), r.reason === 'update.blockedDev' || r.reason === 'update.blockedPortable' ? t('tray.updateBlocked') : t('tray.updateFailed')); return; }
+        if (r.status === 'available') notifyTray(t('tray.title'), t('tray.updateAvailable', { v: r.version }));
+        else if (r.status === 'ready') notifyTray(t('tray.title'), t('tray.updateReady', { v: r.version }));
+        else notifyTray(t('tray.title'), t('tray.upToDate'));
+      },
+    },
+    { type: 'separator' },
+
+    {
+      label: t('tray.service'),
+      submenu: [
+        { label: t('tray.serviceHealth'), click: () => showWindow('services') },
+        { label: t('tray.openLogs'), click: () => shell.openPath(paths.ensureDirs().logsDir) },
+        { label: t('tray.openData'), click: () => shell.openPath(paths.ensureDirs().configDir) },
+      ],
+    },
+    { label: t('tray.settings'), click: () => showWindow('settings') },
+    { type: 'separator' },
+
+    {
+      label: t('tray.startWithWindows'), type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin,
+      click: (menuItem) => {
+        if (config) {
+          const old = config.getSetting('StartWithWindows', false);
+          config.setSetting('StartWithWindows', menuItem.checked);
+          config.save();
+          applyLoginItem();
+          if (logger) logger.auditSettingsChanged('StartWithWindows', old, menuItem.checked);
+        }
+      }
+    },
+    {
+      label: t('tray.closeToTray'), type: 'checkbox', checked: config ? config.getSetting('CloseToTray', true) : true,
+      click: (menuItem) => {
+        if (config) {
+          const old = config.getSetting('CloseToTray', true);
+          config.setSetting('CloseToTray', menuItem.checked);
+          config.save();
+          if (logger) logger.auditSettingsChanged('CloseToTray', old, menuItem.checked);
+        }
+      }
+    },
+    { type: 'separator' },
+    { label: t('tray.quit'), click: () => { isQuitting = true; app.quit(); } }
+  ]);
+}
+
 function createTray() {
   // Load logo from assets for system tray
   let trayIcon;
@@ -209,51 +392,14 @@ function createTray() {
   }
 
   tray = new Tray(trayIcon);
-  tray.setToolTip('Κύριος Χρόνος - Task Scheduler');
+  tray.setToolTip('Κύριος Χρόνος');
+  // O idioma vem da config, e não do renderer: a bandeja aparece antes da
+  // janela em boa parte dos casos (autostart minimizado), e sem ler a
+  // preferência aqui o primeiro menu que a pessoa vê estaria em inglês.
+  trayI18n.setLang(config ? config.getSetting('Language', 'en') : 'en');
+  tray.setToolTip(trayI18n.t('tray.title'));
 
-  const contextMenu = Menu.buildFromTemplate([
-    { label: 'Κύριος Χρόνος', enabled: false },
-    { type: 'separator' },
-    {
-      label: 'Show Window', click: () => {
-        if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
-      }
-    },
-    { type: 'separator' },
-    {
-      label: 'Quick Actions', submenu: [
-        { label: 'Refresh Dashboard', click: () => { if (mainWindow) mainWindow.webContents.send('tray-refresh'); } },
-        { label: 'Run Due Tasks', click: () => { runDueTasksFromTray(); } }
-      ]
-    },
-    { type: 'separator' },
-    {
-      label: 'Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin,
-      click: (menuItem) => {
-        if (config) {
-          const old = config.getSetting('StartWithWindows', false);
-          config.setSetting('StartWithWindows', menuItem.checked);
-          config.save();
-          applyLoginItem();
-          logger.auditSettingsChanged('StartWithWindows', old, menuItem.checked);
-        }
-      }
-    },
-    { label: 'Minimize to Tray on Close', type: 'checkbox', checked: true,
-      click: (menuItem) => {
-        if (config) {
-          const old = config.getSetting('CloseToTray', true);
-          config.setSetting('CloseToTray', menuItem.checked);
-          config.save();
-          logger.auditSettingsChanged('CloseToTray', old, menuItem.checked);
-        }
-      }
-    },
-    { type: 'separator' },
-    { label: 'Exit', click: () => { isQuitting = true; app.quit(); } }
-  ]);
-
-  tray.setContextMenu(contextMenu);
+  tray.setContextMenu(buildTrayMenu());
 
   tray.on('double-click', () => {
     if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
@@ -985,6 +1131,13 @@ function registerIPC() {
     catch (err) { return { ok: false, error: err.message }; }
   });
   ipcMain.handle('get-app-update-state', async () => updateManager.snapshot());
+  // O idioma vem do renderer porque é lá que a preferência vive. O menu da
+  // bandeja é montado aqui e ficaria em inglês sem este aviso.
+  ipcMain.handle('set-ui-language', async (e, lang) => {
+    trayI18n.setLang(lang);
+    refreshTrayMenu();
+    return { ok: true };
+  });
   ipcMain.handle('download-app-update', async () => {
     try { return await updateManager.download(); }
     catch (err) { return { ok: false, error: err.message }; }

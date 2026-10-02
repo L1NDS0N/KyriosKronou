@@ -85,6 +85,13 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
  * Clicks the real nav button so the highlight, title and refresh all stay in
  * one place instead of being reimplemented here.
  */
+// A bandeja manda "navigate-to" para abrir uma aba específica. Sem este
+// listener o item de menu funciona, a janela abre e a pessoa cai no painel sem
+// saber onde procurou.
+window.addEventListener('navigate-to', (e) => {
+  if (e.detail) switchPage(e.detail);
+});
+
 function switchPage(page) {
   const btn = document.querySelector(`.nav-btn[data-page="${page}"]`);
   if (btn) btn.click();
@@ -2757,7 +2764,14 @@ async function initI18n() {
   i18n.init(savedLang);
   document.getElementById('cfg-language').value = savedLang;
   applyTranslations();
-  i18n.onChange(() => applyTranslations());
+  // O menu da bandeja é montado no processo main e não vê esta tela. Sem
+  // avisar o idioma, ele ficava em inglês - o único lugar da interface que não
+  // falava a língua do usuário.
+  if (window.api.setUiLanguage) window.api.setUiLanguage(savedLang);
+  i18n.onChange(() => {
+    applyTranslations();
+    if (window.api.setUiLanguage) window.api.setUiLanguage(i18n.getLang());
+  });
 }
 
 function applyTranslations() {

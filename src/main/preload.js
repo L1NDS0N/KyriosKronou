@@ -102,6 +102,7 @@ contextBridge.exposeInMainWorld('api', {
   // Atualização do app
   checkAppUpdate: () => ipcRenderer.invoke('check-app-update'),
   getAppUpdateState: () => ipcRenderer.invoke('get-app-update-state'),
+  setUiLanguage: (lang) => ipcRenderer.invoke('set-ui-language', lang),
   downloadAppUpdate: () => ipcRenderer.invoke('download-app-update'),
   installAppUpdate: () => ipcRenderer.invoke('install-app-update'),
   onAppUpdateState: (callback) => {
