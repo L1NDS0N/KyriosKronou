@@ -19,6 +19,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { execFile } = require('child_process');
 
 const MODES = ['none', 'perFile', 'archive'];
@@ -183,6 +184,11 @@ function walk(root, policy) {
   return out.sort((a, b) => a.rel.localeCompare(b.rel));
 }
 
+function escaparRegex(valor) {
+  return String(valor).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+
 class FolderCompressor {
   constructor(options = {}) {
     this.logger = options.logger || null;
@@ -254,12 +260,31 @@ class FolderCompressor {
     // O que sumiu da origem sai do container. SÃ³ o `u` nÃ£o resolveria: o
     // arquivo apagado continuaria lÃ¡ para sempre ocupando espaÃ§o que o
     // usuÃ¡rio jÃ¡ pagou para liberar. Ã‰ o `d` que faz isso, e ele existe.
+    // Uma falha aqui nao pode parar o laco: se o `d` falhar e a entrada
+    // continuar no manifest, toda execucao futura desta pasta tentaria de
+    // novo e falharia de novo - um arquivo envenenado que trava a
+    // compactacao do resto para sempre. Um catch por arquivo, seguindo em
+    // frente, e o resultado volta como parcial.
+    const falhas = [];
     for (const rel of Object.keys(manifest.entries)) {
       if (onDisk.has(rel)) continue;
       if (!fs.existsSync(archive)) break;
-      await this.sevenRun(['d', archive, rel]);
+      try {
+        await this.sevenRun(['d', archive, rel]);
+      } catch (err) {
+        // Ou o 7z recusou, ou a entrada ja nao esta no container - que e
+        // exatamente o caso de uma queda no meio. Listar o container e o que
+        // distingue os dois, e um `l` e barato ao lado de reescrever tudo.
+        const dentro = await this.archiveContains(archive, rel);
+        if (dentro) {
+          falhas.push({ rel, detalhe: err.message });
+          continue;
+        }
+        this.log('WARN', `Compactacao: ${rel} nao estava mais no container; manifesto ajustado.`);
+      }
       delete manifest.entries[rel];
       removed++;
+      writeManifest(archive, manifest);
     }
 
     for (const file of files) {
@@ -277,11 +302,46 @@ class FolderCompressor {
       if (!fs.existsSync(archive)) return failed('container nÃ£o foi criado', file.rel);
       manifest.entries[file.rel] = { mtime: file.mtime, size: file.size };
       fs.unlinkSync(file.full);
+      // O manifesto Ã© gravado a cada arquivo, nÃ£o sÃ³ no fim. Se o app morrer
+      // no meio, o manifesto fica no mÃ¡ximo um arquivo atras - e um arquivo
+      // atras sÃ³ causa uma recolagem inofensiva. Gravando sÃ³ no fim, um
+      // crash perderia tudo o que ja tinha sido arquivado.
+      writeManifest(archive, manifest);
     }
 
     writeManifest(archive, manifest);
+    const resumo = { mode: 'archive', archive, added, updated, removed };
+    if (falhas.length) {
+      // O que sobrou e o que deu problema de verdade; o resto foi compactado.
+      return Object.assign({ ok: false, reason: 'sync.compression.partial', falhas }, resumo);
+    }
     this.log('INFO', `SYNC_COMPRESSION archive=${archive} added=${added} updated=${updated} removed=${removed}`);
-    return { ok: true, mode: 'archive', archive, added, updated, removed };
+    return Object.assign({ ok: true }, resumo);
+  }
+
+  /**
+   * O rel ainda esta dentro do container?
+   *
+   * Distingue "o 7z falhou" de "a entrada ja tinha saido" - que e o caso de
+   * uma queda entre o `d` e a gravacao do manifesto. Sem esta distincao, uma
+   * entrada orfa no manifesto faz toda execucao futura falhar, e a pasta nunca
+   * mais compacta.
+   */
+  async archiveContains(archive, rel) {
+    try {
+      const { stdout } = await this.sevenRun(['l', '-ba', archive]);
+      // O 7z lista com colunas de data, hora, atributos e tamanho antes do
+      // nome. Comparar a linha inteira com o nome nunca casaria; o que
+      // identifica a entrada é o último campo, e ele pode ter barra.
+      const alvo = String(rel).split('\\').join('/');
+      return String(stdout).split(/\r?\n/).some((linha) => {
+        const normalizada = linha.trim().replace(/\\/g, '/');
+        return normalizada === alvo || new RegExp('\\s' + escaparRegex(alvo) + '$').test(normalizada);
+      });
+    } catch (e) {
+      // Sem conseguir listar, não se pode afirmar que está dentro.
+      return false;
+    }
   }
 
   async runPerFile(folderPath, files, policy) {
