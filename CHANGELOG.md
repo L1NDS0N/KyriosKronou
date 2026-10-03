@@ -2,6 +2,14 @@
 
 All notable changes to Kyrios Chronos.
 
+## 1.0.16 - 2026-10-03
+
+### Fixed
+
+- fix(compression): a crash mid-compaction no longer poisons the folder forever (`ae6f75c`) — l1nds0n
+
+**Changes since v1.0.15**
+
 ## 1.0.15 - 2026-10-03
 
 ### Added

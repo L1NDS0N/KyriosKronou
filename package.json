@@ -1,6 +1,6 @@
 {
   "name": "kyrios-chronos",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "description": "Kyrios Chronos - Modern Task Scheduler with Cron Support and Windows Service Manager",
   "main": "src/main/main.js",
   "scripts": {
