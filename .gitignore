@@ -10,3 +10,12 @@ Thumbs.db
 # Grafo do codigo, regenerado sob demanda
 graphify-out/
 release-notes.md
+
+# Arvore de arquivos que os testes manuais geram (uns 33 MB).
+# Sai sempre igual a partir de docs/testes-manuais/New-RetentionTestTree.ps1,
+# entao versionar so ocuparia espaco no repositorio.
+docs/testes-manuais/retention-testes/
+docs/testes-manuais/_saida/
+docs/testes-manuais/backup-teste/
+docs/testes-manuais/sync-teste/
+docs/testes-manuais/compactacao-teste/

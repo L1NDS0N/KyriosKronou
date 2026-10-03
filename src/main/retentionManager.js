@@ -50,6 +50,10 @@ function normalizeRetention(value) {
   const normalized = {
     Enabled: value.Enabled === true,
     DateSource: value.DateSource === 'names' ? 'names' : 'metadata',
+    // O padrão de data do usuário. Só importa quando a data vem do nome; em
+    // modo metadata nenhum nome é lido, e um padrão escrito errado não pode
+    // travar a varredura de um destino inteiro.
+    DatePatternRegex: typeof value.DatePatternRegex === 'string' ? value.DatePatternRegex.trim() : '',
     FileExtensions: retention.normalizeExtensions(value),
     ByAge: value.ByAge === true,
     KeepDays: integerField(value, 'KeepDays', 30, 1, 'KeepDays'),

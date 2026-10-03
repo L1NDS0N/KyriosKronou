@@ -21,10 +21,18 @@ function temp() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'kyrios-comp-'));
 }
 
-function arquivo(dir, rel, conteudo) {
+// O mtime é fixado a cada escrita, com um segundo de diferença entre elas.
+// A regra de atualização do container decide por mtime, e deixar isso a cargo
+// do relógio tornava o teste instável: duas escritas seguidas podem cair no
+// mesmo tick e o arquivo pareceria não ter mudado - foi assim que este teste
+// falhou uma vez só, numa máquina em que a suíte rodou mais rápido.
+let mtimeSeq = 1700000000000;
+function arquivo(dir, rel, conteudo, mtimeMs) {
   const full = path.join(dir, rel);
   fs.mkdirSync(path.dirname(full), { recursive: true });
   fs.writeFileSync(full, conteudo);
+  const quando = mtimeMs === undefined ? (mtimeSeq += 1000) : mtimeMs;
+  fs.utimesSync(full, new Date(quando), new Date(quando));
   return full;
 }
 

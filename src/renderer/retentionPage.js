@@ -18,6 +18,14 @@ class RetentionPage {
     this.folder = '';
     this.useMetadata = false;   // false = dates from file names
     this.advanced = false;      // default mode vs full rule set
+    // Padrão de data escrito pelo usuário, usado só quando a data vem do
+    // nome. Vazio = usar os padrões embutidos.
+    this.datePattern = '';
+    this.datePatternError = '';
+    this.datePatternCount = 0;
+    // Só a contagem da última validação é um "ok": sem ela, o campo ficaria
+    // sem nenhuma confirmação de que o padrão é válido.
+    this.datePatternOk = false;
     this.analysis = null;
     this.preview = null;        // what WOULD be deleted right now
     this.lastRun = null;        // result of an executed run
@@ -70,6 +78,24 @@ class RetentionPage {
                 <span>${retEsc(i18n.t('retention.dateMetadata'))}</span>
               </label>
             </div>
+
+            <!-- Só faz sentido quando a data vem do nome: em modo metadado
+                 nenhum nome é lido. O campo explica isso em vez de ficar
+                 aparentemente sem efeito. -->
+            ${this.useMetadata ? '' : `
+            <div class="ret-pattern">
+              <label class="ret-field">
+                <span>${retEsc(i18n.t('retention.customPattern'))}</span>
+                <input type="text" id="ret-date-pattern" spellcheck="false"
+                  placeholder="${retEsc(i18n.t('retention.customPatternPlaceholder'))}"
+                  value="${retEsc(this.datePattern || '')}"
+                  oninput="retentionPage.setDatePattern(this.value)">
+              </label>
+              <p class="ret-hint">${retEsc(i18n.t('retention.customPatternHint'))}</p>
+              <p class="ret-hint ret-hint-dim">${retEsc(i18n.t('retention.customPatternBuiltins'))}</p>
+              ${this.datePatternError ? `<p class="ret-pattern-error"><i data-lucide="shield-alert"></i> ${retEsc(this.datePatternError)}</p>` : ''}
+              ${this.datePatternOk ? `<p class="ret-pattern-ok"><i data-lucide="check"></i> ${retEsc(i18n.t('retention.customPatternOk').replace('{n}', String(this.datePatternCount)))}</p>` : ''}
+            </div>`}
 
             <div id="ret-analysis" style="margin-top:14px">${this._renderAnalysis()}</div>
           </div>
@@ -156,6 +182,50 @@ class RetentionPage {
     if (this.folder) this.analyze();
   }
 
+  /**
+   * O padrão do usuário só é consultado quando a data vem do nome, e é
+   * validado no main antes de qualquer leitura de arquivo: escrever um regex
+   * que trava o agendador seria o pior resultado possível numa tela de backup.
+   * A contagem abaixo é a prévia de quantos arquivos ele passa a ler.
+   */
+  setDatePattern(valor) {
+    this.datePattern = valor || '';
+    this.datePatternError = '';
+    this.datePatternCount = 0;
+    this.datePatternOk = false;
+    clearTimeout(this.patternTimer);
+    if (!this.datePattern) {
+      this.render();
+      if (this.folder) this.analyze();
+      return;
+    }
+    // Validação e contagem só quando a análise já existe, para não varrer a
+    // pasta a cada tecla digitada.
+    if (!this.analysis || this.analysis.ok === false) { this.render(); return; }
+    this.patternTimer = setTimeout(async () => {
+      try {
+        const r = await window.api.analyzeSyncFolder(this.folder, {
+          useNames: true,
+          useMetadata: false,
+          extensions: [...this._getCfg().FileExtensions],
+          datePattern: this.datePattern,
+        });
+        if (r && r.ok === false) {
+          this.datePatternError = r.error || i18n.t('retention.customPatternInvalid');
+          this.datePatternCount = 0;
+          this.datePatternOk = false;
+        } else {
+          this.datePatternError = '';
+          this.datePatternCount = (r && r.withDates) || 0;
+          this.datePatternOk = this.datePatternCount > 0;
+        }
+      } catch (e) {
+        this.datePatternError = e.message;
+      }
+      this.render();
+    }, 600);
+  }
+
   async analyze() {
     if (!this.folder || this.busy) return;
     this.busy = true;
@@ -166,6 +236,7 @@ class RetentionPage {
         useNames: !this.useMetadata,
         useMetadata: this.useMetadata,
         extensions: [...this._getCfg().FileExtensions],
+        datePattern: this.datePattern,
       });
     } catch (e) {
       this.analysis = { ok: false, error: e.message };
@@ -303,8 +374,11 @@ class RetentionPage {
       this.cfg = { Enabled: true, FileExtensions: ['.7z', '.zip'], ByAge: false, KeepDays: 90, ByCount: true, KeepCount: 30, BySize: false, FreeGb: 0, ByWeekly: false, WeeklyKeepWeeks: 8, ByBiweekly: false, BiweeklyKeepPeriods: 12, ByMonthly: true, MonthlyKeepMonths: 12, MinKeep: 5 };
     }
     // The date source toggle is part of the policy: preview and apply must
-    // date snapshots exactly as the analysis did.
+    // date snapshots exactly as the analysis did. The custom pattern travels
+    // with it for the same reason - preview and apply have to read the same
+    // dates, or the preview describes a tree the apply never sees.
     this.cfg.DateSource = this.useMetadata ? 'metadata' : 'names';
+    this.cfg.DatePatternRegex = this.datePattern;
     return this.cfg;
   }
 
@@ -740,6 +814,13 @@ class RetentionPage {
     this.advanced = true;
     this.folder = p.FolderPath || '';
     this.useMetadata = p.Retention && p.Retention.DateSource === 'metadata';
+    // O padrão de data faz parte da política salva: abrir um perfil tem que
+    // trazer o campo preenchido, senão a tela mostra um campo vazio enquanto a
+    // política gravada tem outro - e quem edita acabaria sobrescrevendo.
+    this.datePattern = (p.Retention && p.Retention.DatePatternRegex) || '';
+    this.datePatternError = '';
+    this.datePatternOk = false;
+    this.datePatternCount = 0;
     this.cfg = { ...this._getCfg(), ...(p.Retention || {}) };
     this._resetResults();
     await this.analyze();

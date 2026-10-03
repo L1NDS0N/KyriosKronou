@@ -916,6 +916,7 @@ class ApiServer {
             useNames: body.useNames,
             useMetadata: body.useMetadata,
             extensions: body.extensions || body.FileExtensions,
+            datePattern: body.datePattern || body.DatePatternRegex || '',
           }),
         });
       } catch (e) {

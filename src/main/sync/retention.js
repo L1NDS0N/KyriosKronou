@@ -27,15 +27,103 @@ const path = require('path');
 // Date shapes a filename may carry, tried in order of specificity.
 // All of them must be plausible dates - 20261345 or 99-99-9999 are just
 // long numbers, and treating them as dates would compute nonsense ages.
+//
+// The order is longest-first within a family, because the shared boundary
+// guard `(?:[^\d]|$)` is what stops "20260922" from matching inside
+// "202511182152": after eight digits there is still a digit, so the short
+// pattern refuses and only the date+time one can win.
+//
+// AAAA-MM-DD-HH-mm, AAAA_MM_DD_HH_mm, DD-MM-AAAA-HH-mm and DD_MM_AAAA_HH_mm
+// cover backups that carry the hour of the run. The slash formats are ambiguous
+// on purpose and resolved DD/MM first, matching the hyphen ones: 03/04/2026
+// reads as 3 April. A server that writes American dates needs the custom
+// pattern below - guessing wrong here would delete the wrong backups.
 const DATE_PATTERNS = [
-  { re: /(?:^|[^\d])(\d{4})-(\d{2})-(\d{2})(?:[^\d]|$)/, order: ['y', 'm', 'd'] },        // 2026-09-22
-  { re: /(?:^|[^\d])(\d{4})(\d{2})(\d{2})(?:[^\d]|$)/, order: ['y', 'm', 'd'] },          // 20260922
-  { re: /(?:^|[^\d])(\d{2})-(\d{2})-(\d{4})(?:[^\d]|$)/, order: ['d', 'm', 'y'] },        // 22-09-2026
-  { re: /(?:^|[^\d])(\d{2})\.(\d{2})\.(\d{4})(?:[^\d]|$)/, order: ['d', 'm', 'y'] },      // 22.09.2026
-  { re: /(?:^|[^\d])(\d{2})_(\d{2})_(\d{4})(?:[^\d]|$)/, order: ['d', 'm', 'y'] },        // 22_09_2026
+  // Date and time, no separator: the shape real backup tools emit.
+  { re: /(?:^|[^\d])(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:[^\d]|$)/, order: ['y', 'm', 'd'] }, // 20251118215230
+  { re: /(?:^|[^\d])(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(?:[^\d]|$)/, order: ['y', 'm', 'd'] },        // 202511182152
+  { re: /(?:^|[^\d])(\d{4})(\d{2})(\d{2})(?:[^\d]|$)/, order: ['y', 'm', 'd'] },                      // 20260922
+
+  // Date and time, separated.
+  // Date and time, separated. The separator class is consistent across the
+  // whole date so 2026_09_22_21_52 and 2026.09.22-21-52 are both read; a
+  // hardcoded hyphen here accepted only one spelling of a real backup name.
+  { re: /(?:^|[^\d])(\d{4})[-_. ](\d{2})[-_. ](\d{2})[-_. :]+(\d{2})[-_.:](\d{2})(?:[^\d]|$)/, order: ['y', 'm', 'd'] }, // 2026-09-22-21-52
+  { re: /(?:^|[^\d])(\d{2})[-_.](\d{2})[-_.](\d{4})[-_. :]+(\d{2})[-_.:](\d{2})(?:[^\d]|$)/, order: ['d', 'm', 'y'] },           // 22-09-2026-21-52
+
+  // Date only.
+  { re: /(?:^|[^\d])(\d{4})-(\d{2})-(\d{2})(?:[^\d]|$)/, order: ['y', 'm', 'd'] },                    // 2026-09-22
+  { re: /(?:^|[^\d])(\d{2})-(\d{2})-(\d{4})(?:[^\d]|$)/, order: ['d', 'm', 'y'] },                      // 22-09-2026
+  { re: /(?:^|[^\d])(\d{2})\.(\d{2})\.(\d{4})(?:[^\d]|$)/, order: ['d', 'm', 'y'] },                    // 22.09.2026
+  { re: /(?:^|[^\d])(\d{2})_(\d{2})_(\d{4})(?:[^\d]|$)/, order: ['d', 'm', 'y'] },                      // 22_09_2026
+  { re: /(?:^|[^\d])(\d{2})\/(\d{2})\/(\d{4})(?:[^\d]|$)/, order: ['d', 'm', 'y'] },                    // 22/09/2026
+  { re: /(?:^|[^\d])(\d{2})\/(\d{2})\/(\d{4})[-_ ](\d{2})\/(\d{2})(?:[^\d]|$)/, order: ['d', 'm', 'y'] }, // 22/09/2026/21
 ];
 
 const DAY_MS = 86400000;
+
+// A pattern the user wrote. Capturing year, month and day by name is the
+// readable way to write one; positional groups still work for anything else.
+//
+// This is a regex that runs over every file name in a folder tree and decides
+// what gets deleted, so it is the one piece of user input in this file that can
+// be made to hang the scheduler forever - `(.+)+` style patterns blow up
+// exponentially on a long filename. The rejection below is deliberately
+// conservative: it turns away a pattern that might be slow rather than letting
+// the service freeze with a retention job mid-flight. Whoever wrote the regex
+// gets the reason back and can simplify the expression.
+const REPETICAO_OURO = '(\(.+\)[*+]){2,}';
+const REPETICAO_ESTRELAS = '\\([^()]*[*+]\\){4,}';
+const GRUPO_ANINHADO = '\\((?:[^()\\\\]|\\\\.)*[+*](?:[^()\\\\]|\\\\.)*\\)[+*]';
+// Lookaround e retrovisão: o amplificador clássico de travamento, porque
+// ((\w+)\1+)+ é linear no papel e explosivo na prática. A guarda anterior era
+// \(\??\) e não pegava "(?=" - o "?" opcional era seguido de ")", e o próximo
+// caractere é "=".
+//
+// A forma é "(?" seguido de "=", "!", ou "<" seguido de "=" ou "!": isso é
+// exatamente (?= (?! (?<= (?<=. Um grupo nomeado (?<year>...) NÃO é barrado,
+// porque depois do "<" vem uma letra, e ele é a forma legível de escrever um
+// padrão - que é justamente o que a tela oferece.
+const LOOKAROUND = /\(\?(?:[=!]|<[=!])/;
+const LIMITES = LOOKAROUND;
+
+function validarPadraoCustom(texto) {
+  // Ausente é o mesmo que vazio: um perfil salvo antes de existir o campo não
+  // pode quebrar, e "não usar padrão próprio" não é erro - é o padrão.
+  if (texto === undefined || texto === null) return { ok: true, vazio: true };
+  if (typeof texto !== 'string') return { ok: false, reason: 'notAString' };
+  const valor = texto.trim();
+  if (!valor) return { ok: true, vazio: true };
+  if (valor.length > 200) return { ok: false, reason: 'tooLong' };
+
+  for (const [nome, rx] of [['nestedRepeat', REPETICAO_OURO], ['starRepeat', REPETICAO_ESTRELAS],
+    ['nestedGroup', GRUPO_ANINHADO], ['lookaround', LIMITES]]) {
+    if (new RegExp(rx).test(valor)) return { ok: false, reason: nome };
+  }
+
+  let re;
+  try { re = new RegExp(valor); } catch (e) { return { ok: false, reason: 'invalid' }; }
+  // Sem grupo de captura nenhum não há como extrair ano, mês e dia, e aceitar a
+  //regex só faria a pessoa acreditar que ela funciona.
+  if (re.exec('20260922') === null && !/(year|m|d|y)/i.test(valor)) {
+    return { ok: false, reason: 'noCapture' };
+  }
+  if (!/(\d|\d{4})/.test(valor)) return { ok: false, reason: 'noDigits' };
+  return { ok: true, re };
+}
+
+// Extrai ano, mês e dia de um regex: primeiro pelos grupos nomeados, senão
+// pelas três primeiras posições.
+function extrairGrupos(m) {
+  if (m.groups) {
+    const y = m.groups.year || m.groups.y || m.groups.ano;
+    const mm = m.groups.month || m.groups.m || m.groups.mes;
+    const d = m.groups.day || m.groups.d || m.groups.dia;
+    if (y && mm && d) return { y, m: mm, d };
+  }
+  return { y: m[1], m: m[2], d: m[3] };
+}
+
 
 // Level-0 rule of formats: retention only ever manages archive extensions
 // unless the user narrows them further - or empties the list, which means
@@ -103,22 +191,49 @@ function filterByExtension(files, extensions) {
   return files.filter(f => wanted.includes(extensionOf(f.rel)));
 }
 
-/** Parse the first plausible date in a filename; null when there is none. */
-function parseDateFromName(name) {
+// Uma data só vale se o calendário concordar. Isto vale para o regex do
+// usuário tanto quanto para os padrões embutidos: um grupo que não vira data
+// real é descartado, e o parseador segue tentando o próximo.
+function dataPlausivel(y, month, d) {
+  if (!Number.isFinite(y) || !Number.isFinite(month) || !Number.isFinite(d)) return null;
+  if (month < 1 || month > 12 || d < 1 || d > 31) return null;
+  const date = new Date(Date.UTC(y, month - 1, d));
+  // Round-trips only when the calendar agrees (rejects 30-02-2026).
+  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== d) return null;
+  // Anything this old predates computing; anything in the future is a
+  // different convention (e.g. 20260922 as a version number).
+  if (y < 1970 || date.getTime() > Date.now() + DAY_MS) return null;
+  return date;
+}
+
+/**
+ * Parse the first plausible date in a filename; null when there is none.
+ *
+ * `customRegex` is tried before the built-in patterns, so a naming convention
+ * that none of them covers becomes readable instead of silently falling back to
+ * the file's mtime - which is the failure that made this matter, because a
+ * retention rule then deletes by modification date and nobody can tell from
+ * the preview that the dates it read were not the ones in the names.
+ */
+function parseDateFromName(name, customRegex) {
+  if (customRegex) {
+    const validacao = validarPadraoCustom(customRegex);
+    if (validacao.ok && !validacao.vazio && validacao.re) {
+      const m = name.match(validacao.re);
+      if (m) {
+        const g = extrairGrupos(m);
+        const date = dataPlausivel(parseInt(g.y, 10), parseInt(g.m, 10), parseInt(g.d, 10));
+        if (date) return date;
+      }
+    }
+  }
   for (const p of DATE_PATTERNS) {
     const m = name.match(p.re);
     if (!m) continue;
     const parts = {};
     p.order.forEach((key, i) => { parts[key] = parseInt(m[i + 1], 10); });
-    const { y, m: month, d } = parts;
-    if (month < 1 || month > 12 || d < 1 || d > 31) continue;
-    const date = new Date(Date.UTC(y, month - 1, d));
-    // Round-trips only when the calendar agrees (rejects 30-02-2026).
-    if (date.getUTCFullYear() !== y || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== d) continue;
-    // Anything this old predates computing; anything in the future is a
-    // different convention (e.g. 20260922 as a version number).
-    if (y < 1970 || date.getTime() > Date.now() + DAY_MS) continue;
-    return date;
+    const date = dataPlausivel(parts.y, parts.m, parts.d);
+    if (date) return date;
   }
   return null;
 }
@@ -172,12 +287,12 @@ function scanDest(dir) {
  * @returns {Array} [{ rel, files }] - rel '' is the destination root, listed
  *          first, then the sub-archives in alphabetical order.
  */
-function groupFiles(files) {
+function groupFiles(files, datePattern) {
   const rootFiles = [];
   const candidates = new Map();
   for (const f of files) {
     const parts = f.rel.split('/');
-    if (parts.length < 2 || parseDateFromName(parts[0]) || !_hasInnerDate(f.rel)) {
+    if (parts.length < 2 || parseDateFromName(parts[0], datePattern) || !_hasInnerDate(f.rel, datePattern)) {
       rootFiles.push(f);
       continue;
     }
@@ -200,10 +315,10 @@ function groupFiles(files) {
 }
 
 /** True when a path component BELOW the top-level folder carries a date. */
-function _hasInnerDate(rel) {
+function _hasInnerDate(rel, datePattern) {
   const parts = rel.split('/');
   for (let i = 1; i < parts.length; i++) {
-    if (parseDateFromName(parts[i])) return true;
+    if (parseDateFromName(parts[i], datePattern)) return true;
   }
   return false;
 }
@@ -217,7 +332,7 @@ function _hasInnerDate(rel) {
  *            filesTruncated, suggested }
  */
 function _describe(files, opts, sampleLimit) {
-  const { useNames, useMetadata } = opts;
+  const { useNames, useMetadata, datePattern } = opts;
   if (!files.length) {
     return {
       totalFiles: 0, totalBytes: 0, withDates: 0, fromMetadata: 0, dateIsh: 0,
@@ -245,7 +360,7 @@ function _describe(files, opts, sampleLimit) {
     if (useNames) {
       const parts = f.rel.split('/');
       for (let i = 0; i < parts.length; i++) {
-        const d = parseDateFromName(parts[i]);
+        const d = parseDateFromName(parts[i], datePattern);
         if (!d) continue;
         date = d;
         inFolder = i < parts.length - 1;
@@ -333,11 +448,32 @@ function analyze(dir, options = {}) {
   const opts = {
     useNames: options.useNames !== false,
     useMetadata: options.useMetadata === true,
+    // O mesmo padrão que a execução usaria. Se a prévia lesse as datas de um
+    // jeito e a execução de outro, a prévia passaria a mentir - que é o que
+    // torna perigoso aplicar uma retenção sobre backup real.
+    datePattern: options.datePattern || '',
   };
   // The format filter, when the caller knows it, is applied before anything is
   // measured - the analysis must not describe files retention would never touch.
   const exts = options.extensions === undefined || options.extensions === null
     ? null : normalizeExtensions(options.extensions);
+
+  // A análise valida o padrão do usuário com a mesma regra que a compilação.
+  // Sem isto, um padrão inválido era ignorado em silêncio: a prévia mostrava
+  // zero arquivos com data, todo mundo caía no mtime, e era exatamente a
+  // situação perigosa que o campo existe para evitar - o usuário achava que
+  // estava lendo o nome e a exclusão decidia pela data de modificação.
+  if (options.datePattern) {
+    const padrao = validarPadraoCustom(options.datePattern);
+    if (!padrao.ok && !padrao.vazio) {
+      return {
+        ok: false,
+        error: 'Padrão de data inválido: ' + padraoReason(padrao.reason),
+        datePatternError: padrao.reason,
+      };
+    }
+  }
+
   const scanned = scanner(dir);
   const files = exts ? filterByExtension(scanned, exts) : scanned;
 
@@ -355,7 +491,7 @@ function analyze(dir, options = {}) {
   // A bounded sample prevents a folder with tens of thousands of files from
   // bloating every analyzer response.
   const total = _describe(files, opts, 500);
-  const groups = groupFiles(files);
+  const groups = groupFiles(files, opts.datePattern);
   const folders = groups.map(g => {
     const d = _describe(g.files, opts, FOLDER_EVIDENCE_LIMIT);
     return {
@@ -511,7 +647,17 @@ function compile(cfg) {
   const dateSource = c.DateSource === 'names' ? 'names' : 'metadata';
   // Format filter. Absent key -> the level-0 default; empty list -> every format.
   const extensions = normalizeExtensions(c);
-  if (!c.Enabled) return { ok: true, rules: [], minKeep: 0, dateSource, extensions };
+  // The user's own date pattern, validated once here so every file below pays
+  // nothing for a bad expression. It only matters in names mode; in metadata
+  // mode the file's own clock decides and no name is ever read.
+  const padrao = validarPadraoCustom(c.DatePatternRegex);
+  const datePattern = padrao.ok && !padrao.vazio ? c.DatePatternRegex : '';
+  const datePatternError = padrao.ok || padrao.vazio ? null : padrao.reason;
+  if (dateSource === 'names' && datePatternError) {
+    return { ok: false, rules: [], minKeep: 0, dateSource, extensions, datePatternError,
+      error: 'Padrão de data inválido: ' + padraoReason(datePatternError) };
+  }
+  if (!c.Enabled) return { ok: true, rules: [], minKeep: 0, dateSource, extensions, datePattern };
 
   const rules = [];
   const keepDays = parseInt(c.KeepDays, 10);
@@ -537,12 +683,12 @@ function compile(cfg) {
   }
 
   if (!rules.length) {
-    return { ok: false, rules: [], minKeep: 0, dateSource, extensions, error: 'Política de retenção ativa sem nenhum critério (idade, quantidade, espaço ou cópias periódicas)' };
+    return { ok: false, rules: [], minKeep: 0, dateSource, extensions, datePattern, error: 'Política de retenção ativa sem nenhum critério (idade, quantidade, espaço ou cópias periódicas)' };
   }
 
   // Never below MinKeep snapshots, whatever the rules say.
   const minKeep = Math.max(0, parseInt(c.MinKeep, 10) || 0);
-  return { ok: true, rules, minKeep, dateSource, extensions };
+  return { ok: true, rules, minKeep, dateSource, extensions, datePattern };
 }
 
 /**
@@ -570,7 +716,7 @@ function _calendarDay(ms) {
  * itself - and date each one. Every rule decides on whole snapshots, so a
  * dated folder never survives half-deleted.
  */
-function _snapshots(group, dateSource) {
+function _snapshots(group, dateSource, datePattern) {
   const units = new Map();
   for (const f of group.files) {
     const parts = f.rel.split('/');
@@ -593,7 +739,7 @@ function _snapshots(group, dateSource) {
     // Names mode trusts the date in the snapshot's name and falls back to the
     // mtime when the name carries none - the same clock the age rule always
     // used, so undated files are not immune to retention.
-    const nameDate = dateSource === 'names' ? parseDateFromName(unit.label) : null;
+    const nameDate = dateSource === 'names' ? parseDateFromName(unit.label, datePattern) : null;
     unit.time = nameDate ? nameDate.getTime() : unit.newestMtime;
     unit.dateFrom = nameDate ? 'name' : 'metadata';
     unit.day = unit.time ? _calendarDay(unit.time) : null;
@@ -633,7 +779,7 @@ function planDeletion(files, compiled, hooks = {}) {
   if (!compiled || !compiled.ok) {
     return { ok: false, delete: [], kept: [], folders: [], error: (compiled && compiled.error) || 'Política de retenção inválida' };
   }
-  const meta = { rules: compiled.rules, minKeep: compiled.minKeep, dateSource: compiled.dateSource || 'metadata' };
+  const meta = { rules: compiled.rules, minKeep: compiled.minKeep, dateSource: compiled.dateSource || 'metadata', datePattern: compiled.datePattern || '' };
   // The format filter comes first: a .sql sitting next to the archives is not
   // retention's business when the policy only manages .7z/.zip.
   const scoped = Array.isArray(compiled.extensions) ? filterByExtension(Array.isArray(files) ? files : [], compiled.extensions)
@@ -642,8 +788,8 @@ function planDeletion(files, compiled, hooks = {}) {
     return { ok: true, delete: [], kept: [], folders: [], totalSnapshots: 0, extensions: compiled.extensions || [], ...meta };
   }
 
-  const groups = groupFiles(scoped);
-  for (const g of groups) g.units = _snapshots(g, meta.dateSource);
+  const groups = groupFiles(scoped, meta.datePattern);
+  for (const g of groups) g.units = _snapshots(g, meta.dateSource, meta.datePattern);
   const units = groups.flatMap(g => g.units);
   const protectedBy = new Map(); // unit -> { reason, detail }
   const doomedBy = new Map();    // unit -> { reason, detail }
@@ -753,12 +899,33 @@ function planDeletion(files, compiled, hooks = {}) {
   };
 }
 
+// Motivo legível de cada recusa, para a tela mostrar o que aconteceu em vez
+// de dizer "padrão inválido".
+const PADRAO_MOTIVOS = {
+  notAString: 'o padrão precisa ser texto',
+  tooLong: 'o padrão é longo demais (máx. 200 caracteres)',
+  nestedRepeat: 'o padrão repete um grupo repetido e pode travar o agendador',
+  starRepeat: 'o padrão encadeia grupos com * ou + demais',
+  nestedGroup: 'o padrão tem grupo aninhado com * ou +',
+  lookaround: 'o padrão usa (?=) ou (?<=), o amplificador mais comum de travamento',
+  invalid: 'o padrão não compila como expressão regular',
+  noCapture: 'o padrão precisa de três grupos: ano, mês e dia',
+  noDigits: 'o padrão precisa casar números',
+};
+function padraoReason(reason) {
+  return PADRAO_MOTIVOS[reason] || reason;
+}
+
 module.exports = {
   analyze,
   compile,
   planDeletion,
   scanDest,
   parseDateFromName,
+  validateDatePattern: validarPadraoCustom,
+  padraoReason,
+  datePatternReasons: PADRAO_MOTIVOS,
+  DATE_PATTERNS,
   groupFiles,
   normalizeExtensions,
   filterByExtension,

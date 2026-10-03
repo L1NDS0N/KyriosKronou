@@ -421,10 +421,22 @@ function createTray() {
   });
 
   if (config) {
-    const closeToTray = config.getSetting('CloseToTray', true);
-    contextMenu.items[7].checked = closeToTray;
-    const startWithWin = config.getSetting('StartWithWindows', false);
-    contextMenu.items[5].checked = startWithWin;
+    // Os checkboxes leem a config dentro de buildTrayMenu(). Eles ficavam
+    // neste bloco ajustados por índice - contextMenu.items[7] - e a variável
+    // deixou de existir quando o menu virou função: o app nem subia.
+    // Ajustar por índice também quebrava sozinho se um item fosse inserido.
+    logConfiguracaoDaBandeja();
+  }
+}
+
+// Confere o que o usuário configurou sobre a bandeja. Só registra: o menu já
+// foi montado com esses valores, e a validação fica visível no log.
+function logConfiguracaoDaBandeja() {
+  if (!config) return;
+  const closeToTray = config.getSetting('CloseToTray', true);
+  const startWithWin = config.getSetting('StartWithWindows', false);
+  if (logger) {
+    logger.info(`Bandeja: fechar vai para a bandeja=${closeToTray ? ' sim' : ' nao'}, iniciar com o Windows${startWithWin ? ' sim' : ' nao'}`);
   }
 }
 

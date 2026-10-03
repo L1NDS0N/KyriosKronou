@@ -1762,6 +1762,10 @@
           useNames: (r.DateSource || 'metadata') === 'names',
           useMetadata: (r.DateSource || 'metadata') !== 'names',
           extensions: formatosDe(r),
+          // O padrão do usuário viaja com a análise: a prévia do painel tem de
+          // ler as datas exatamente como a execução vai ler, ou ela descreve
+          // uma árvore que a aplicação nunca vai ver.
+          datePattern: r.DatePatternRegex || '',
         }),
       });
       const alvo = $('ret-analysis');

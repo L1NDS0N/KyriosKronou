@@ -836,6 +836,16 @@ kbd {
  .retention-simulator-modal { max-height: 55vh; overflow-y: auto; }
 
 .ret-toggles { display: flex; gap: 18px; margin-top: 12px; flex-wrap: wrap; }
+.ret-pattern { margin-top: 14px; }
+.ret-field { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: var(--text3); }
+.ret-field input[type="text"] { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--bg3); color: var(--text); font-family: var(--font-mono); font-size: 12px; }
+.ret-hint-dim { color: var(--text3); opacity: .8; }
+.ret-pattern .ret-hint { margin: 6px 0 0; font-size: 10.5px; line-height: 1.55; color: var(--text3); }
+.ret-pattern-error { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; font-size: 11px; color: var(--red); }
+.ret-pattern-error svg { width: 13px; height: 13px; flex: 0 0 auto; }
+.ret-pattern-ok { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; font-size: 11px; color: var(--green); }
+.ret-pattern-ok svg { width: 13px; height: 13px; flex: 0 0 auto; }
+
 .ret-analysis { background: rgba(255,255,255,.03); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
 .ret-mode-row { margin-bottom: 12px; }
 .ret-default-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }

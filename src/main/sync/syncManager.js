@@ -470,6 +470,10 @@ class SyncManager {
       useNames: options.useNames !== false,
       useMetadata: options.useMetadata === true,
       extensions: options.extensions,
+      // A prévia precisa ler as datas com o MESMO padrão que a execução vai
+      // usar. Sem isto a prévia descreve uma árvore e a execução apaga outra,
+      // que é a forma mais perigosa de enganar quem opera backup real.
+      datePattern: options.datePattern || '',
     });
   }
 
