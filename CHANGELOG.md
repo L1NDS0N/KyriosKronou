@@ -2,6 +2,14 @@
 
 All notable changes to Kyrios Chronos.
 
+## 1.0.15 - 2026-10-03
+
+### Added
+
+- feat(retention): read dates from names the app could not read, plus a custom pattern (`b69239e`) — l1nds0n
+
+**Changes since v1.0.14**
+
 ## 1.0.14 - 2026-10-02
 
 ### Changed
