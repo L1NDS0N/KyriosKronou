@@ -2,6 +2,14 @@
 
 All notable changes to Kyrios Chronos.
 
+## 1.0.17 - 2026-10-05
+
+### Fixed
+
+- fix(syncthing): the installer thought chocolatey was missing on a machine that had it (`2fb1179`) — l1nds0n
+
+**Changes since v1.0.16**
+
 ## 1.0.16 - 2026-10-03
 
 ### Fixed
