@@ -320,20 +320,36 @@ describe('Release workflow', () => {
   });
 
   it('generates a categorized changelog from the real git history', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kyrios-changelog-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kyrios-cl-'));
     const output = path.join(dir, 'CHANGELOG.md');
     const notes = path.join(dir, 'notes.md');
-    // --output e --notes-output são obrigatórios aqui: sem eles o script usa
-    // CHANGELOG.md na raiz do repositório e o teste passa reescrevendo o
-    // changelog de verdade a cada execução da suíte.
-    execFileSync(process.execPath, ['scripts/generate-changelog.js', '--version', '1.0.0', '--output', output, '--notes-output', notes], { cwd: ROOT });
-    execFileSync(process.execPath, ['scripts/generate-changelog.js', '--version', '1.0.0', '--output', output, '--notes-output', notes], { cwd: ROOT });
-    const changelog = fs.readFileSync(output, 'utf8');
-    const releaseNotes = fs.readFileSync(notes, 'utf8');
-    expect(changelog.match(/^## 1\.0\.0 /gm)).to.have.lengthOf(1);
-    expect(changelog).to.include('## 1.0.0');
-    expect(releaseNotes).to.match(/### (Added|Fixed|Changed|Documentation|Tests)/);
-    fs.rmSync(dir, { recursive: true, force: true });
+    // Escolhe a tag mais recente cujo intervalo tem commit categorizável. Um
+    // número fixo deixava de funcionar assim que as releases começaram a existir:
+    // "1.0.0" não é tag, previous resolvia para a última tag, e o intervalo
+    // saía vazio - o teste passava a não exercitar categorização nenhuma.
+    const tags = execFileSync('git', ['tag', '--list', 'v*', '--sort=-v:refname'], { cwd: ROOT, encoding: 'utf8' })
+      .split(/\r?\n/).filter(Boolean);
+    let versao = null;
+    for (const tag of tags.slice(0, 12)) {
+      const anterior = execFileSync('git', ['describe', '--tags', '--abbrev=0', `${tag}^`], { cwd: ROOT, encoding: 'utf8' }).trim();
+      const assuntos = execFileSync('git', ['log', `${anterior}..${tag}`, '--no-merges', '--pretty=format:%s'], { cwd: ROOT, encoding: 'utf8' });
+      if (/^(feat|fix|docs|test|perf|refactor)(\([^)]*\))?:/im.test(assuntos)) { versao = tag; break; }
+    }
+    if (!versao) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      this.skip();
+      return;
+    }
+
+    try {
+      execFileSync(process.execPath, ['scripts/generate-changelog.js', '--version', versao, '--output', output, '--notes-output', notes], { cwd: ROOT });
+      const changelog = fs.readFileSync(output, 'utf8');
+      const releaseNotes = fs.readFileSync(notes, 'utf8');
+      expect(changelog.match(new RegExp(`^## ${versao.replace('.', '\\.')} `, 'gm'))).to.have.lengthOf(1);
+      expect(releaseNotes).to.match(/### (Added|Fixed|Changed|Documentation|Tests)/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('deixa o changelog do repositório intacto ao rodar a suíte', () => {

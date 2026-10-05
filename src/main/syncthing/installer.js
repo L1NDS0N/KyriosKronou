@@ -5,7 +5,7 @@
 // tratado como dependência de sistema, exatamente como o NSSM, e instalado pelo
 // Chocolatey - que é o mesmo caminho já usado pelo NssmInstaller.
 
-const { execSync, execFile } = require('child_process');
+const { execSync, execFile, execFileSync } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const https = require('https');
@@ -100,7 +100,12 @@ class SyncthingInstaller {
     // não é alcançado de quem troca o módulo depois do require. Sem isto o
     // teste rodava PowerShell de verdade na máquina de quem roda a suíte.
     this.execFile = options.execFile || execFile;
-    this.execFileSync = options.execFileSync || execSync;
+    // execFileSync, e nao execSync: a chamada passa executavel e argumentos
+    // separados (execFileSync('choco', ['--version'])). Com execSync o segundo
+    // argumento vira o objeto de opcoes, a lista e ignorada, o comando roda sem
+    // argumento e sai com codigo diferente de zero - que o catch transformava em
+    // "chocolatey ausente", e a instalacao do Syncthing nunca nem comecava.
+    this.execFileSync = options.execFileSync || execFileSync;
   }
 
   // Returns { installed, path, version } - version is null when not installed.
