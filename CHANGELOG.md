@@ -2,6 +2,14 @@
 
 All notable changes to Kyrios Chronos.
 
+## 1.0.18 - 2026-10-06
+
+### Fixed
+
+- fix(retention): async background processing, loading states, tabs and assisted cron (#3) (`e77668c`) — Lindson França
+
+**Changes since v1.0.17**
+
 ## 1.0.17 - 2026-10-05
 
 ### Fixed
