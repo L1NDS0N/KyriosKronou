@@ -36,10 +36,10 @@ function dailyArchive(days, nameOf) {
   return files;
 }
 
-function run(files, cfg) {
+async function run(files, cfg) {
   const compiled = retention.compile({ Enabled: true, MinKeep: 0, ...cfg });
   expect(compiled.ok, compiled.error).to.equal(true);
-  const plan = retention.planDeletion(files, compiled, { now: NOW });
+  const plan = await retention.planDeletion(files, compiled, { now: NOW });
   expect(plan.ok).to.equal(true);
   const deleted = new Set(plan.delete.map(d => d.rel));
   const survivors = files.filter(f => !deleted.has(f.rel)).map(f => f.rel).sort();
@@ -57,8 +57,11 @@ const lastDayOfMonth = (y, m) => new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
 
 describe('retention simulations: age + monthly (the production incident)', () => {
   const files = dailyArchive(3 * 365);
-  const { plan, deleted, survivors } = run(files, {
-    DateSource: 'names', ByAge: true, KeepDays: 180, ByMonthly: true, MonthlyKeepMonths: 24,
+  let plan, deleted, survivors;
+  before(async () => {
+    ({ plan, deleted, survivors } = await run(files, {
+      DateSource: 'names', ByAge: true, KeepDays: 180, ByMonthly: true, MonthlyKeepMonths: 24,
+    }));
   });
 
   // Age cutoff: NOW - 180d = 2026-03-19 12:00, so 2026-03-20 on is kept whole.
@@ -68,35 +71,35 @@ describe('retention simulations: age + monthly (the production incident)', () =>
     monthly.push(`backup-${y}${String(m + 1).padStart(2, '0')}${lastDayOfMonth(y, m)}.zip`);
   }
 
-  it('keeps every backup of the last 180 days', () => {
+  it('keeps every backup of the last 180 days', async () => {
     for (const rel of range('2026-03-20', '2026-09-15')) expect(deleted.has(rel), rel).to.equal(false);
   });
 
-  it('keeps exactly one backup per month from Oct/2024 to Feb/2026', () => {
+  it('keeps exactly one backup per month from Oct/2024 to Feb/2026', async () => {
     expect(monthly).to.have.lengthOf(17);
     expect(monthly[0]).to.equal('backup-20241031.zip');
     expect(monthly[16]).to.equal('backup-20260228.zip');
     for (const rel of monthly) expect(deleted.has(rel), rel).to.equal(false);
   });
 
-  it('survivors are exactly those two sets - nothing more, nothing less', () => {
+  it('survivors are exactly those two sets - nothing more, nothing less', async () => {
     const expected = [...range('2026-03-20', '2026-09-15'), ...monthly].sort();
     expect(survivors).to.deep.equal(expected);
     expect(survivors).to.have.lengthOf(180 + 17);
   });
 
-  it('deletes everything older than the 24-month window', () => {
+  it('deletes everything older than the 24-month window', async () => {
     expect(deleted.has('backup-20240930.zip')).to.equal(true);
     expect(deleted.has('backup-20231001.zip')).to.equal(true);
   });
 
-  it('reports the rescued monthly copies with their month', () => {
+  it('reports the rescued monthly copies with their month', async () => {
     expect(plan.kept.map(k => k.rel).sort()).to.deep.equal([...monthly].sort());
     expect(plan.kept.every(k => k.reason === 'monthly')).to.equal(true);
     expect(plan.kept.map(k => k.detail)).to.include('2024-10').and.to.include('2026-02');
   });
 
-  it('lists every deleted file with its reason and date', () => {
+  it('lists every deleted file with its reason and date', async () => {
     expect(plan.delete).to.have.lengthOf(files.length - survivors.length);
     expect(plan.delete.every(d => d.reason === 'age' && /^\d{4}-\d{2}-\d{2}T/.test(d.date))).to.equal(true);
     expect(plan.rules.map(r => `${r.kind}:${r.type}`)).to.deep.equal(['delete:age', 'keep:monthly']);
@@ -105,11 +108,14 @@ describe('retention simulations: age + monthly (the production incident)', () =>
 
 describe('retention simulations: weekly copies', () => {
   const files = dailyArchive(200);
-  const { plan, survivors } = run(files, {
-    DateSource: 'names', ByAge: true, KeepDays: 30, ByWeekly: true, WeeklyKeepWeeks: 8,
+  let plan, survivors;
+  before(async () => {
+    ({ plan, survivors } = await run(files, {
+      DateSource: 'names', ByAge: true, KeepDays: 30, ByWeekly: true, WeeklyKeepWeeks: 8,
+    }));
   });
 
-  it('keeps 30 days whole plus the Sunday of each older week in the window', () => {
+  it('keeps 30 days whole plus the Sunday of each older week in the window', async () => {
     // Weeks start on Monday. The 8 weeks: Jul 27 .. Sep 14 (current).
     // Age keeps Aug 17 on (cutoff Aug 16 12:00); the older weeks keep their
     // newest backup, the Sunday: Aug 2, Aug 9 and Aug 16.
@@ -121,11 +127,14 @@ describe('retention simulations: weekly copies', () => {
 
 describe('retention simulations: fortnightly copies', () => {
   const files = dailyArchive(200);
-  const { plan, survivors } = run(files, {
-    DateSource: 'names', ByAge: true, KeepDays: 30, ByBiweekly: true, BiweeklyKeepPeriods: 6,
+  let plan, survivors;
+  before(async () => {
+    ({ plan, survivors } = await run(files, {
+      DateSource: 'names', ByAge: true, KeepDays: 30, ByBiweekly: true, BiweeklyKeepPeriods: 6,
+    }));
   });
 
-  it('keeps 30 days whole plus the last day of each older fortnight', () => {
+  it('keeps 30 days whole plus the last day of each older fortnight', async () => {
     // Fortnights: 1-15 and 16-end. The 6: Jun Q2 .. Sep Q1 (current).
     const ends = ['backup-20260630.zip', 'backup-20260715.zip', 'backup-20260731.zip', 'backup-20260815.zip'];
     expect(survivors).to.deep.equal([...range('2026-08-17', '2026-09-15'), ...ends].sort());
@@ -135,11 +144,14 @@ describe('retention simulations: fortnightly copies', () => {
 
 describe('retention simulations: weekly + monthly together', () => {
   const files = dailyArchive(400);
-  const { survivors } = run(files, {
-    DateSource: 'names', ByAge: true, KeepDays: 14, ByWeekly: true, WeeklyKeepWeeks: 4, ByMonthly: true, MonthlyKeepMonths: 6,
+  let survivors;
+  before(async () => {
+    ({ survivors } = await run(files, {
+      DateSource: 'names', ByAge: true, KeepDays: 14, ByWeekly: true, WeeklyKeepWeeks: 4, ByMonthly: true, MonthlyKeepMonths: 6,
+    }));
   });
 
-  it('each keep rule protects its own copies; their union survives', () => {
+  it('each keep rule protects its own copies; their union survives', async () => {
     // Age: Sep 2 on. Weekly (Aug 24 .. Sep 14 weeks): Sunday Aug 30.
     // Monthly (Apr .. Sep): Apr 30, May 31, Jun 30, Jul 31, Aug 31.
     const expected = [
@@ -152,55 +164,55 @@ describe('retention simulations: weekly + monthly together', () => {
 });
 
 describe('retention simulations: count, size and MinKeep with a keep rule', () => {
-  it('count keeps the N newest; the monthly rule still rescues older months', () => {
+  it('count keeps the N newest; the monthly rule still rescues older months', async () => {
     const files = dailyArchive(120);
-    const { survivors } = run(files, { DateSource: 'names', ByCount: true, KeepCount: 10, ByMonthly: true, MonthlyKeepMonths: 3 });
+    const { survivors } = await run(files, { DateSource: 'names', ByCount: true, KeepCount: 10, ByMonthly: true, MonthlyKeepMonths: 3 });
     // 10 newest: Sep 6..15. Monthly Jul..Sep: Jul 31, Aug 31 (Sep 15 already kept).
     expect(survivors).to.deep.equal([...range('2026-09-06', '2026-09-15'), 'backup-20260731.zip', 'backup-20260831.zip'].sort());
   });
 
-  it('size frees space oldest-first but skips protected copies', () => {
+  it('size frees space oldest-first but skips protected copies', async () => {
     const files = dailyArchive(90).map(f => ({ ...f, size: 1024 * 1024 * 1024 })); // 1 GB each
-    const { survivors, plan } = run(files, { DateSource: 'names', BySize: true, FreeGb: 20, ByMonthly: true, MonthlyKeepMonths: 3 });
+    const { survivors, plan } = await run(files, { DateSource: 'names', BySize: true, FreeGb: 20, ByMonthly: true, MonthlyKeepMonths: 3 });
     // 20 GB fit in total. The protected Jul 31 still takes 1 GB of it, so
     // the unprotected backups are cut to the 19 newest (Aug 28 .. Sep 15).
     expect(survivors).to.deep.equal([...range('2026-08-28', '2026-09-15'), 'backup-20260731.zip'].sort());
     expect(plan.delete.every(d => d.reason === 'size')).to.equal(true);
   });
 
-  it('MinKeep shields the newest snapshots from every rule', () => {
+  it('MinKeep shields the newest snapshots from every rule', async () => {
     const files = dailyArchive(60);
-    const { survivors, plan } = run(files, { DateSource: 'names', ByAge: true, KeepDays: 1, MinKeep: 5 });
+    const { survivors, plan } = await run(files, { DateSource: 'names', ByAge: true, KeepDays: 1, MinKeep: 5 });
     expect(survivors).to.deep.equal(range('2026-09-11', '2026-09-15'));
     expect(plan.kept.every(k => k.reason === 'minKeep')).to.equal(true);
   });
 
-  it('keep rules alone keep ONLY the periodic copies', () => {
+  it('keep rules alone keep ONLY the periodic copies', async () => {
     const files = dailyArchive(120);
-    const { survivors, plan } = run(files, { DateSource: 'names', ByMonthly: true, MonthlyKeepMonths: 3 });
+    const { survivors, plan } = await run(files, { DateSource: 'names', ByMonthly: true, MonthlyKeepMonths: 3 });
     expect(survivors).to.deep.equal(['backup-20260731.zip', 'backup-20260831.zip', 'backup-20260915.zip']);
     expect(plan.delete.every(d => d.reason === 'notPeriodic')).to.equal(true);
   });
 });
 
 describe('retention simulations: layouts and date sources', () => {
-  it('dated folders live or die whole', () => {
+  it('dated folders live or die whole', async () => {
     const files = [];
     for (const f of dailyArchive(400)) {
       const d = f.rel.slice(7, 15);
       const folder = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6)}`;
       files.push({ ...f, rel: `${folder}/db.sql` }, { ...f, rel: `${folder}/files.zip` });
     }
-    const { survivors } = run(files, { DateSource: 'names', ByAge: true, KeepDays: 7, ByMonthly: true, MonthlyKeepMonths: 2, FileExtensions: [] });
+    const { survivors } = await run(files, { DateSource: 'names', ByAge: true, KeepDays: 7, ByMonthly: true, MonthlyKeepMonths: 2, FileExtensions: [] });
     const folders = [...new Set(survivors.map(r => r.split('/')[0]))].sort();
     expect(folders).to.deep.equal(['2026-08-31', '2026-09-09', '2026-09-10', '2026-09-11', '2026-09-12', '2026-09-13', '2026-09-14', '2026-09-15']);
     // Both files of every surviving folder remain.
     expect(survivors).to.have.lengthOf(folders.length * 2);
   });
 
-  it('metadata mode dates undated names by mtime and obeys the same rules', () => {
+  it('metadata mode dates undated names by mtime and obeys the same rules', async () => {
     const files = dailyArchive(400, (t, i) => `dump_${String(i).padStart(4, '0')}.sql`);
-    const { survivors } = run(files, { DateSource: 'metadata', ByAge: true, KeepDays: 30, ByMonthly: true, MonthlyKeepMonths: 4, FileExtensions: ['.sql'] });
+    const { survivors } = await run(files, { DateSource: 'metadata', ByAge: true, KeepDays: 30, ByMonthly: true, MonthlyKeepMonths: 4, FileExtensions: ['.sql'] });
     // i = days before Sep 15. Age keeps i <= 29 (Aug 17 03:00 > Aug 16 12:00).
     // Monthly Jun..Sep: Jun 30 (i=77), Jul 31 (i=46), Aug 31 kept by age anyway.
     const expected = [];
@@ -209,11 +221,11 @@ describe('retention simulations: layouts and date sources', () => {
     expect(survivors).to.deep.equal(expected.sort());
   });
 
-  it('names mode ignores a misleading mtime (restored backup)', () => {
+  it('names mode ignores a misleading mtime (restored backup)', async () => {
     // Every file was copied today, so every mtime is fresh; the names are the
     // only truth. Age by mtime would keep everything.
     const files = dailyArchive(100).map(f => ({ ...f, mtimeMs: NOW - 3600 * 1000 }));
-    const { survivors } = run(files, { DateSource: 'names', ByAge: true, KeepDays: 30, ByMonthly: true, MonthlyKeepMonths: 3 });
+    const { survivors } = await run(files, { DateSource: 'names', ByAge: true, KeepDays: 30, ByMonthly: true, MonthlyKeepMonths: 3 });
     expect(survivors).to.deep.equal([...range('2026-08-17', '2026-09-15'), 'backup-20260731.zip'].sort());
   });
 });
@@ -236,7 +248,7 @@ describe('retention simulations: real files on disk, preview == apply', () => {
 
   it('the preview lists exactly the files the run deletes', async () => {
     const cfg = { Enabled: true, DateSource: 'names', ByAge: true, KeepDays: 180, ByMonthly: true, MonthlyKeepMonths: 24, MinKeep: 5 };
-    const preview = mgr.previewRetention(dir, cfg, { now: NOW });
+    const preview = await mgr.previewRetention(dir, cfg, { now: NOW });
     expect(preview.ok).to.equal(true);
     expect(preview.rules.map(r => r.type)).to.deep.equal(['age', 'monthly']);
     expect(preview.kept).to.have.lengthOf(17);

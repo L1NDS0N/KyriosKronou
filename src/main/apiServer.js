@@ -906,13 +906,13 @@ class ApiServer {
     // Analisar, simular, previsualizar e testar conexão só LEEM: percorrem o
     // disco (ou abrem uma conexão) e nada é apagado. Por isso pedem a leitura da
     // tela - igual ao test-connection de backup.
-    this.app.post('/api/sync/analyze', this._need('sync:view'), (req, res) => {
+    this.app.post('/api/sync/analyze', this._need('sync:view'), async (req, res) => {
       if (!guard(res)) return;
       const body = req.body || {};
       try {
         res.json({
           success: true,
-          data: this.syncManager.analyzeFolder(pastaDe(body), {
+          data: await this.syncManager.analyzeFolder(pastaDe(body), {
             useNames: body.useNames,
             useMetadata: body.useMetadata,
             extensions: body.extensions || body.FileExtensions,
@@ -943,13 +943,13 @@ class ApiServer {
       }
     });
 
-    this.app.post('/api/sync/retention/preview', this._need('sync:view'), (req, res) => {
+    this.app.post('/api/sync/retention/preview', this._need('sync:view'), async (req, res) => {
       if (!guard(res)) return;
       const body = req.body || {};
       try {
         res.json({
           success: true,
-          data: this.syncManager.previewRetention(pastaDe(body), body.Retention || body.retention || {}),
+          data: await this.syncManager.previewRetention(pastaDe(body), body.Retention || body.retention || {}),
         });
       } catch (e) {
         res.status(500).json({ error: e.message });

@@ -169,7 +169,7 @@ describe('SyncManager: retention end to end (local engine, real files)', () => {
       const st = fs.statSync(path.join(dst, dir, 'dump.sql'));
       return { rel: `${dir}/dump.sql`, size: st.size, mtimeMs: st.mtimeMs };
     });
-    const plan = retention.planDeletion(files, compiled, { now: base });
+    const plan = await retention.planDeletion(files, compiled, { now: base });
 
     expect(plan.ok).to.equal(true);
     // planDeletion planeja, não apaga: quem apaga é o SyncManager depois.
@@ -197,28 +197,28 @@ describe('SyncManager: retention end to end (local engine, real files)', () => {
       const d = new Date(Date.now() - i * DAY);
       write(src, `${d.toISOString().slice(0, 10)}/f.bin`, 'x');
     }
-    const a = mgr.analyzeFolder(src);
+    const a = await mgr.analyzeFolder(src);
     expect(a.ok).to.equal(true);
     expect(a.folderPattern).to.equal('dated-folders');
     expect(a.suggested.Enabled).to.equal(true);
   });
 
-  it('analyzeFolder reports missing folders without throwing', () => {
-    const a = mgr.analyzeFolder(path.join(src, 'sumiu'));
+  it('analyzeFolder reports missing folders without throwing', async () => {
+    const a = await mgr.analyzeFolder(path.join(src, 'sumiu'));
     expect(a.ok).to.equal(false);
   });
 
-  it('previewRetention lists deletions without touching the disk', () => {
+  it('previewRetention lists deletions without touching the disk', async () => {
     aged(dst, 'antigo.txt', 30, 'v');
     aged(dst, 'novo.txt', 1, 'n');
-    const preview = mgr.previewRetention(dst, { Enabled: true, ByAge: true, KeepDays: 7, MinKeep: 0, FileExtensions: [] });
+    const preview = await mgr.previewRetention(dst, { Enabled: true, ByAge: true, KeepDays: 7, MinKeep: 0, FileExtensions: [] });
     expect(preview.ok).to.equal(true);
     expect(preview.delete.map(x => x.rel)).to.deep.equal(['antigo.txt']);
     // Files are still there - it is a preview.
     expect(fs.existsSync(path.join(dst, 'antigo.txt'))).to.equal(true);
   });
 
-  it('createProfile normalizes a missing Retention block', () => {
+  it('createProfile normalizes a missing Retention block', async () => {
     const p = mgr.createProfile({ Name: 'Sem retenção', SourcePath: 'C:/a', DestPath: 'D:/b' });
     expect(p.Retention).to.deep.include({ Enabled: false, ByAge: false, MinKeep: 3 });
   });

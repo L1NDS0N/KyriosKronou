@@ -88,8 +88,12 @@ app.whenReady().then(async () => {
       await retentionPage.applyNow();
       clearTimeout(retentionPage.previewTimer);
       await retentionPage.load();
+      // Os perfis agendados agora ficam na aba própria.
+      retentionPage.setTab('scheduled');
       const profileRows = document.querySelectorAll('[data-retention-profile]').length;
       await retentionPage.runScheduleProfile('scheduled-1');
+      // A medição de layout abaixo espera o painel manual de volta.
+      retentionPage.setTab('manual');
       return { initialDisabled, failedDisabled, blocked, successEnabled, changedDisabled, applyCalls, appliedPolicy, sidebarVisible, previewButtonCount, modalCalls: window.__modalCalls, folderInputPreserved, folderFocusPreserved, defaultPolicy, analyzedPolicy, defaultControls, folderAccordions, previewViewButtons, treeFolders, treeFiles, treePattern, treePatternText, treeModeActive, defaultFormats, customFormats, allFormats, profileRows, profileRuns: window.__profileRuns, pageErrors: [] };
     })()`);
     const measureLayout = async (width) => {

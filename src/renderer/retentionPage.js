@@ -11,7 +11,7 @@
 
 'use strict';
 
-function retEsc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+function retEsc(s) { if (!retEsc._d) retEsc._d = document.createElement('div'); const d = retEsc._d; d.textContent = s == null ? '' : String(s); return d.innerHTML; }
 
 class RetentionPage {
   constructor() {
@@ -34,27 +34,73 @@ class RetentionPage {
     this.previewRequest = 0;
     this.previewKey = null;
     this.profiles = [];
+    this._profilesCache = null;
+    this._profilesRefreshing = false;
     this.editingProfileId = null;
     this.previewTab = 'all';
     this.previewView = 'folders';
+    this.tab = 'manual';
+    this.analyzing = false;
+    this.previewing = false;
+    this.applying = false;
   }
 
   async load() {
+    // SWR: pinta o que já temos e revalida em background, igual à tela de
+    // services. A lista nunca fica em branco esperando a resposta.
+    if (this._profilesCache) {
+      this.profiles = this._profilesCache;
+      this.render();
+    }
     if (window.api.getRetentionProfiles) {
+      this._profilesRefreshing = true;
+      this._updateProfilesRefreshingBadge();
       try {
         const profiles = await window.api.getRetentionProfiles();
-        this.profiles = Array.isArray(profiles) ? profiles : [];
+        const list = Array.isArray(profiles) ? profiles : [];
+        const changed = !this._profilesCache || JSON.stringify(this._profilesCache) !== JSON.stringify(list);
+        this._profilesCache = list;
+        this.profiles = list;
+        if (changed) this.render();
       } catch (e) {
-        this.profiles = [];
+        if (!this._profilesCache) this.profiles = [];
+        this.render();
+      } finally {
+        this._profilesRefreshing = false;
+        this._updateProfilesRefreshingBadge();
       }
+    } else {
+      this.render();
     }
-    this.render();
+  }
+
+  _updateProfilesRefreshingBadge() {
+    const badge = document.getElementById('ret-profiles-refreshing');
+    if (badge) badge.style.display = this._profilesRefreshing ? '' : 'none';
   }
 
   render() {
     const host = document.getElementById('retention-content');
     if (!host) return;
     host.innerHTML = `
+      <div class="ret-tabs" role="tablist">
+        <button class="ret-tab ${this.tab === 'manual' ? 'active' : ''}" role="tab" onclick="retentionPage.setTab('manual')">${retEsc(i18n.t('retention.tabManual'))}</button>
+        <button class="ret-tab ${this.tab === 'scheduled' ? 'active' : ''}" role="tab" onclick="retentionPage.setTab('scheduled')">${retEsc(i18n.t('retention.tabScheduled'))}</button>
+      </div>
+      ${this.tab === 'manual' ? this._renderManualTab() : this._renderScheduledTab()}
+    `;
+    if (window.PathInput) PathInput.attachAll(host);
+    if (window.lucide) lucide.createIcons();
+  }
+
+  setTab(tab) {
+    if (tab !== 'manual' && tab !== 'scheduled') return;
+    this.tab = tab;
+    this.render();
+  }
+
+  _renderManualTab() {
+    return `
       <div class="retention-layout">
         <div class="retention-config">
           <div class="glass-card ret-card">
@@ -65,7 +111,7 @@ class RetentionPage {
             <div class="input-row">
               <input type="text" class="form-input" id="ret-folder" data-path-input data-path-kind="directory" value="${retEsc(this.folder)}" placeholder="D:\\Backups" oninput="retentionPage._onFolderInput(this)">
               <button class="btn-outline btn-sm" onclick="retentionPage._browse()" title="${retEsc(i18n.t('taskModal.browse'))}"><i data-lucide="folder-open"></i></button>
-              <button class="btn-glow btn-sm" onclick="retentionPage.analyze()" id="ret-analyze-btn"><i data-lucide="search"></i> ${retEsc(i18n.t('retention.analyzeBtn'))}</button>
+              <button class="btn-glow btn-sm" onclick="retentionPage.analyze()" id="ret-analyze-btn" ${this.analyzing ? 'disabled' : ''}><i data-lucide="search"></i> ${retEsc(i18n.t('retention.analyzeBtn'))}</button>
             </div>
 
             <div class="ret-toggles">
@@ -115,18 +161,22 @@ class RetentionPage {
           <div class="ret-preview-content">${this._renderPreviewState()}</div>
           <button class="btn-danger" onclick="retentionPage.applyNow()" id="ret-apply-btn" ${this.preview && this.preview.ok ? '' : 'disabled'}><i data-lucide="trash-2"></i> ${retEsc(i18n.t('retention.applyBtn'))}</button>
         </aside>
-      </div>
+      </div>`;
+  }
+
+  _renderScheduledTab() {
+    return `
       <div class="glass-card ret-card ret-schedules-card">
         <div class="ret-schedules-header">
           <div class="glass-card-header"><h3><i data-lucide="calendar-clock"></i> ${retEsc(i18n.t('retention.profilesTitle'))}</h3></div>
-          <button class="btn-glow btn-sm" onclick="retentionPage.showScheduleEditor()"><i data-lucide="plus"></i> ${retEsc(i18n.t('retention.newProfile'))}</button>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span id="ret-profiles-refreshing" class="ret-refreshing" style="display:${this._profilesRefreshing ? '' : 'none'}"><i data-lucide="loader-circle"></i> ${retEsc(i18n.t('retention.refreshing'))}</span>
+            <button class="btn-glow btn-sm" onclick="retentionPage.showScheduleEditor()"><i data-lucide="plus"></i> ${retEsc(i18n.t('retention.newProfile'))}</button>
+          </div>
         </div>
         <div class="form-hint" style="margin-bottom:12px">${retEsc(i18n.t('retention.profilesHint'))}</div>
         <div id="ret-profiles-list">${this._renderProfiles()}</div>
-      </div>
-    `;
-    if (window.PathInput) PathInput.attachAll(host);
-    if (window.lucide) lucide.createIcons();
+      </div>`;
   }
 
   _onFolderInput(input) {
@@ -227,10 +277,13 @@ class RetentionPage {
   }
 
   async analyze() {
-    if (!this.folder || this.busy) return;
-    this.busy = true;
+    if (!this.folder || this.busy || this.analyzing) return;
+    this.analyzing = true;
     const btn = document.getElementById('ret-analyze-btn');
     if (btn) btn.disabled = true;
+    const analysisEl = document.getElementById('ret-analysis');
+    if (analysisEl) analysisEl.innerHTML = `<div class="form-hint ret-loading"><i data-lucide="loader-circle"></i> ${retEsc(i18n.t('retention.analyzing'))}</div>`;
+    if (window.lucide) lucide.createIcons();
     try {
       this.analysis = await window.api.analyzeSyncFolder(this.folder, {
         useNames: !this.useMetadata,
@@ -241,8 +294,7 @@ class RetentionPage {
     } catch (e) {
       this.analysis = { ok: false, error: e.message };
     }
-    this.busy = false;
-    if (btn) btn.disabled = false;
+    this.analyzing = false;
     this.render();
     this._schedulePreview();
   }
@@ -432,7 +484,14 @@ class RetentionPage {
   _renderPreviewState() {
     if (!this.folder) return `<div class="form-hint">${retEsc(i18n.t('retention.previewIdleFolder'))}</div>`;
     if (!this.analysis || this.analysis.ok === false) return `<div class="form-hint">${retEsc(i18n.t('retention.previewIdleAnalysis'))}</div>`;
-    if (!this.preview) return `<div class="form-hint">${retEsc(i18n.t('retention.previewUpdating'))}</div>`;
+    if (this.previewing) {
+      // Se já existe uma prévia, ela continua na tela com um aviso discreto
+      // de atualização (SWR); só fica em branco/loading quando não há nada.
+      return this.preview
+        ? this._renderPreview() + `<div class="form-hint ret-loading" style="margin-top:8px"><i data-lucide="loader-circle"></i> ${retEsc(i18n.t('retention.previewUpdating'))}</div>`
+        : `<div class="form-hint ret-loading"><i data-lucide="loader-circle"></i> ${retEsc(i18n.t('retention.previewUpdating'))}</div>`;
+    }
+    if (!this.preview) return `<div class="form-hint ret-loading"><i data-lucide="loader-circle"></i> ${retEsc(i18n.t('retention.previewUpdating'))}</div>`;
     return this._renderPreview();
   }
 
@@ -453,12 +512,15 @@ class RetentionPage {
 
   // ─── Preview & execution ───
   async runPreview() {
-    if (!this.folder || this.busy) return;
+    if (!this.folder || this.busy || this.previewing) return;
     this._syncAdvanced(false);
     const request = ++this.previewRequest;
     const folder = this.folder;
     const policy = { ...this._getCfg() };
     const previewKey = JSON.stringify({ folder, policy });
+    this.previewing = true;
+    const content = document.querySelector('.ret-preview-content');
+    if (content) { content.innerHTML = this._renderPreviewState(); if (window.lucide) lucide.createIcons(); }
     try {
       const preview = await window.api.previewSyncRetention(folder, policy);
       if (request !== this.previewRequest || folder !== this.folder) return;
@@ -468,8 +530,13 @@ class RetentionPage {
       if (request !== this.previewRequest || folder !== this.folder) return;
       this.preview = { ok: false, error: e.message };
       this.previewKey = null;
+    } finally {
+      this.previewing = false;
     }
     this.render();
+    // Se o editor de perfil estiver aberto, o botão salvar destrava assim
+    // que a prévia casa com a política corrente.
+    this._updateScheduleSaveButton();
   }
 
   async applyNow() {
@@ -483,14 +550,23 @@ class RetentionPage {
     const msg = i18n.t('retention.confirmDelete', { n });
     if (!confirm(msg)) return;
     this.busy = true;
+    this.applying = true;
     const btn = document.getElementById('ret-apply-btn');
-    if (btn) btn.disabled = true;
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<i data-lucide="loader-circle"></i> ${retEsc(i18n.t('retention.applying'))}`;
+      if (window.lucide) lucide.createIcons();
+    }
+    const lastRun = document.getElementById('ret-last-run');
+    if (lastRun) lastRun.innerHTML = `<div class="ret-lastrun"><i data-lucide="loader-circle"></i> ${retEsc(i18n.t('retention.applying'))}</div>`;
+    if (window.lucide) lucide.createIcons();
     try {
       this.lastRun = await window.api.runRetentionNow(this.folder, this._getCfg());
     } catch (e) {
       this.lastRun = { ok: false, error: e.message, deleted: 0 };
     }
     this.busy = false;
+    this.applying = false;
     this.preview = null;
     this.previewKey = null;
     this.render();
@@ -823,7 +899,13 @@ class RetentionPage {
     this.datePatternCount = 0;
     this.cfg = { ...this._getCfg(), ...(p.Retention || {}) };
     this._resetResults();
+    // A edição confere a configuração na aba manual, que é onde ela mora.
+    this.tab = 'manual';
     await this.analyze();
+    // A prévia tem que ter terminado antes de abrir o editor: é ela que
+    // habilita o botão salvar e alimenta o resumo de regras do modal.
+    clearTimeout(this.previewTimer);
+    await this.runPreview();
     this.scheduleDraft = {
       Name: p.Name || '',
       CronExpression: p.CronExpression || '0 3 * * *',
@@ -849,11 +931,17 @@ class RetentionPage {
       </div>
       <label class="form-label" data-tip="${retEsc(i18n.t('retention.tipProfileName'))}">${retEsc(i18n.t('retention.profileName'))}</label>
       <input type="text" class="form-input" id="ret-profile-name" value="${retEsc(d.Name)}" oninput="retentionPage.scheduleDraft.Name=this.value">
-      <label class="form-label" style="margin-top:12px" data-tip="${retEsc(i18n.t('retention.tipProfileCron'))}">${retEsc(i18n.t('summary.schedule'))}</label>
-      <input type="text" class="form-input mono" id="ret-profile-cron" value="${retEsc(d.CronExpression)}" oninput="retentionPage.scheduleDraft.CronExpression=this.value">
+      <label class="form-label" data-tip="${retEsc(i18n.t('retention.tipProfileCron'))}">${retEsc(i18n.t('summary.schedule'))}</label>
+      <div id="ret-smart-cron-container"></div>
       <label class="check-row" style="margin-top:14px"><input type="checkbox" ${d.Enabled ? 'checked' : ''} onchange="retentionPage.scheduleDraft.Enabled=this.checked"><span>${retEsc(i18n.t('wizard.enableProfile'))}</span></label>
+      <div class="ret-modal-rules">
+        ${this.preview ? this._renderRules(this.preview) : `<div class="form-hint">${retEsc(i18n.t('retention.previewRequired'))}</div>`}
+      </div>
       <div class="modal-actions"><button class="btn-ghost" onclick="hideModal()">${retEsc(i18n.t('taskModal.cancel'))}</button><button class="btn-glow" data-retention-save onclick="retentionPage.saveScheduleProfile()" ${this.preview && this.preview.ok && this.previewKey === this._currentPreviewKey() ? '' : 'disabled'}>${retEsc(i18n.t('retention.saveProfile'))}</button></div>
     `, true);
+    // Cron assistido (mesmo componente das tarefas de backup): campos por
+    // parte, descrição em texto corrido, próximas execuções e modelos.
+    this._scheduleSmartCron = new SmartCronInput('#ret-smart-cron-container', { value: d.CronExpression });
     this._updateScheduleSaveButton();
     if (window.lucide) lucide.createIcons();
   }
@@ -864,6 +952,7 @@ class RetentionPage {
       return;
     }
     const d = this.scheduleDraft;
+    if (this._scheduleSmartCron) d.CronExpression = this._scheduleSmartCron.getValue();
     if (!d.Name || !d.Name.trim() || !d.CronExpression || !d.CronExpression.trim()) {
       showToast(i18n.t('retention.profileFieldsRequired'), 'error');
       return;
@@ -950,8 +1039,9 @@ class RetentionPage {
   }
 
   async runScheduleProfile(id) {
-    if (!window.api.runRetentionProfile) return;
+    if (!window.api.runRetentionProfile || this.busy) return;
     this.busy = true;
+    showToast(i18n.t('retention.profileRunning'), 'info');
     try {
       const result = await window.api.runRetentionProfile(id);
       if (result && result.success === false) showToast(result.message || i18n.t('retention.profileRunFailed'), 'error');

@@ -425,7 +425,7 @@ class SyncManager {
     }
     if (!files.length) return { ok: true, deleted: 0 };
 
-    const plan = retention.planDeletion(files, compiled);
+    const plan = await retention.planDeletion(files, compiled);
     if (!plan.ok) return { ok: false, deleted: 0, error: plan.error };
     if (!plan.delete.length) return { ok: true, deleted: 0 };
 
@@ -462,7 +462,7 @@ class SyncManager {
    *   metadata (mtime), or both (names win per file). `extensions` restricts
    *   the analysis to the formats the retention policy manages.
    */
-  analyzeFolder(dir, options = {}) {
+  async analyzeFolder(dir, options = {}) {
     if (!dir) return { ok: false, error: 'Pasta não informada' };
     const resolved = path.resolve(dir);
     if (!fs.existsSync(resolved)) return { ok: false, error: `Pasta não encontrada: ${dir}` };
@@ -496,10 +496,10 @@ class SyncManager {
     const compiled = retention.compile(cfg);
     if (!compiled.ok) return { ok: false, deleted: 0, error: compiled.error };
 
-    const files = retention.scanDest(resolved);
+    const files = await retention.scanDest(resolved);
     if (!files.length) return { ok: true, deleted: 0, freed: 0, planned: 0, folders: [] };
 
-    const plan = retention.planDeletion(files, compiled, { now: hooks.now });
+    const plan = await retention.planDeletion(files, compiled, { now: hooks.now });
     if (!plan.ok) return { ok: false, deleted: 0, error: plan.error };
     if (!plan.delete.length) return { ok: true, deleted: 0, freed: 0, planned: 0, folders: plan.folders };
 
@@ -551,11 +551,11 @@ class SyncManager {
    * Preview which destination files a policy would delete, without touching
    * anything. The wizard shows this list before the user confirms.
    */
-  previewRetention(dir, retentionCfg, hooks = {}) {
+  async previewRetention(dir, retentionCfg, hooks = {}) {
     const compiled = retention.compile(normalizeRetention(retentionCfg));
     if (!compiled.ok) return { ok: false, error: compiled.error };
-    const files = retention.scanDest(dir);
-    const plan = retention.planDeletion(files, compiled, { now: hooks.now });
+    const files = await retention.scanDest(dir);
+    const plan = await retention.planDeletion(files, compiled, { now: hooks.now });
     if (!plan.ok) return { ok: false, error: plan.error };
     // Everything the UI needs to show the rules and every single file:
     // what goes, and what a keep rule rescued from a delete rule.
@@ -644,7 +644,7 @@ class SyncManager {
         const f = sourceMap.get(c.rel);
         if (f) postCopyMap.set(c.rel, { rel: c.rel, size: f.size, mtimeMs: f.mtimeMs });
       }
-      const verdict = retention.planDeletion([...postCopyMap.values()], compiled);
+      const verdict = await retention.planDeletion([...postCopyMap.values()], compiled);
       if (verdict.ok) {
         retentionDoomed = new Map(verdict.delete.map(d => [d.rel, d]));
       }
