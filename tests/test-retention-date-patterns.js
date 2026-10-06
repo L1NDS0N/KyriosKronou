@@ -141,12 +141,12 @@ describe('Retencao: o regex viaja ate a analise e a execucao', () => {
     return { dir, cliente, nomes, agora };
   }
 
-  it('o padrao real ja e lido SEM regex custom', () => {
+  it('o padrao real ja e lido SEM regex custom', async () => {
     // Este era o bug: o nome de 12 digitos nao era reconhecido e o arquivo
     // passava a ser datado pelo mtime. Com o padrao novo ele e lido sozinho.
     const { dir, cliente } = cenario();
     try {
-      const a = retention.analyze(cliente, { useNames: true, extensions: ['.zip', '.7z'] });
+      const a = await retention.analyze(cliente, { useNames: true, extensions: ['.zip', '.7z'] });
       expect(a.withDates, 'o padrao embutido tem de ler o nome real').to.equal(5);
       expect(a.ignored).to.deep.equal([]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -163,16 +163,16 @@ describe('Retencao: o regex viaja ate a analise e a execucao', () => {
     expect(retention.parseDateFromName('EcoDoacoes202511182152.zip').toISOString().slice(0, 10)).to.equal('2025-11-18');
   });
 
-  it('com o regex custom, a previa e a execucao leem a mesma data', () => {
+  it('com o regex custom, a previa e a execucao leem a mesma data', async () => {
     const { dir, cliente, agora } = cenario();
     const padrao = 'EcoDoacoes(\\d{4})(\\d{2})(\\d{2})';
     try {
-      const arquivos = retention.scanDest(cliente);
+      const arquivos = await retention.scanDest(cliente);
       const comPadrao = retention.compile({
         Enabled: true, ByCount: true, KeepCount: 2, MinKeep: 0,
         DateSource: 'names', FileExtensions: ['.zip', '.7z'], DatePatternRegex: padrao,
       });
-      const plano = retention.planDeletion(arquivos, comPadrao, { now: agora });
+      const plano = await retention.planDeletion(arquivos, comPadrao, { now: agora });
 
       // Os três mais antigos pela DATA DO NOME. Datas: 2025-11-18, 2026-01-10,
       // 2026-09-30, 2026-05-27 e 2026-03-30 - as três mais velhas são
@@ -183,7 +183,7 @@ describe('Retencao: o regex viaja ate a analise e a execucao', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
-  it('a analise usa o regex custom quando a data vem do nome', () => {
+  it('a analise usa o regex custom quando a data vem do nome', async () => {
     // Formato que NENHUM padrao embutido pega: ano.mes.dia com ponto.
     // O custom existe para isso - o prefixo do nome nao importa, o que
     // importa e o formato da data em si.
@@ -194,10 +194,10 @@ describe('Retencao: o regex viaja ate a analise e a execucao', () => {
       for (const n of ['bk_V3_2024.03.11_a.zip', 'bk_V3_2024.04.11_a.zip']) {
         fs.writeFileSync(path.join(c, n), 'x');
       }
-      const semPadrao = retention.analyze(c, { useNames: true, extensions: ['.zip'] });
+      const semPadrao = await retention.analyze(c, { useNames: true, extensions: ['.zip'] });
       expect(semPadrao.withDates, 'AAA.MM.DD nao esta entre os padroes embutidos').to.equal(0);
 
-      const comPadrao = retention.analyze(c, {
+      const comPadrao = await retention.analyze(c, {
         useNames: true, extensions: ['.zip'],
         datePattern: 'bk_V\\d+_(\\d{4})\\.(\\d{2})\\.(\\d{2})_',
       });
@@ -215,7 +215,7 @@ describe('Retencao: o regex viaja ate a analise e a execucao', () => {
     expect(c.error).to.contain('inválido');
   });
 
-  it('um padrao invalido impede a analise, e nao e ignorado em silencio', () => {
+  it('um padrao invalido impede a analise, e nao e ignorado em silencio', async () => {
     // A falha perigosa: preview mostrava zero arquivos com data e todo mundo
     // caia no mtime, que e o que a pessoa nao esperava. analyze() tem que
     // recusar igual a compile(), senao a tela mente.
@@ -225,20 +225,20 @@ describe('Retencao: o regex viaja ate a analise e a execucao', () => {
       fs.mkdirSync(c, { recursive: true });
       fs.writeFileSync(path.join(c, 'bk-2024-03-11.zip'), 'x');
 
-      const r = retention.analyze(c, { useNames: true, extensions: ['.zip'], datePattern: '((.+)+)+' });
+      const r = await retention.analyze(c, { useNames: true, extensions: ['.zip'], datePattern: '((.+)+)+' });
       expect(r.ok, 'a analise tem de recusar o padrao perigoso').to.equal(false);
       expect(r.datePatternError).to.be.a('string');
       expect(r.error).to.contain('inválido');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
-  it('um padrao valido passa pela analise', () => {
+  it('um padrao valido passa pela analise', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kyrios-ok-'));
     try {
       const c = path.join(dir, 'X');
       fs.mkdirSync(c, { recursive: true });
       fs.writeFileSync(path.join(c, 'bk_2024-03-11.zip'), 'x');
-      const r = retention.analyze(c, { useNames: true, extensions: ['.zip'], datePattern: 'bk_(\\d{4})-(\\d{2})-(\\d{2})' });
+      const r = await retention.analyze(c, { useNames: true, extensions: ['.zip'], datePattern: 'bk_(\\d{4})-(\\d{2})-(\\d{2})' });
       expect(r.ok).to.equal(true);
       expect(r.withDates).to.equal(1);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }

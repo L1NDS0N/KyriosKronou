@@ -49,21 +49,21 @@ function monthlySubfolder(days = ['2026-07-01', '2026-08-01', '2026-09-01'], fol
   return days.map(d => snap(`${folder}/${d}/db.7z`, d));
 }
 
-function run(files, cfg) {
+async function run(files, cfg) {
   const compiled = retention.compile({ Enabled: true, MinKeep: 0, ...cfg });
   expect(compiled.ok, compiled.error).to.equal(true);
-  return retention.planDeletion(files, compiled, { now: NOW });
+  return await retention.planDeletion(files, compiled, { now: NOW });
 }
 
 const rels = (items) => items.map(i => i.rel).sort();
 
 // ─── The reported bug: every subfolder gets its own plan ───
 describe('retention: subfolder archives are planned separately', () => {
-  it('a subfolder with ten snapshots is not one copy', () => {
+  it('a subfolder with ten snapshots is not one copy', async () => {
     // 10 daily snapshots next to 3 monthly ones. Before the fix both folders
     // were single snapshots: totalSnapshots was 2 and nothing was ever deleted.
     const files = [...dailySubfolder(10), ...monthlySubfolder()];
-    const plan = run(files, { DateSource: 'names', ByCount: true, KeepCount: 3 });
+    const plan = await run(files, { DateSource: 'names', ByCount: true, KeepCount: 3 });
 
     expect(plan.totalSnapshots).to.equal(13);
     expect(plan.folders.map(f => f.rel)).to.deep.equal(['daily', 'monthly']);
@@ -82,12 +82,12 @@ describe('retention: subfolder archives are planned separately', () => {
     expect(plan.folders.find(f => f.rel === 'monthly').delete).to.deep.equal([]);
   });
 
-  it('ages each subfolder by its own snapshots, not by the newest of them', () => {
+  it('ages each subfolder by its own snapshots, not by the newest of them', async () => {
     const files = [
       ...monthlySubfolder(['2025-01-01', '2026-09-10']),
       ...dailySubfolder(1),
     ];
-    const plan = run(files, { DateSource: 'names', ByAge: true, KeepDays: 20 });
+    const plan = await run(files, { DateSource: 'names', ByAge: true, KeepDays: 20 });
     // Before the fix, the whole 'monthly' folder was dated by its newest mtime
     // (2026-09-10) and the 2025 snapshot survived forever.
     expect(rels(plan.delete)).to.deep.equal(['monthly/2025-01-01/db.7z']);
@@ -95,21 +95,21 @@ describe('retention: subfolder archives are planned separately', () => {
     expect(plan.delete[0].reason).to.equal('age');
   });
 
-  it('MinKeep shields the newest snapshots of every subfolder', () => {
+  it('MinKeep shields the newest snapshots of every subfolder', async () => {
     const files = [...dailySubfolder(5), ...monthlySubfolder(['2026-09-01'])];
-    const plan = run(files, { DateSource: 'names', ByCount: true, KeepCount: 1, MinKeep: 2 });
+    const plan = await run(files, { DateSource: 'names', ByCount: true, KeepCount: 1, MinKeep: 2 });
     // Two newest per subfolder: the single monthly snapshot survives even
     // though it is the oldest file in the destination.
     expect(rels(plan.delete)).to.have.lengthOf(3);
     expect(plan.delete.every(d => d.rel.startsWith('daily/'))).to.equal(true);
   });
 
-  it('keeps one periodic copy per subfolder, not one for the destination', () => {
+  it('keeps one periodic copy per subfolder, not one for the destination', async () => {
     const files = [
       ...monthlySubfolder(['2026-06-05', '2026-07-10', '2026-08-02', '2026-09-01'], 'monthly'),
       ...monthlySubfolder(['2026-06-20', '2026-07-01', '2026-08-15', '2026-09-10'], 'mensal'),
     ];
-    const plan = run(files, { DateSource: 'names', ByMonthly: true, MonthlyKeepMonths: 3 });
+    const plan = await run(files, { DateSource: 'names', ByMonthly: true, MonthlyKeepMonths: 3 });
     // Jul, Aug and Sep are inside the window, so each subfolder protects its
     // own newest copy of each. With the buckets shared, one subfolder would
     // have won all three and the other lost everything but June.
@@ -117,19 +117,19 @@ describe('retention: subfolder archives are planned separately', () => {
     expect(plan.folders.map(f => [f.rel, f.kept.length])).to.deep.equal([['mensal', 3], ['monthly', 3]]);
   });
 
-  it('the size budget stays global: one destination, one target', () => {
+  it('the size budget stays global: one destination, one target', async () => {
     const files = [
       snap('velho/2026-01-01/db.7z', '2026-01-01', 5 * 1024 ** 3),
       snap('novo/2026-09-01/db.7z', '2026-09-01', 5 * 1024 ** 3),
     ];
     // 10 GB total, 6 GB target -> free 4 GB -> one 5 GB unit. Per subfolder
     // the same policy would have freed 8 GB.
-    const plan = run(files, { DateSource: 'names', BySize: true, FreeGb: 6 });
+    const plan = await run(files, { DateSource: 'names', BySize: true, FreeGb: 6 });
     expect(rels(plan.delete)).to.deep.equal(['velho/2026-01-01/db.7z']);
     expect(plan.delete[0].reason).to.equal('size');
   });
 
-  it('a subfolder whose own name is the date stays a snapshot of the root', () => {
+  it('a subfolder whose own name is the date stays a snapshot of the root', async () => {
     // The classic dated-folder archive: the top level IS the snapshot set, so
     // it stays one group and one count rule - unchanged behaviour.
     const files = [];
@@ -137,7 +137,7 @@ describe('retention: subfolder archives are planned separately', () => {
       const day = ymd(NOW - i * DAY);
       files.push(snap(`${day}/db.7z`, day), snap(`${day}/files.zip`, day));
     }
-    const plan = run(files, { DateSource: 'names', ByCount: true, KeepCount: 2 });
+    const plan = await run(files, { DateSource: 'names', ByCount: true, KeepCount: 2 });
     expect(plan.folders.map(f => f.rel)).to.deep.equal(['']);
     expect(plan.totalSnapshots).to.equal(5);
     expect(rels(plan.delete)).to.deep.equal([
@@ -147,14 +147,14 @@ describe('retention: subfolder archives are planned separately', () => {
     ]);
   });
 
-  it('undated subfolders are not sub-archives', () => {
+  it('undated subfolders are not sub-archives', async () => {
     const files = [
       { rel: 'snap-01/a.7z', size: 10, mtimeMs: NOW - 10 * DAY },
       { rel: 'snap-02/a.7z', size: 10, mtimeMs: NOW - 9 * DAY },
       { rel: 'snap-03/a.7z', size: 10, mtimeMs: NOW - 8 * DAY },
       { rel: 'outro/a.7z', size: 10, mtimeMs: NOW - 1 * DAY },
     ];
-    const plan = run(files, { ByCount: true, KeepCount: 2 });
+    const plan = await run(files, { ByCount: true, KeepCount: 2 });
     // No date anywhere below the subfolder name: they are plain folders of the
     // destination, exactly as before.
     expect(plan.folders.map(f => f.rel)).to.deep.equal(['']);
@@ -162,9 +162,9 @@ describe('retention: subfolder archives are planned separately', () => {
     expect(rels(plan.delete)).to.deep.equal(['snap-01/a.7z', 'snap-02/a.7z']);
   });
 
-  it('every planned file carries the subfolder it belongs to', () => {
+  it('every planned file carries the subfolder it belongs to', async () => {
     const files = [...dailySubfolder(3), ...monthlySubfolder(), { rel: 'raiz.7z', size: 1, mtimeMs: NOW - 400 * DAY }];
-    const plan = run(files, { DateSource: 'names', ByAge: true, KeepDays: 2 });
+    const plan = await run(files, { DateSource: 'names', ByAge: true, KeepDays: 2 });
     const folderOf = new Map(plan.folders.map(f => [f.rel, f]));
     expect([...folderOf.keys()]).to.deep.equal(['', 'daily', 'monthly']);
     for (const f of plan.folders) {
@@ -183,8 +183,8 @@ describe('retention: subfolder archives are planned separately', () => {
 describe('retention: analyze per subfolder', () => {
   const files = [...dailySubfolder(10), ...monthlySubfolder()];
 
-  it('gives every subfolder its own pattern, evidence and suggestion', () => {
-    const a = retention.analyze('.', { scanner: () => files });
+  it('gives every subfolder its own pattern, evidence and suggestion', async () => {
+    const a = await retention.analyze('.', { scanner: () => files });
     expect(a.ok).to.equal(true);
     expect(a.grouping).to.equal('folders');
     expect(a.folders.map(f => f.rel)).to.deep.equal(['daily', 'monthly']);
@@ -212,8 +212,8 @@ describe('retention: analyze per subfolder', () => {
     expect(daily.evidence.ignored).to.deep.equal([]);
   });
 
-  it('keeps the aggregate fields the UI already reads', () => {
-    const a = retention.analyze('.', { scanner: () => files });
+  it('keeps the aggregate fields the UI already reads', async () => {
+    const a = await retention.analyze('.', { scanner: () => files });
     expect(a.totalFiles).to.equal(13);
     expect(a.folderPattern).to.equal('dated-folders');
     expect(a.dateIsh).to.equal(1);
@@ -223,29 +223,29 @@ describe('retention: analyze per subfolder', () => {
     expect(a.subfolders[0]).to.include({ rel: 'daily', files: 10 });
   });
 
-  it('a single-group destination still returns one group, named ""', () => {
+  it('a single-group destination still returns one group, named ""', async () => {
     const flat = [];
     for (let i = 0; i < 4; i++) {
       const day = ymd(NOW - i * 7 * DAY);
       flat.push(snap(`backup-${day.replace(/-/g, '')}.7z`, day));
     }
-    const a = retention.analyze('.', { scanner: () => flat });
+    const a = await retention.analyze('.', { scanner: () => flat });
     expect(a.grouping).to.equal('root');
     expect(a.folders).to.have.lengthOf(1);
     expect(a.folders[0]).to.include({ rel: '', isRoot: true, totalFiles: 4 });
     expect(a.suggested).to.deep.equal(a.folders[0].suggested);
   });
 
-  it('an empty destination returns an empty group list, not a crash', () => {
-    const a = retention.analyze('.', { scanner: () => [] });
+  it('an empty destination returns an empty group list, not a crash', async () => {
+    const a = await retention.analyze('.', { scanner: () => [] });
     expect(a.folders).to.deep.equal([]);
     expect(a.subfolders).to.deep.equal([]);
     expect(a.totalFiles).to.equal(0);
   });
 
-  it('exposes the sample cap per subfolder', () => {
+  it('exposes the sample cap per subfolder', async () => {
     const many = dailySubfolder(80);
-    const a = retention.analyze('.', { scanner: () => many });
+    const a = await retention.analyze('.', { scanner: () => many });
     expect(a.folders[0].evidence.understood).to.have.lengthOf(50);
     expect(a.folders[0].evidence.truncated).to.equal(true);
   });
@@ -253,7 +253,7 @@ describe('retention: analyze per subfolder', () => {
 
 // ─── Level-0 rule of formats ───
 describe('retention: format filter', () => {
-  it('defaults to the archive extensions when the config says nothing', () => {
+  it('defaults to the archive extensions when the config says nothing', async () => {
     expect(retention.normalizeExtensions({})).to.deep.equal(['.7z', '.zip']);
     expect(retention.normalizeExtensions(null)).to.deep.equal(['.7z', '.zip']);
     expect(retention.DEFAULT_EXTENSIONS).to.deep.equal(['.7z', '.zip']);
@@ -261,7 +261,7 @@ describe('retention: format filter', () => {
       .to.deep.equal(['.7z', '.zip']);
   });
 
-  it('accepts either key, a string, and mixed case', () => {
+  it('accepts either key, a string, and mixed case', async () => {
     expect(retention.normalizeExtensions({ FileExtensions: ['7Z', '.RAR'] })).to.deep.equal(['.7z', '.rar']);
     expect(retention.normalizeExtensions({ Extensions: '.tar, gz' })).to.deep.equal(['.tar', '.gz']);
     // FileExtensions wins when both are present.
@@ -269,7 +269,7 @@ describe('retention: format filter', () => {
       .to.deep.equal(['.7z']);
   });
 
-  it('an emptied list means every format, not none', () => {
+  it('an emptied list means every format, not none', async () => {
     expect(retention.normalizeExtensions({ FileExtensions: [] })).to.deep.equal([]);
     expect(retention.normalizeExtensions({ FileExtensions: '*' })).to.deep.equal([]);
     expect(retention.normalizeExtensions({ Extensions: [] })).to.deep.equal([]);
@@ -277,36 +277,36 @@ describe('retention: format filter', () => {
     expect(retention.filterByExtension(files, [])).to.have.lengthOf(3);
   });
 
-  it('filters before planning: other formats are never touched', () => {
+  it('filters before planning: other formats are never touched', async () => {
     const files = [
       { rel: 'antigo.7z', size: 10, mtimeMs: NOW - 400 * DAY },
       { rel: 'antigo.zip', size: 10, mtimeMs: NOW - 400 * DAY },
       { rel: 'antigo.sql', size: 10, mtimeMs: NOW - 400 * DAY },
       { rel: 'antigo.txt', size: 10, mtimeMs: NOW - 400 * DAY },
     ];
-    const plan = run(files, { ByAge: true, KeepDays: 30 });
+    const plan = await run(files, { ByAge: true, KeepDays: 30 });
     expect(rels(plan.delete)).to.deep.equal(['antigo.7z', 'antigo.zip']);
     // The user removes the filter: now everything ages out.
-    const all = run(files, { ByAge: true, KeepDays: 30, FileExtensions: [] });
+    const all = await run(files, { ByAge: true, KeepDays: 30, FileExtensions: [] });
     expect(rels(all.delete)).to.deep.equal(['antigo.7z', 'antigo.sql', 'antigo.txt', 'antigo.zip']);
     expect(all.extensions).to.deep.equal([]);
   });
 
-  it('filters before analysis, so the pattern describes the managed formats', () => {
+  it('filters before analysis, so the pattern describes the managed formats', async () => {
     const files = [
       { rel: '2026-01-01/db.7z', size: 10, mtimeMs: NOW - 400 * DAY },
       { rel: '2026-02-01/db.7z', size: 10, mtimeMs: NOW - 390 * DAY },
       { rel: 'lixo.sql', size: 10, mtimeMs: NOW },
     ];
-    const scoped = retention.analyze('.', { scanner: () => files, extensions: ['.7z', '.zip'] });
+    const scoped = await retention.analyze('.', { scanner: () => files, extensions: ['.7z', '.zip'] });
     expect(scoped.totalFiles).to.equal(2);
     expect(scoped.extensions).to.deep.equal(['.7z', '.zip']);
     expect(scoped.folderPattern).to.equal('dated-folders');
     // No filter given: the analysis inspects everything, as it always did.
-    expect(retention.analyze('.', { scanner: () => files }).totalFiles).to.equal(3);
+    expect((await retention.analyze('.', { scanner: () => files })).totalFiles).to.equal(3);
   });
 
-  it('ignores case and folders that merely look like an extension', () => {
+  it('ignores case and folders that merely look like an extension', async () => {
     const files = [
       { rel: 'A.ZIP', size: 1, mtimeMs: NOW },
       { rel: 'pasta.zip/arquivo.txt', size: 1, mtimeMs: NOW },
@@ -343,8 +343,8 @@ describe('SyncManager: retention across subfolders (real files)', () => {
 
   const cfg = { Enabled: true, DateSource: 'names', ByCount: true, KeepCount: 3, MinKeep: 0 };
 
-  it('preview groups the verdict per subfolder and keeps the aggregates', () => {
-    const preview = mgr.previewRetention(dir, cfg, { now: NOW });
+  it('preview groups the verdict per subfolder and keeps the aggregates', async () => {
+    const preview = await mgr.previewRetention(dir, cfg, { now: NOW });
     expect(preview.ok).to.equal(true);
     expect(preview.folders.map(f => f.rel)).to.deep.equal(['daily', 'monthly']);
     expect(preview.extensions).to.deep.equal(['.7z', '.zip']);
@@ -360,7 +360,7 @@ describe('SyncManager: retention across subfolders (real files)', () => {
   });
 
   it('the run deletes in every subfolder the preview planned', async () => {
-    const preview = mgr.previewRetention(dir, cfg, { now: NOW });
+    const preview = await mgr.previewRetention(dir, cfg, { now: NOW });
     const result = await mgr.runRetentionNow(dir, cfg, { now: NOW });
     expect(result.ok).to.equal(true);
     expect(result.deleted).to.equal(preview.delete.length);
@@ -380,7 +380,7 @@ describe('SyncManager: retention across subfolders (real files)', () => {
 
   it('an emptied format filter lets every format age out, preview == run', async () => {
     const all = { ...cfg, ByCount: false, ByAge: true, KeepDays: 2, FileExtensions: [] };
-    const preview = mgr.previewRetention(dir, all, { now: NOW });
+    const preview = await mgr.previewRetention(dir, all, { now: NOW });
     expect(preview.extensions).to.deep.equal([]);
     expect(preview.delete.map(d => d.rel)).to.include('daily/2026-09-01/notas.sql');
     const result = await mgr.runRetentionNow(dir, all, { now: NOW });
@@ -388,7 +388,7 @@ describe('SyncManager: retention across subfolders (real files)', () => {
     expect(fs.existsSync(path.join(dir, 'daily', '2026-09-01', 'notas.sql'))).to.equal(false);
   });
 
-  it('a profile stores the normalized extensions under both keys', () => {
+  it('a profile stores the normalized extensions under both keys', async () => {
     const p = mgr.createProfile({
       Name: 'subpastas', SourcePath: dir, DestPath: dir, Engine: 'local',
       Retention: { Enabled: true, ByAge: true, KeepDays: 30, Extensions: '.7Z' },

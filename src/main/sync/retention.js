@@ -243,10 +243,13 @@ function parseDateFromName(name, customRegex) {
  * Mirrors filePlanner.scan; kept separate so the planner never grows
  * retention concerns.
  */
-function scanDest(dir) {
+async function scanDest(dir) {
   const out = [];
   if (!dir || !fs.existsSync(dir)) return out;
-  const walk = (base) => {
+  // Yield periódico: a varredura de uma pasta grande roda no processo main,
+  // e um loop síncrono longo segura lá o heartbeat do lease e o apiServer.
+  let n = 0;
+  const walk = async (base) => {
     let entries;
     try {
       entries = fs.readdirSync(base, { withFileTypes: true });
@@ -257,7 +260,7 @@ function scanDest(dir) {
       const full = path.join(base, entry.name);
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
-        walk(full);
+        await walk(full);
         continue;
       }
       if (!entry.isFile()) continue;
@@ -268,9 +271,10 @@ function scanDest(dir) {
         size: st.size,
         mtimeMs: st.mtimeMs,
       });
+      if (++n % 500 === 0) await new Promise(r => setImmediate(r));
     }
   };
-  walk(dir);
+  await walk(dir);
   return out;
 }
 
@@ -439,7 +443,7 @@ function _describe(files, opts, sampleLimit) {
  *            folderPattern: 'dated-folders'|'dated-files'|'mixed'|'flat',
  *            medianGapDays, suggested, folders, subfolders, extensions }
  */
-function analyze(dir, options = {}) {
+async function analyze(dir, options = {}) {
   const scanner = options.scanner || scanDest;
   const now = options.now || Date.now();
   // Date source toggle: file NAMES (default) and/or file METADATA (mtime).
@@ -474,7 +478,7 @@ function analyze(dir, options = {}) {
     }
   }
 
-  const scanned = scanner(dir);
+  const scanned = await scanner(dir);
   const files = exts ? filterByExtension(scanned, exts) : scanned;
 
   if (!files.length) {
@@ -492,9 +496,12 @@ function analyze(dir, options = {}) {
   // bloating every analyzer response.
   const total = _describe(files, opts, 500);
   const groups = groupFiles(files, opts.datePattern);
-  const folders = groups.map(g => {
+  const folders = [];
+  for (let i = 0; i < groups.length; i++) {
+    const g = groups[i];
+    if (i % 25 === 0 && i > 0) await new Promise(r => setImmediate(r));
     const d = _describe(g.files, opts, FOLDER_EVIDENCE_LIMIT);
-    return {
+    folders.push({
       rel: g.rel,
       isRoot: g.rel === '',
       totalFiles: d.totalFiles,
@@ -514,8 +521,8 @@ function analyze(dir, options = {}) {
       },
       suggested: d.suggested,
       suggestion: d.suggested,
-    };
-  });
+    });
+  }
 
   return {
     ok: true,
@@ -774,7 +781,7 @@ function _snapshots(group, dateSource, datePattern) {
  *            folders: [{ rel, delete, kept }], rules, minKeep, dateSource,
  *            extensions, totalSnapshots, error? }
  */
-function planDeletion(files, compiled, hooks = {}) {
+async function planDeletion(files, compiled, hooks = {}) {
   const now = hooks.now || Date.now();
   if (!compiled || !compiled.ok) {
     return { ok: false, delete: [], kept: [], folders: [], error: (compiled && compiled.error) || 'Política de retenção inválida' };
@@ -789,7 +796,11 @@ function planDeletion(files, compiled, hooks = {}) {
   }
 
   const groups = groupFiles(scoped, meta.datePattern);
-  for (const g of groups) g.units = _snapshots(g, meta.dateSource, meta.datePattern);
+  let gi = 0;
+  for (const g of groups) {
+    if (++gi % 25 === 0) await new Promise(r => setImmediate(r));
+    g.units = _snapshots(g, meta.dateSource, meta.datePattern);
+  }
   const units = groups.flatMap(g => g.units);
   const protectedBy = new Map(); // unit -> { reason, detail }
   const doomedBy = new Map();    // unit -> { reason, detail }
@@ -862,7 +873,9 @@ function planDeletion(files, compiled, hooks = {}) {
   const del = [];
   const kept = [];
   const folders = [];
+  let fi = 0;
   for (const g of groups) {
+    if (++fi % 25 === 0) await new Promise(r => setImmediate(r));
     const groupDel = [];
     const groupKept = [];
     for (const u of g.units) {

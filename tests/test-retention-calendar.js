@@ -36,9 +36,9 @@ function snapshots(diasAtras) {
   });
 }
 
-function rodar(arquivos, config) {
+async function rodar(arquivos, config) {
   const compiled = retention.compile(config);
-  const plano = retention.planDeletion(arquivos, compiled, { now: FRONTEIRA });
+  const plano = await retention.planDeletion(arquivos, compiled, { now: FRONTEIRA });
   const apagados = plano.delete.map((d) => d.rel);
   return {
     ok: plano.ok,
@@ -50,8 +50,8 @@ function rodar(arquivos, config) {
 const COUNT = { Enabled: true, ByCount: true, KeepCount: 3, MinKeep: 0, FileExtensions: ['.sql'] };
 
 describe('Retenção: o calendário não depende do fuso da máquina', () => {
-  it('a regra de contagem protege a pasta de hoje na fronteira do dia', () => {
-    const r = rodar(snapshots([4, 3, 2, 1, 0]), COUNT);
+  it('a regra de contagem protege a pasta de hoje na fronteira do dia', async () => {
+    const r = await rodar(snapshots([4, 3, 2, 1, 0]), COUNT);
     expect(r.ok).to.equal(true);
     // keep=3 sobre cinco snapshots: as duas mais antigas caem.
     expect(r.apagados).to.have.lengthOf(2);
@@ -61,11 +61,11 @@ describe('Retenção: o calendário não depende do fuso da máquina', () => {
     expect(r.apagados).to.include('2026-09-28/dump.sql');
   });
 
-  it('a regra de idade usa o mesmo dia que a regra de contagem', () => {
-    const dentro = rodar(snapshots([1, 0]), { Enabled: true, ByAge: true, KeepDays: 3, MinKeep: 0, FileExtensions: ['.sql'] });
+  it('a regra de idade usa o mesmo dia que a regra de contagem', async () => {
+    const dentro = await rodar(snapshots([1, 0]), { Enabled: true, ByAge: true, KeepDays: 3, MinKeep: 0, FileExtensions: ['.sql'] });
     expect(dentro.apagados, 'nada dentro da janela').to.have.lengthOf(0);
 
-    const fora = rodar(snapshots([10, 9, 8]), { Enabled: true, ByAge: true, KeepDays: 3, MinKeep: 0, FileExtensions: ['.sql'] });
+    const fora = await rodar(snapshots([10, 9, 8]), { Enabled: true, ByAge: true, KeepDays: 3, MinKeep: 0, FileExtensions: ['.sql'] });
     expect(fora.apagados, 'tudo fora da janela').to.have.lengthOf(3);
   });
 
@@ -84,8 +84,10 @@ describe('Retenção: o calendário não depende do fuso da máquina', () => {
         return { rel: new Date(quando).toISOString().slice(0, 10) + '/dump.sql', size: 10, mtimeMs: quando };
       });
       const compiled = retention.compile(${JSON.stringify(COUNT)});
-      const plano = retention.planDeletion(arquivos, compiled, { now: FRONTEIRA });
-      process.stdout.write(JSON.stringify(plano.delete.map(d => d.rel).sort()));
+      (async () => {
+        const plano = await retention.planDeletion(arquivos, compiled, { now: FRONTEIRA });
+        process.stdout.write(JSON.stringify(plano.delete.map(d => d.rel).sort()));
+      })();
     `;
 
     const saidas = ['UTC', 'America/Sao_Paulo', 'Asia/Tokyo', 'Pacific/Kiritimati'].map((tz) => ({
