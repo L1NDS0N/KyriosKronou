@@ -40,6 +40,7 @@ class RetentionPage {
     this.previewTab = 'all';
     this.previewView = 'folders';
     this.tab = 'manual';
+    this.editingSchedule = false;
     this.analyzing = false;
     this.previewing = false;
     this.applying = false;
@@ -82,10 +83,26 @@ class RetentionPage {
   render() {
     const host = document.getElementById('retention-content');
     if (!host) return;
+    // Enquanto o modal de perfil aberto, a página de fundo fica vazia: o
+    // modal carrega os mesmos campos (ret-folder, ret-analysis, ret-apply-btn)
+    // e dois conjuntos com os mesmos ids quebrariam getElementById.
+    if (this.editingSchedule) {
+      host.innerHTML = '';
+      // O modal carrega a mesma região de configuração: cada render re-pinta
+      // só ela dentro do modal-body, sem tocar nos campos do perfil (nome,
+      // cron, SmartCronInput), que ficam fora desta região.
+      const region = document.querySelector('#modal-body .ret-modal-config');
+      if (region) {
+        region.innerHTML = this._renderManualConfig();
+        if (window.PathInput) PathInput.attachAll(region);
+        if (window.lucide) lucide.createIcons();
+      }
+      return;
+    }
     host.innerHTML = `
       <div class="ret-tabs" role="tablist">
-        <button class="ret-tab ${this.tab === 'manual' ? 'active' : ''}" role="tab" onclick="retentionPage.setTab('manual')">${retEsc(i18n.t('retention.tabManual'))}</button>
-        <button class="ret-tab ${this.tab === 'scheduled' ? 'active' : ''}" role="tab" onclick="retentionPage.setTab('scheduled')">${retEsc(i18n.t('retention.tabScheduled'))}</button>
+        <button class="ret-tab ${this.tab === 'manual' ? 'active' : ''}" role="tab" aria-selected="${this.tab === 'manual'}" onclick="retentionPage.setTab('manual')"><i data-lucide="scissors"></i><span>${retEsc(i18n.t('retention.tabManual'))}</span></button>
+        <button class="ret-tab ${this.tab === 'scheduled' ? 'active' : ''}" role="tab" aria-selected="${this.tab === 'scheduled'}" onclick="retentionPage.setTab('scheduled')"><i data-lucide="calendar-clock"></i><span>${retEsc(i18n.t('retention.tabScheduled'))}</span></button>
       </div>
       ${this.tab === 'manual' ? this._renderManualTab() : this._renderScheduledTab()}
     `;
@@ -100,12 +117,15 @@ class RetentionPage {
   }
 
   _renderManualTab() {
+    return this._renderManualConfig();
+  }
+
+  _renderManualConfig() {
     return `
       <div class="retention-layout">
         <div class="retention-config">
           <div class="glass-card ret-card">
-            <div class="glass-card-header"><h3><i data-lucide="scissors"></i> ${retEsc(i18n.t('retention.cardTitle'))}</h3></div>
-            <div class="form-hint" style="margin-bottom:14px">${retEsc(i18n.t('retention.cardHint'))}</div>
+            <div class="glass-card-header"><h3><i data-lucide="scissors"></i> ${retEsc(i18n.t('retention.cardTitle'))} <button class="ret-info-btn" data-tip="${retEsc(i18n.t('retention.cardHint'))}"><i data-lucide="info"></i></button></h3></div>
 
             <label class="form-label">${retEsc(i18n.t('retention.folderLabel'))}</label>
             <div class="input-row">
@@ -131,14 +151,12 @@ class RetentionPage {
             ${this.useMetadata ? '' : `
             <div class="ret-pattern">
               <label class="ret-field">
-                <span>${retEsc(i18n.t('retention.customPattern'))}</span>
+                <span>${retEsc(i18n.t('retention.customPattern'))} <button class="ret-info-btn" data-tip="${retEsc(i18n.t('retention.customPatternHint') + ' ' + i18n.t('retention.customPatternBuiltins'))}"><i data-lucide="info"></i></button></span>
                 <input type="text" id="ret-date-pattern" spellcheck="false"
                   placeholder="${retEsc(i18n.t('retention.customPatternPlaceholder'))}"
                   value="${retEsc(this.datePattern || '')}"
                   oninput="retentionPage.setDatePattern(this.value)">
               </label>
-              <p class="ret-hint">${retEsc(i18n.t('retention.customPatternHint'))}</p>
-              <p class="ret-hint ret-hint-dim">${retEsc(i18n.t('retention.customPatternBuiltins'))}</p>
               ${this.datePatternError ? `<p class="ret-pattern-error"><i data-lucide="shield-alert"></i> ${retEsc(this.datePatternError)}</p>` : ''}
               ${this.datePatternOk ? `<p class="ret-pattern-ok"><i data-lucide="check"></i> ${retEsc(i18n.t('retention.customPatternOk').replace('{n}', String(this.datePatternCount)))}</p>` : ''}
             </div>`}
@@ -168,13 +186,12 @@ class RetentionPage {
     return `
       <div class="glass-card ret-card ret-schedules-card">
         <div class="ret-schedules-header">
-          <div class="glass-card-header"><h3><i data-lucide="calendar-clock"></i> ${retEsc(i18n.t('retention.profilesTitle'))}</h3></div>
+          <div class="glass-card-header"><h3><i data-lucide="calendar-clock"></i> ${retEsc(i18n.t('retention.profilesTitle'))} <button class="ret-info-btn" data-tip="${retEsc(i18n.t('retention.profilesHint'))}"><i data-lucide="info"></i></button></h3></div>
           <div style="display:flex;align-items:center;gap:10px">
             <span id="ret-profiles-refreshing" class="ret-refreshing" style="display:${this._profilesRefreshing ? '' : 'none'}"><i data-lucide="loader-circle"></i> ${retEsc(i18n.t('retention.refreshing'))}</span>
             <button class="btn-glow btn-sm" onclick="retentionPage.showScheduleEditor()"><i data-lucide="plus"></i> ${retEsc(i18n.t('retention.newProfile'))}</button>
           </div>
         </div>
-        <div class="form-hint" style="margin-bottom:12px">${retEsc(i18n.t('retention.profilesHint'))}</div>
         <div id="ret-profiles-list">${this._renderProfiles()}</div>
       </div>`;
   }
@@ -336,7 +353,7 @@ class RetentionPage {
       <div class="ret-mode-row">
         <label class="check-row">
           <input type="checkbox" ${adv ? 'checked' : ''} onchange="retentionPage.setAdvanced(this.checked)">
-          <span>${retEsc(i18n.t('retention.advancedMode'))}<span class="check-hint">${retEsc(i18n.t('retention.advancedHint'))}</span></span>
+          <span>${retEsc(i18n.t('retention.advancedMode'))} <button class="ret-info-btn" data-tip="${retEsc(i18n.t('retention.advancedHint'))}"><i data-lucide="info"></i></button></span>
         </label>
       </div>
       ${this._renderFormatRules()}
@@ -352,8 +369,7 @@ class RetentionPage {
     const choices = ['.7z', '.zip', '.bak', '.tar', '.gz'];
     for (const ext of extensions) if (!choices.includes(ext)) choices.push(ext);
     return `<div class="ret-format-rule">
-      <div class="form-section-title"><i data-lucide="file-check-2"></i> ${retEsc(i18n.t('retention.formatsTitle'))}</div>
-      <div class="form-hint" style="margin:0 0 8px">${retEsc(i18n.t('retention.formatsHint'))}</div>
+      <div class="form-section-title"><i data-lucide="file-check-2"></i> ${retEsc(i18n.t('retention.formatsTitle'))} <button class="ret-info-btn" data-tip="${retEsc(i18n.t('retention.formatsHint'))}"><i data-lucide="info"></i></button></div>
       <label class="check-row"><input type="checkbox" ${all ? 'checked' : ''} onchange="retentionPage._setAllFormats(this.checked)"><span>${retEsc(i18n.t('retention.formatsAll'))}</span></label>
       <div class="ret-format-choices">${choices.map(ext => `<label class="check-row"><input type="checkbox" ${!all && extensions.includes(ext) ? 'checked' : ''} onchange="retentionPage._toggleFormat('${ext}', this.checked)"><span class="mono">${retEsc(ext)}</span></label>`).join('')}</div>
       <div class="input-row" style="margin-top:6px"><input type="text" class="form-input mono" id="ret-custom-format" placeholder="${retEsc(i18n.t('retention.formatsCustom'))}" onkeydown="if(event.key==='Enter'){event.preventDefault();retentionPage._addFormat()}"><button class="btn-outline btn-sm" onclick="retentionPage._addFormat()" title="${retEsc(i18n.t('retention.formatsCustom'))}"><i data-lucide="plus"></i></button></div>
@@ -392,12 +408,11 @@ class RetentionPage {
     const c = this._getCfg();
     return `
       <div class="ret-default">
-        <div class="form-hint" style="margin-bottom:8px">${retEsc(i18n.t('retention.defaultHint'))}</div>
+        <button class="ret-info-btn" style="margin-bottom:8px" data-tip="${retEsc(i18n.t('retention.defaultHint') + ' ' + i18n.t('retention.defaultSafety'))}"><i data-lucide="info"></i></button>
         <label class="check-row"><input type="checkbox" id="ret-default-count" ${c.ByCount ? 'checked' : ''} onchange="retentionPage._syncAdvanced()">
           <span>${retEsc(i18n.t('retention.keepRecent'))} <input type="number" class="form-input" id="ret-default-count-n" value="${c.KeepCount}" min="1" max="10000" style="width:80px;display:inline-block;padding:2px 6px" onchange="retentionPage._syncAdvanced()"> ${retEsc(i18n.t('retention.filesCount'))}</span></label>
         <label class="check-row"><input type="checkbox" id="ret-default-monthly" ${c.ByMonthly ? 'checked' : ''} onchange="retentionPage._syncAdvanced()">
           <span>${retEsc(i18n.t('retention.byMonthly'))} <input type="number" class="form-input" id="ret-default-months" value="${c.MonthlyKeepMonths}" min="1" max="240" style="width:80px;display:inline-block;padding:2px 6px" onchange="retentionPage._syncAdvanced()"> ${retEsc(i18n.t('retention.months'))}</span></label>
-        <div class="form-hint" style="margin-top:8px">${retEsc(i18n.t('retention.defaultSafety'))}</div>
       </div>`;
   }
 
@@ -415,8 +430,8 @@ class RetentionPage {
           <span>${retEsc(i18n.t('sync.retBySize'))} <input type="number" class="form-input" id="ret-adv-gb" value="${c.FreeGb || 10}" min="1" max="100000" style="width:80px;display:inline-block;padding:2px 6px" onchange="retentionPage._syncAdvanced()"> GB</span></label>
         <div style="margin-top:10px">
           <label class="form-label">${retEsc(i18n.t('sync.minKeep'))}</label>
-          <input type="number" class="form-input" id="ret-adv-minkeep" value="${c.MinKeep != null ? c.MinKeep : 3}" min="0" max="1000" style="width:100px" onchange="retentionPage._syncAdvanced()">
-          <div class="form-hint">${retEsc(i18n.t('sync.minKeepHint'))}</div>
+           <input type="number" class="form-input" id="ret-adv-minkeep" value="${c.MinKeep != null ? c.MinKeep : 3}" min="0" max="1000" style="width:100px" onchange="retentionPage._syncAdvanced()">
+           <button class="ret-info-btn" data-tip="${retEsc(i18n.t('sync.minKeepHint'))}"><i data-lucide="info"></i></button>
         </div>
       </div>`;
   }
@@ -870,10 +885,6 @@ class RetentionPage {
   }
 
   async showScheduleEditor() {
-    if (!this.folder || !this.analysis || this.analysis.ok === false || !this.preview || !this.preview.ok) {
-      showToast(i18n.t('retention.profileDraftRequired'), 'error');
-      return;
-    }
     this.editingProfileId = null;
     this.scheduleDraft = {
       Name: `${i18n.t('retention.newProfile')} ${this.profiles.length + 1}`,
@@ -916,6 +927,15 @@ class RetentionPage {
 
   _openScheduleEditor() {
     const d = this.scheduleDraft;
+    // O fundo fica em branco enquanto o modal abre: o modal repete os campos
+    // da aba manual (ids iguais) e não podem coexistir no DOM.
+    this.editingSchedule = true;
+    this.render();
+    window.onModalClose = () => {
+      window.onModalClose = null;
+      this.editingSchedule = false;
+      this.render();
+    };
     showModal(`
       <h2><i data-lucide="calendar-clock"></i> ${retEsc(i18n.t(this.editingProfileId ? 'retention.editProfile' : 'retention.newProfile'))}</h2>
       <div class="modal-steps">
@@ -924,16 +944,14 @@ class RetentionPage {
         <div class="modal-step active">${retEsc(i18n.t('retention.profileStepEnable'))}</div>
       </div>
       <div class="modal-help"><i data-lucide="shield-alert"></i><span>${retEsc(i18n.t('retention.profileHelp'))}</span></div>
-      <div class="modal-summary">
-        <div class="modal-summary-item"><span class="modal-summary-label">${retEsc(i18n.t('retention.folderLabel'))}</span><span class="modal-summary-value mono">${retEsc(this.folder)}</span></div>
-        <div class="modal-summary-item"><span class="modal-summary-label">${retEsc(i18n.t('retention.colDelete'))}</span><span class="modal-summary-value">${this.preview && this.preview.delete ? this.preview.delete.length : 0}</span></div>
-        <div class="modal-summary-item"><span class="modal-summary-label">${retEsc(i18n.t('retention.summaryKeep'))}</span><span class="modal-summary-value">${this.preview && this.preview.kept ? this.preview.kept.length : 0}</span></div>
-      </div>
       <label class="form-label" data-tip="${retEsc(i18n.t('retention.tipProfileName'))}">${retEsc(i18n.t('retention.profileName'))}</label>
       <input type="text" class="form-input" id="ret-profile-name" value="${retEsc(d.Name)}" oninput="retentionPage.scheduleDraft.Name=this.value">
       <label class="form-label" data-tip="${retEsc(i18n.t('retention.tipProfileCron'))}">${retEsc(i18n.t('summary.schedule'))}</label>
       <div id="ret-smart-cron-container"></div>
       <label class="check-row" style="margin-top:14px"><input type="checkbox" ${d.Enabled ? 'checked' : ''} onchange="retentionPage.scheduleDraft.Enabled=this.checked"><span>${retEsc(i18n.t('wizard.enableProfile'))}</span></label>
+      <div class="ret-modal-config">
+        ${this._renderManualConfig()}
+      </div>
       <div class="ret-modal-rules">
         ${this.preview ? this._renderRules(this.preview) : `<div class="form-hint">${retEsc(i18n.t('retention.previewRequired'))}</div>`}
       </div>
