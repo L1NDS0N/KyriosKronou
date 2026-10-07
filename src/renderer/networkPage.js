@@ -196,7 +196,12 @@ class NetworkPage {
     const result = await window.api.startSyncthing();
     this.busy = null;
     if (result && result.success) showToast(i18n.t('network.started'), 'success');
-    else showToast(i18n.t('network.startFailed'), 'error');
+    else {
+      // O reason virá do main como chave i18n ("network.startTimeout" etc.) ou
+      // como motivo cru: ao menos apontar a etapa falha em vez de só negar.
+      const motivo = result && result.reason ? (String(result.reason).startsWith('network.') ? i18n.t(result.reason) : result.reason) : i18n.t('network.startFailed');
+      showToast(motivo, 'error');
+    }
     await this.load();
   }
 

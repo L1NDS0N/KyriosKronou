@@ -23,6 +23,7 @@ function reasonOf(result) {
     case 'not-generated': return 'network.notGenerated';
     case 'no-port': return 'network.noPort';
     case 'still-running': return 'network.stillRunning';
+    case 'start-timeout': return 'network.startTimeout';
     default: return result.reason || 'network.unknownError';
   }
 }
