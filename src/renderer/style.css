@@ -1407,15 +1407,19 @@ button.th-entry:focus-visible { outline: 1px solid var(--primary); outline-offse
 .svc-refreshing::before { content: ''; width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--glass-border2); border-top-color: var(--text2); animation: spin .8s linear infinite; background: none; }
 
 /* ─── Retention screen states ─── */
-.ret-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
-.ret-tab { padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border); background: rgba(255,255,255,.02); color: var(--text2); cursor: pointer; font-size: 12.5px; }
-.ret-tab:hover { color: var(--text); }
-.ret-tab.active { color: var(--primary-light); border-color: var(--primary); background: rgba(106,90,173,.15); }
+.ret-tabs { display: flex; gap: 6px; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
+.ret-tab { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text3); font: inherit; font-size: 12px; cursor: pointer; transition: var(--transition); }
+.ret-tab:hover { color: var(--text2); }
+.ret-tab.active { color: var(--text); border-bottom-color: var(--primary); }
 .ret-refreshing { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text3); }
 .ret-refreshing svg { width: 12px; height: 12px; animation: spin .9s linear infinite; }
 .ret-loading { display: flex; align-items: center; gap: 8px; }
 .ret-loading svg { width: 14px; height: 14px; animation: spin .9s linear infinite; }
 .ret-modal-rules { margin-top: 14px; }
+.ret-info-btn { display: inline-flex; align-items: center; border: 0; background: none; color: var(--text3); cursor: help; padding: 2px; vertical-align: middle; }
+.ret-info-btn:hover { color: var(--text2); }
+.ret-info-btn svg { width: 13px; height: 13px; }
+.ret-card-title-row { display: flex; align-items: center; gap: 6px; }
 
 /* ═══ PATH AUTOCOMPLETE ═══ */
 /* The list is appended to <body> and positioned against the viewport so it is

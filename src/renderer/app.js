@@ -163,6 +163,7 @@ function hideModal() {
   if (window.PathInput) PathInput.close();
   document.getElementById('modal-overlay').classList.add('hidden');
   document.getElementById('modal-content').classList.remove('wizard-wide');
+  if (typeof window.onModalClose === 'function') window.onModalClose();
 }
 document.getElementById('modal-overlay').addEventListener('click', (e) => {
   if (e.target === document.getElementById('modal-overlay')) hideModal();
