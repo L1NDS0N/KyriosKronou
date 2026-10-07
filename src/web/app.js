@@ -2123,7 +2123,8 @@
     if (!can('network', 'run')) return;
     botao.disabled = true;
     try {
-      await api('/api/network/daemon/' + encodeURIComponent(acao), { method: 'POST', body: '{}' });
+      const res = await api('/api/network/daemon/' + encodeURIComponent(acao), { method: 'POST', body: '{}' });
+      if (res && res.success === false) toast('O daemon não respondeu: ' + (res.reason || 'erro desconhecido'), 'error');
     } catch (e) { /* falhaDeTela na proxima carga */ }
     await loadNetwork();
   }
