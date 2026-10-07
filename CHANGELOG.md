@@ -2,6 +2,15 @@
 
 All notable changes to Kyrios Chronos.
 
+## 1.0.19 - 2026-10-07
+
+### Fixed
+
+- fix(syncthing): mostrar motivo no toast de start daemon (startTimeout etc.) (#5) (`1604f68`) — Lindson França
+- fix(retention): modal de retenção agendada com caminho/política/preview, abas no estilo de Network e textos em tooltips (#4) (`026e15a`) — Lindson França
+
+**Changes since v1.0.18**
+
 ## 1.0.18 - 2026-10-06
 
 ### Fixed
