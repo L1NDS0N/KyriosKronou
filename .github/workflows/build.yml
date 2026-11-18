@@ -5,10 +5,6 @@ name: CI
 # workflows uploading the same tag is how you end up with a draft release cut
 # from a stale build.
 on:
-  push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
   workflow_dispatch:
     inputs:
       run_tests:
